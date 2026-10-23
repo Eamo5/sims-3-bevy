@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 4;
+pub const PETS_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -75,6 +75,10 @@ pub struct PetKind {
     pub manes: Vec<PetPart>,
     /// Coat regions and markings.
     pub regions: Vec<PetRegion>,
+    /// A horse's riding tack (`TACK`: the English saddle and the bridle), each mesh in its
+    /// default colours.
+    #[serde(default)]
+    pub tack: Vec<PetPart>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -95,7 +99,11 @@ pub struct PetRegion {
 /// The kinds, their part-name prefix and skeleton.
 const KINDS: [(&str, &str); 8] = [("ac", "acRig"), ("cc", "ccRig"), ("ad", "adRig"), ("cd", "cdRig"), ("al", "alRig"), ("cl", "cdRig"), ("ah", "ahRig"), ("ch", "chRig")];
 
-/// CAS part types for pets.
+/// CAS part types for pets (a horse's saddle and bridle too).
+const PT_SADDLE: u32 = 52;
+const PT_BRIDLE: u32 = 51;
+/// The riding tack a horse wears ridden: the game's English saddle and plain bridle.
+pub const TACK: [&str; 2] = ["ahSaddleEnglishRiding", "ahBridle"];
 const PT_TAIL: u32 = 48;
 const PT_EARS: u32 = 49;
 const PT_MANE: u32 = 50;
@@ -233,7 +241,26 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         for m in tails.iter().chain(&ears).chain(&manes).flat_map(|p| &p.meshes) {
             textures.extend(m.texture.map(|t| (t, false)));
         }
-        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, regions });
+        // (The tack, its default preset drawn as its texture.)
+        let tack: Vec<PetPart> = pets
+            .iter()
+            .filter(named)
+            .filter(|c| matches!(c.clothing_type, PT_SADDLE | PT_BRIDLE) && TACK.contains(&c.name.as_str()))
+            .filter_map(|c| {
+                let key: Key = (0x00B2_D882, 0x5441_434B, s3pkg::fnv64(&c.name));
+                if !root.tex_path(key).exists()
+                    && let Some(img) = c.presets.first().and_then(|x| s3formats::complate::render_preset(pkgs, x, 512, false))
+                {
+                    let _ = std::fs::write(root.tex_path(key), crate::ddsw::encode_dds(&img));
+                }
+                let mut meshes = meshes(c);
+                for m in &mut meshes {
+                    m.texture = root.tex_path(key).exists().then_some(key).or(m.texture);
+                }
+                (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes })
+            })
+            .collect();
+        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, regions, tack });
     }
     // The breeds: each outfit's coat painted.
     progress("Converting: pet breeds…");

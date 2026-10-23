@@ -1052,7 +1052,7 @@ fn save_game(
         ),
         (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
-        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&crate::pets::PetBonds>, Option<&crate::pets::PetTraits>))>,
+        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&crate::pets::PetBonds>, Option<&crate::pets::PetTraits>, Has<crate::riding::Tack>))>,
         Res<crate::pets::PetData>,
     ),
     (mut slot, (maid, paper), mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (

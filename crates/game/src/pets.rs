@@ -269,6 +269,7 @@ pub struct PetSkeleton {
     rig: Arc<Rig>,
     joints: Vec<Entity>,
     bind: Vec<Transform>,
+    inverse: Handle<SkinnedMeshInverseBindposes>,
 }
 
 impl PetSkeleton {
@@ -401,8 +402,32 @@ pub fn spawn_pet(
             .id();
         commands.entity(root).add_child(e);
     }
-    commands.entity(root).insert(PetSkeleton { rig, joints, bind });
+    commands.entity(root).insert(PetSkeleton { rig, joints, bind, inverse });
     Some(root)
+}
+
+/// A horse's riding tack put on (its kind's saddle and bridle, in their own colours), skinned to
+/// its skeleton: the meshes, to take off again.
+pub fn put_on_tack(commands: &mut Commands, data: &PetsBaked, kind: &str, skel: &PetSkeleton, root: Entity, ctx: &mut AssetCtx, assets: &mut ObjectAssets) -> Vec<Entity> {
+    let Some(k) = data.kinds.iter().find(|k| k.code == kind) else { return Vec::new() };
+    let mut out = Vec::new();
+    for m in k.tack.iter().flat_map(|p| &p.meshes) {
+        let texture = m.texture.and_then(|t| assets.texture(ctx, t));
+        let material = ctx.materials.add(StandardMaterial { base_color_texture: texture, perceptual_roughness: 0.7, reflectance: 0.3, alpha_mode: AlphaMode::Mask(0.5), ..default() });
+        let mesh = ctx.meshes.add(crate::simbody::skin_mesh(m.clone()));
+        let e = commands
+            .spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                SkinnedMesh { inverse_bindposes: skel.inverse.clone(), joints: skel.joints.clone() },
+                Transform::default(),
+                bevy::camera::visibility::NoFrustumCulling,
+                ChildOf(root),
+            ))
+            .id();
+        out.push(e);
+    }
+    out
 }
 
 /// Plays each pet's animation on its skeleton (looping), fading from the last over a moment.
@@ -521,6 +546,9 @@ pub struct SavedPet {
     pub traits: Vec<String>,
     #[serde(default)]
     pub female: bool,
+    /// A horse left saddled after a ride (`riding`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub saddled: bool,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -582,7 +610,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random() });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -610,7 +638,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false })
     }
 }
 
@@ -653,6 +681,9 @@ fn spawn_household_pets(
             let motives = pet.motives.map(crate::petneeds::PetMotives).unwrap_or_else(|| crate::petneeds::PetMotives::new(&pet.kind, &mut rng));
             let traits = if pet.traits.is_empty() { crate::pettraits::random(&pet.kind, &mut rng) } else { pet.traits.clone() };
             commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect()), PetTraits(traits)));
+            if pet.saddled {
+                commands.entity(e).insert(crate::riding::WantsTack);
+            }
             info!("pet {} the {} ({}) is home", pet.name, p.breeds[breed].kind, pet.outfit);
         }
     }
@@ -750,13 +781,13 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// The household's pets, for the save.
-pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, Has<crate::riding::Tack>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
     let Some(data) = data else { return Vec::new() };
     pets.iter()
-        .filter_map(|(p, h, tf, m, (b, t))| {
+        .filter_map(|(p, h, tf, m, (b, t, saddled))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled })
         })
         .collect()
 }

@@ -965,7 +965,9 @@ installation is unreachable.
   and Skittish pets turn Sims down with the pack's aggressive and cowering rejections.
   Horses are ridden (the horse's menu's "Ride", for teens and up it likes well enough: the
   pack's `kMinLtrForMountAvailability`, and it lets them up from `kMinLtrForMountAccept`): the Sim
-  goes round to its left side, where the game's mounting jig stands them, and climbs up with the
+  goes round to its left side, where the game's mounting jig stands them, saddles it first if
+  it isn't (the pack's swipe, its English saddle and bridle put on in their own colours, skinned
+  to it and left on after: "Unsaddle" on its menu takes them off; kept in saves), and climbs up with the
   pack's clips, the horse's half and the rider's together (near failing at it at first, with a
   swing once skilled: `kNearFailMountChance`, `kSkilledMountChance`). Up there the rider sits
   the horse's every move in the pack's rider clips, in step with its own: its idles (each horse

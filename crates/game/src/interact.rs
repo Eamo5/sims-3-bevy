@@ -2917,8 +2917,9 @@ pub enum ActionKind {
     AdoptPet { kind: &'static str },
     /// A social with a pet (`pets::PET_SOCIALS`): where the pet was, its kind.
     PetSocial { target: Entity, social: usize, at: Vec2, kind: &'static str },
-    /// A ride on a horse (`riding`): which, and where to get on it.
-    Ride { horse: Entity, slot: Vec2 },
+    /// A ride on a horse (`riding`): which, and where to get on it (or only to take its saddle
+    /// off).
+    Ride { horse: Entity, slot: Vec2, unsaddle: bool },
     /// Off the horse they're riding.
     Dismount,
     /// Putting a fire out (`fire`): which, where, and on what floor.
@@ -4533,8 +4534,8 @@ pub(crate) fn run_actions(
                                 finished = true;
                             }
                             // (Up on the horse: the ride takes it from here.)
-                            ActionKind::Ride { horse, .. } => {
-                                commands.entity(me).insert(crate::riding::Mounted::new(*horse));
+                            ActionKind::Ride { horse, unsaddle, .. } => {
+                                commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
                             ActionKind::Dismount => finished = true,
                             // (Off along the street: the jog takes it from here.)

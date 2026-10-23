@@ -1270,7 +1270,7 @@ fn world_click(
         Query<&crate::upgrades::Upgrades>,
         Res<crate::family::Genealogy>,
         Query<&crate::doorbell::AtTheDoor>,
-        Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>)>,
+        Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>, Has<crate::riding::Tack>)>,
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
@@ -1339,7 +1339,7 @@ fn world_click(
         return;
     }
     // A pet: what can be done with it.
-    if let Some((t, (pet, ptf, bonds, home))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
+    if let Some((t, (pet, ptf, bonds, home, saddled))) = target.and_then(|t| pets_q.get(t).ok().map(|p| (t, p)))
         && !actor_sim.age.is_little()
     {
         let kind: &'static str = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"].into_iter().find(|k| *k == pet.kind).unwrap_or("ac");
@@ -1365,7 +1365,12 @@ fn world_click(
                 && liking >= crate::riding::MIN_LIKING_OFFERED
                 && !queues_q.iter().any(|q| crate::riding::riding_on(q) == Some(t))
             {
-                options.insert(0, ("Ride".to_string(), ActionKind::Ride { horse: t, slot: crate::riding::mount_slot(&ptf.compute_transform()) }));
+                let slot = crate::riding::mount_slot(&ptf.compute_transform());
+                options.insert(0, ("Ride".to_string(), ActionKind::Ride { horse: t, slot, unsaddle: false }));
+                // (Saddled, from a ride: its saddle taken off.)
+                if saddled {
+                    options.push(("Unsaddle".to_string(), ActionKind::Ride { horse: t, slot, unsaddle: true }));
+                }
             }
         }
         pie.submenus.clear();

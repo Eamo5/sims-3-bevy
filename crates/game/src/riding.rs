@@ -31,7 +31,7 @@ pub struct RidingPlugin;
 
 impl Plugin for RidingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, ride_test.before(ride).run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (ride_test, dress).before(ride).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (ride, in_step).chain().before(crate::anim::drive_skeletons).run_if(in_state(PlayMode::Live)))
             .add_systems(PostUpdate, seat_riders.before(bevy::transform::TransformSystems::Propagate).run_if(in_state(PlayMode::Live)));
     }
@@ -80,7 +80,7 @@ pub fn can_ride(sim: &Sim) -> bool {
 pub fn riding_on(q: &ActionQueue) -> Option<Entity> {
     match q.0.front() {
         Some(a) if matches!(a.phase, crate::interact::Phase::Running(_)) => match a.kind {
-            ActionKind::Ride { horse, .. } => Some(horse),
+            ActionKind::Ride { horse, unsaddle: false, .. } => Some(horse),
             _ => None,
         },
         _ => None,
@@ -152,6 +152,8 @@ pub fn gait_for(level: u32, distance: f32) -> usize {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Stage {
+    /// Saddling it first (or, `false`, taking its saddle off): how far into the swipe.
+    Saddle(bool, f32),
     /// Getting on (the way: `MOUNTS`).
     On(usize),
     Up,
@@ -170,11 +172,18 @@ pub struct Mounted {
     rider: &'static [&'static str],
     benefit_at: f64,
     started: bool,
+    /// Only come to take its saddle off.
+    unsaddle: bool,
 }
 
 impl Mounted {
-    pub fn new(horse: Entity) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false }
+    pub fn new(horse: Entity, unsaddle: bool) -> Self {
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle }
+    }
+
+    /// Playing in step with the horse (not saddling it).
+    fn in_step(&self) -> bool {
+        !matches!(self.stage, Stage::Saddle(..))
     }
 
     /// Up on it (not getting on or off).
@@ -183,14 +192,52 @@ impl Mounted {
     }
 }
 
-/// A horse with a rider (or one getting on or off).
+/// A horse with a rider (or one getting on or off, or seeing to its saddle).
 #[derive(Component)]
 pub struct Ridden(pub Entity);
+
+/// A horse's riding tack on it (its meshes): put on to ride (the game's `Saddle`, a swipe of the
+/// hand), left on after, taken off from its menu (`Unsaddle`).
+#[derive(Component)]
+pub struct Tack(pub Vec<Entity>);
+
+/// A horse to have its tack on (left saddled when the game was saved).
+#[derive(Component)]
+pub struct WantsTack;
+
+/// Horses left saddled saddled again, once their skeletons are up.
+#[allow(clippy::type_complexity)]
+fn dress(
+    mut commands: Commands,
+    q: Query<(Entity, &Pet, &crate::pets::PetSkeleton), With<WantsTack>>,
+    (pet_data, data, mut assets): (Res<crate::pets::PetData>, Res<Baked>, ResMut<crate::objects::ObjectAssets>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+) {
+    let Some(d) = pet_data.0.as_deref() else { return };
+    for (e, pet, skel) in &q {
+        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+        let parts = crate::pets::put_on_tack(&mut commands, d, &pet.kind, skel, e, &mut ctx, &mut assets);
+        commands.entity(e).remove::<WantsTack>().insert(Tack(parts));
+    }
+}
+
+/// The swipe that saddles a horse, or unsaddles it, its length, and when the tack's on or off.
+const SWIPE_ON: &[&str] = &["a_saddle_swipeSaddle_x"];
+const SWIPE_OFF: &[&str] = &["a_saddle_swipeUnsaddle_x"];
+const SWIPE_LEN: f32 = 1.7;
+const SWIPE_AT: f32 = 0.67;
 
 /// The horse and the rider play a pair of clips together.
 fn play(anim: &mut PetAnim, m: &mut Mounted, (horse, rider): (&'static str, &'static [&'static str])) {
     anim.replay(horse.to_string());
     m.rider = rider;
+}
+
+/// Up onto the horse, as well as their Riding has them.
+fn mount(anim: &mut PetAnim, m: &mut Mounted, level: u32, rng: &mut impl Rng) {
+    let way = way_on(level, rng.random());
+    m.stage = Stage::On(way);
+    play(anim, m, MOUNTS[way]);
 }
 
 /// An idle pair for the horse and its rider: mostly just breathing.
@@ -207,13 +254,14 @@ fn ride(
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
     (grid, world, building): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>),
     mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, Option<&crate::life::Mood>)>,
-    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>), Without<Sim>>,
+    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
+    (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();
     for (e, sim, mut m, mut queue, mut anim, mut skills, mood) in &mut sims {
-        let Ok((pet, mut htf, mut hanim, motives, mut bonds)) = horses.get_mut(m.horse) else {
+        let Ok((pet, mut htf, mut hanim, motives, mut bonds, (skel, tack))) = horses.get_mut(m.horse) else {
             // (The horse gone: down where they are.)
             queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
             commands.entity(e).remove::<(Mounted, ActionClip)>();
@@ -225,23 +273,56 @@ fn ride(
             m.started = true;
             // (Only one that likes them enough lets them up.)
             let liking = bonds.as_deref().map_or(crate::pets::FAMILY_LIKING, |b| b.liking(sim.id, true));
-            if liking < MIN_LIKING_ACCEPTED {
+            if !m.unsaddle && liking < MIN_LIKING_ACCEPTED {
                 notes.push(format!("{} won't let {} ride.", pet.name, sim.first));
                 queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
                 commands.entity(e).remove::<Mounted>();
                 continue;
             }
-            let way = way_on(level, rng.random());
-            m.stage = Stage::On(way);
             m.benefit_at = clock.minutes + BENEFIT_MINUTES;
-            play(&mut hanim, &mut m, MOUNTS[way]);
             anim.pose = Pose::Use;
             commands.entity(e).remove::<crate::nav::PathFollow>();
             commands.entity(m.horse).insert((Ridden(e), crate::pets::PetBusy)).remove::<crate::petneeds::PetTask>();
-            info!("riding: {} gets on {} ({})", sim.first, pet.name, MOUNTS[way].0);
+            // (Saddled first, if it isn't; or come only to take its saddle off.)
+            if m.unsaddle || tack.is_none() {
+                m.stage = Stage::Saddle(!m.unsaddle, 0.0);
+                m.rider = if m.unsaddle { SWIPE_OFF } else { SWIPE_ON };
+                hanim.replay(IDLES[0].0.to_string());
+            } else {
+                mount(&mut hanim, &mut m, level, &mut rng);
+                info!("riding: {} gets on {}", sim.first, pet.name);
+            }
         }
         let done = |lib: &mut ClipLibrary, a: &PetAnim| lib.get(&data, &a.clip).is_none_or(|c| a.time() >= c.duration);
         match m.stage {
+            Stage::Saddle(on, t) => {
+                let t = t + dt;
+                m.stage = Stage::Saddle(on, t);
+                if t >= SWIPE_AT && on && tack.is_none() {
+                    let Some(d) = pet_data.0.as_deref() else { continue };
+                    let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+                    let parts = crate::pets::put_on_tack(&mut commands, d, &pet.kind, skel, m.horse, &mut ctx, &mut assets);
+                    commands.entity(m.horse).insert(Tack(parts));
+                }
+                if t >= SWIPE_AT && !on && let Some(Tack(parts)) = tack {
+                    for p in parts {
+                        commands.entity(*p).try_despawn();
+                    }
+                    commands.entity(m.horse).remove::<Tack>();
+                }
+                if t >= SWIPE_LEN {
+                    if on {
+                        mount(&mut hanim, &mut m, level, &mut rng);
+                        info!("riding: {} saddles {} and gets on", sim.first, pet.name);
+                    } else {
+                        queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
+                        commands.entity(e).remove::<(Mounted, ActionClip)>();
+                        commands.entity(m.horse).remove::<Ridden>();
+                        anim.pose = Pose::Stand;
+                        info!("riding: {} unsaddles {}", sim.first, pet.name);
+                    }
+                }
+            }
             Stage::On(_) => {
                 if done(&mut lib, &hanim) {
                     m.stage = Stage::Up;
@@ -380,7 +461,7 @@ fn ride_test(
                 skills.0.insert("Riding", l);
             }
             info!("ride test: riding {name}");
-            q.push_player(crate::interact::Action::new("Ride", ActionKind::Ride { horse: h, slot: mount_slot(htf) }, false));
+            q.push_player(crate::interact::Action::new("Ride", ActionKind::Ride { horse: h, slot: mount_slot(htf), unsaddle: false }, false));
             *stage = (1, now);
         }
         1 if m.is_some_and(|m| m.up()) => *stage = (2, now),
@@ -405,7 +486,7 @@ fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&Ac
         if clip != Some(&want) {
             commands.entity(e).insert(want);
         }
-        let Ok(h) = horses.get(m.horse) else { continue };
+        let Some(h) = horses.get(m.horse).ok().filter(|_| m.in_step()) else { continue };
         let Some(dur) = player.clip.as_ref().map(|c| c.duration).filter(|d| *d > 0.0) else { continue };
         // (Getting on and off play once, held at their end; the rest go round.)
         player.time = if m.up() { h.time() % dur } else { h.time().min(dur - 1e-3) };

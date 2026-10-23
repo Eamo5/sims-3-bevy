@@ -988,6 +988,25 @@ fn main() {
         }
         return;
     }
+    if args[1] == "petparts" {
+        // petparts <root> <name part>: CAS parts whose names have it, with their part type.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args[3].to_ascii_lowercase();
+        let mut found: Vec<(String, u32, u64)> = Vec::new();
+        for k in set.keys_of_type(types::CASP).copied().collect::<Vec<_>>() {
+            if let Some(c) = set.read(&k).and_then(|d| s3formats::sim::CasPart::parse(&d).ok())
+                && c.name.to_ascii_lowercase().contains(&want)
+            {
+                found.push((c.name.clone(), c.clothing_type, k.i));
+            }
+        }
+        found.sort();
+        found.dedup_by(|a, b| a.0 == b.0);
+        for (n, t, i) in found {
+            println!("{t:3} {i:016X} {n}");
+        }
+        return;
+    }
     if args[1] == "blueprints" {
         // blueprints: the baked blueprints, a line each, and the first's details.
         let data = s3bake::load_gamedata(&s3bake::default_root()).expect("gamedata");
