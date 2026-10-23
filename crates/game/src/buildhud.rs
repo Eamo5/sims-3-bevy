@@ -84,6 +84,7 @@ fn home_action(id: u32) -> Option<Action> {
         0x100d => Action::Ponds,
         // (The tool holder's blueprint button: Blueprint mode.)
         0x2f1 => Action::Tool(BuildTool::Blueprint),
+        0x305 => Action::HalfWalls,
         _ => return None,
     })
 }
@@ -135,6 +136,8 @@ fn spawn(
         (BACK, Action::Home), (HAND, Action::Hand), (HAMMER, Action::Tool(BuildTool::Sledgehammer)),
         (LIGHT, Action::Lighting), (GRID, Action::Grid),
         (0x2e2, Action::Undo), (0x2e3, Action::Redo), (0x2f1, Action::Tool(BuildTool::Blueprint)),
+        // (The walls panel's half wall: the half walls' catalogue.)
+        (0x305, Action::HalfWalls),
         (0x301, Action::Tool(BuildTool::Wall)), (0x302, Action::Tool(BuildTool::Room)), (0x304, Action::Tool(BuildTool::DiagonalRoom)),
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
         (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
@@ -162,7 +165,7 @@ fn spawn(
     for (id, tooltip) in [(0x2e2, "Undo (Ctrl+Z)"), (0x2e3, "Redo (Ctrl+Y)"), (0x2f1, "Blueprint Mode")] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(crate::icons::Tooltip(tooltip.into())); }
     }
-    for id in [0x2ea, 0x2ef, 0x305, 0x06ee_34a2, 0x0a67_d7f0] {
+    for id in [0x2ea, 0x2ef, 0x06ee_34a2, 0x0a67_d7f0] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(Unavailable); }
     }
     // Hide fountain/curved-pool alternatives inside the rectangular-pool panel.
