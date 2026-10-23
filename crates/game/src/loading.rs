@@ -50,6 +50,9 @@ pub struct CatalogEntry {
     pub shell: bool,
     /// A gate: a door set into a fence.
     pub gate: bool,
+    /// A pool's (Build mode's Pool Objects: ladders, diving boards, slides, waterfalls, loungers,
+    /// lights).
+    pub pool: bool,
 }
 
 /// The buy-mode tab of a catalogue object: by what it does, else by the game's own grouping of
@@ -102,6 +105,7 @@ impl Catalog {
                 category: buy_category(crate::interact::ObjectKind::from_script(&c.script, &c.instance_name), &c.script),
                 shell: c.script.contains(".Shells."),
                 gate: crate::building::is_gate(&c.script),
+            pool: c.script.contains(".Pools.") || c.script.ends_with("LightingPoolLight"),
             })
             .collect();
         let index = entries.iter().enumerate().map(|(i, e)| (e.key, i)).collect();

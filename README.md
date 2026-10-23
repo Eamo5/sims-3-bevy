@@ -1633,6 +1633,9 @@ installation is unreachable.
   and the Railings page with the catalogue's railings (CRAL); a staircase goes in in the one
   chosen with the railing chosen (else its own, by name), its pieces baked with the fences'.
   `STAIR_STYLE=<n>` with `--build --storey` (tests).
+  The pool panel's Pool Objects opens the build catalogue's grid of the pool's things (the
+  catalogue's ladders, diving boards, slides, waterfalls, loungers, the pool bar and lights), and
+  the walls panel's Half Wall button the half walls.
   The Foundations panel has the catalogue's foundation kinds (CFND: Foundation, Deck, Platform,
   read from the packages, each its sides' own covering drawn), the household's foundation
   put in the one chosen (an undoable build op, kept in saves).
