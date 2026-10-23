@@ -257,6 +257,8 @@ pub enum ObjectKind {
     Terrarium,
     /// A bird cage (the Pets pack's: a terrarium for a bird, `terrarium`).
     BirdCage,
+    /// A slippy slide (Generations'): run at and slid down.
+    SlippySlide,
     Other,
 }
 
@@ -283,6 +285,8 @@ impl ObjectKind {
             Self::Terrarium
         } else if has("objects.decorations.birdcage") {
             Self::BirdCage
+        } else if has("objects.environment.slippyslide") {
+            Self::SlippySlide
         } else if has("hobbiesskills.pooltable") {
             Self::PoolTable
         } else if has("hobbiesskills.dartboard") || has("hobbiesskills.expensivedartboard") {
@@ -531,7 +535,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::DollHouse | Self::StuffedToy => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SlippySlide | Self::DollHouse | Self::StuffedToy => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -635,6 +639,8 @@ impl ObjectKind {
                 // (A jungle gym's and a slide's: at the foot of the ladder.)
                 | K::JungleGym
                 | K::Slide
+                // (A slippy slide's: at its foot, facing down it.)
+                | K::SlippySlide
         )
         .then_some(0)
     }
@@ -1333,6 +1339,8 @@ pub enum Special {
     /// A large bird talked with, and taught a way of talking (`terrarium`).
     TalkWithBird,
     TeachBirdToTalk,
+    /// Down the slippy slide (one run; then again, while it's fun).
+    SlippySlide,
     MinorPetInfo,
     MournMinorPet,
     /// Lock or unlock a door (from its menu, at once: see `doorlocks`).
@@ -1876,6 +1884,9 @@ static BIRD_CAGE: [InteractionDef; 8] = [
     InteractionDef { special: Special::Scrub, ..def("Clean", 8.0, [0.0, 0.0, 0.0, 0.0, -10.0, 0.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::MournMinorPet, ..def("Mourn", 4.0, N, Pose::Use) },
 ];
+/// A slippy slide: a run at it and down it on their front (the game's `Slide`: Fun 75 an hour),
+/// again and again till they've had their fun.
+static SLIPPY_SLIDE: [InteractionDef; 1] = [InteractionDef { special: Special::SlippySlide, ..def("Slide", 8.0, [0.0, 0.0, -6.0, 0.0, 0.0, 75.0], Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
@@ -2152,6 +2163,20 @@ fn view_clip(sim: &crate::sim::Sim, taste: &'static str) -> crate::anim::ActionC
     let (start, looks): (&'static str, &'static [&'static str]) =
         if child { ("c_idle_neutral_look_upAndOver_x", &["c_idle_neutral_loop_1", "c_idle_neutral_look_rightLeft_x"]) } else { ("a_react_view_curious_x", &["a_soc_idle_neutral_admire_x", "a_idle_neutral_look_upAndOver_x"]) };
     crate::anim::ActionClip::new(Some(start), looks).ending(ending, 3.5)
+}
+
+/// The game's chance of falling on a slippy slide (`kChanceFail`: one in five).
+pub const SLIDE_FALL_CHANCE: f32 = 0.2;
+
+/// A Sim who fell on the slide this run (`Slipped` after).
+#[derive(Component)]
+pub struct SlideFall;
+
+/// A run down the slippy slide: one of the game's three, or its fall; then stood at the end.
+pub fn slide_clip(fell: bool, roll: f32) -> crate::anim::ActionClip {
+    const RUNS: [&[&str]; 3] = [&["a2o_waterSlide_succeedSlide1_x"], &["a2o_waterSlide_succeedSlide2_x"], &["a2o_waterSlide_succeedSlide3_x"]];
+    let run: &'static [&'static str] = if fell { &["a2o_waterSlide_failSlide1_x"] } else { RUNS[((roll * 3.0) as usize).min(2)] };
+    crate::anim::ActionClip::new(Some(run[0]), &["a_idle_neutral_loop_"])
 }
 
 pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::ActionClip> {
@@ -2842,6 +2867,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::PetBowl => &PET_BOWL,
         ObjectKind::Terrarium => &TERRARIUM,
         ObjectKind::BirdCage => &BIRD_CAGE,
+        ObjectKind::SlippySlide => &SLIPPY_SLIDE,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -4083,6 +4109,16 @@ pub(crate) fn run_actions(
                                     let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
                                     // (Art looked over, and then what they make of it.)
                                     let clip = if d.special == Special::ViewArt { Some(view_clip(sim, art_taste(sim, obj.price, taste_roll(me, *target)))) } else { clip };
+                                    // (Down the slippy slide: one of the game's runs, or a fall one time in five.)
+                                    let clip = if d.special == Special::SlippySlide {
+                                        let fell = rand::random::<f32>() < SLIDE_FALL_CHANCE;
+                                        if fell {
+                                            commands.entity(me).insert(SlideFall);
+                                        }
+                                        Some(slide_clip(fell, rand::random()))
+                                    } else {
+                                        clip
+                                    };
                                     // (A double bed's second side: the first's, mirrored.)
                                     let far_side = (obj.kind == ObjectKind::BedDouble || (obj.kind == ObjectKind::Sofa && d.pose == Pose::Sit)) && seconds.get(*target).is_ok_and(|s| s.0 == Some(me));
                                     // (WooHoo's other part, on the far side.)
@@ -4726,6 +4762,22 @@ pub(crate) fn run_actions(
                                 if complete {
                                     finished = true;
                                     life.write(LifeEvent::new(me, LifeEventKind::Finished { activity: d.name, completed: true }));
+                                    // (Down the slide: a fall smarts; and back for another run while it's fun.)
+                                    if d.special == Special::SlippySlide {
+                                        let (t, def) = (*target, *def);
+                                        let again = motives.0[FUN] < 95.0;
+                                        commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                                            if e.take::<SlideFall>().is_some() {
+                                                let now = e.world().resource::<GameClock>().minutes;
+                                                if let Some(mut m) = e.get_mut::<crate::life::Moodlets>() {
+                                                    m.add(crate::life::MoodletKind::Slipped, now);
+                                                }
+                                            }
+                                            if again && let Some(mut q) = e.get_mut::<ActionQueue>().filter(|q| q.0.len() <= 1) {
+                                                q.0.push_back(Action::new("Slide", ActionKind::Object { target: t, def }, true));
+                                            }
+                                        });
+                                    }
                                     // (A bathroom thing used is that much dirtier.)
                                     if crate::grime::cleanable(obj.kind) && !matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage) && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
                                         let traits = sim.traits.clone();
@@ -4900,7 +4952,7 @@ pub(crate) fn run_actions(
                                         Special::FillTerrarium => {
                                             commands.entity(me).insert(crate::terrarium::TerrariumRequest::Fill(*target));
                                         }
-                                        Special::WatchMinorPet => {}
+                                        Special::WatchMinorPet | Special::SlippySlide => {}
                                         // (Talked with, or taught: what it's learned, the Sim's charisma, the
                                         // two fonder: `terrarium`.)
                                         Special::TalkWithBird | Special::TeachBirdToTalk => {
@@ -7773,6 +7825,15 @@ mod tests {
 
     /// Every clip the catalogue's objects' interactions play is baked (needs the bake:
     /// `SIMS3_CACHE=<baked> cargo test -p sims3 interaction_clips_baked -- --ignored`).
+    #[test]
+    fn a_slippy_slide_run_is_one_of_the_games() {
+        assert_eq!(slide_clip(true, 0.5).start, Some("a2o_waterSlide_failSlide1_x"));
+        assert_eq!(slide_clip(false, 0.0).start, Some("a2o_waterSlide_succeedSlide1_x"));
+        assert_eq!(slide_clip(false, 0.99).start, Some("a2o_waterSlide_succeedSlide3_x"));
+        assert!(interactions_for(ObjectKind::SlippySlide).iter().any(|d| d.name == "Slide"));
+        assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Environment.SlippySlideGeneric", "SlippySlideFrog"), ObjectKind::SlippySlide);
+    }
+
     #[test]
     #[ignore]
     fn interaction_clips_baked() {

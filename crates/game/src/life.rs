@@ -827,6 +827,8 @@ pub enum MoodletKind {
     NiceNails,
     CompletelyAtEase,
     Horrified,
+    /// Fallen on the slippy slide (Generations').
+    Slipped,
     Tranquil,
     BornToDoThis,
     DrawnIn,
@@ -885,7 +887,7 @@ pub enum MoodletKind {
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 138] = {
+    pub const ALL: [MoodletKind; 139] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -896,7 +898,7 @@ impl MoodletKind {
             TeethChattering, Frostbitten, GettingWarm, SweatingProfusely, Soaked, TooMuchSun, Werewolf, MintyBreath,
             Disgusted, Mourning, FreshClothing, VeryFreshClothing, HolidayCheer, SpringFling, SummerFun, SpookyTime,
             Decorated, NicelyDecorated, BeautifullyDecorated, GreatMeal, Stressed, Winner, Overworked, IAmBeautiful, SugarRush,
-            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
+            GarlicBreath, BabyIsComing, ItsAGirl, ItsTwins, ItsTriplets, Betrayed, WitnessedBetrayal, WeddingDay, MissedWedding, SawGreatMovie, SawGreatPlay, SawGreatSymphony, SawGreatConcert, SawGreatGame, Fascinated, Intrigued, Impressed, Educated, Relaxed, SmoothSkin, Rejuvenated, Slipped, NiceNails, CompletelyAtEase, Horrified, Tranquil, BornToDoThis, DrawnIn, OutAfterCurfew, CaughtAfterCurfew, CozyFire, DivineMeal, Attractive, SuccessfulPrank, PrankedNegative, PrankedPositive,
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
@@ -1027,6 +1029,7 @@ impl MoodletKind {
             Rejuvenated => md("Rejuvenated", "The cost of a body treatment seems to melt away when the relaxing feeling of rejuvenation overwhelms a Sim.", 30, 24.0),
             NiceNails => md("Nice Nails", "It's foolish not to focus on the nails from time to time. There's nothing quite like crisp cuticles!", 5, 48.0),
             CompletelyAtEase => md("Completely At Ease", "Spending the Simoleons and time to enjoy a full spa package will render your Sim completely at ease.", 20, 168.0),
+            Slipped => md("Slipped!", "Trying out new moves on the Slide can result in a painful landing. Use caution next time!", -10, 10.0 / 60.0),
             Horrified => md("Horrified", "Terrible things have been seen underneath the mausoleum. Explorers beware.", -35, 8.0),
             Tranquil => md("Tranquil", "Nothing can stress or anger Sims who have reached their happy place.", 10, 8.0),
             BornToDoThis => md("Born To Do This", "You're a natural at this, and you know it!", 5, 1.0),
@@ -1190,6 +1193,7 @@ impl MoodletKind {
             NiceNails => ("NiceNails", true),
             CompletelyAtEase => ("CompletelyAtEase", true),
             Horrified => ("Horrified", true),
+            Slipped => ("Slipped", true),
             Tranquil => ("Tranquil", true),
             BornToDoThis => ("BornToDoThis", true),
             DrawnIn => ("DrawnIn", true),

@@ -675,6 +675,9 @@ installation is unreachable.
   back; sat up and out at the end. The rubber ducky's played with in the water too, and a
   bubble bath is a tub of foam. A shower over a tub (the Shower of Power) is showered in,
   over its side and back with the game's shower-tub clips, or bathed in.
+- **Slippy slides** (Generations'): "Slide" runs at it from its foot and down it with one of the
+  game's three runs, carried its length by the clip, or (one time in five: `kChanceFail`) a fall,
+  and Slipped! after; fun (75 an hour), and back round for another while it's fun.
 - **Playgrounds**: children climb a slide's ladder, sit at the top and slide down, and climb a
   jungle gym's tower, play in its lookout and come down its pole: the game's clips carrying them
   along (its `world_offset` channel, the travel the engine moves Sims by), left where they end

@@ -260,6 +260,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_terrarium_",
     // (A bird cage's, and a large bird taught to talk.)
     "a2o_birdcage_",
+    // (A run down a slippy slide.)
+    "a2o_waterSlide_",
+    "c2o_waterSlide_",
+    "t2o_waterSlide_",
     // (Up and down a spiral staircase.)
     "a2o_spiralStaircase_walk",
     "c2o_spiralStaircase_walk",

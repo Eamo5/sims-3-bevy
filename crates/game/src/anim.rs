@@ -203,7 +203,7 @@ const WORLD_OFFSET: u32 = 0x0EB4_037B;
 /// The clips whose travel is played: up the jungle gym's ladder, down its pole and the slide,
 /// where nothing else moves the body.
 fn travels(name: &str) -> bool {
-    name.starts_with("c2o_JungleGym")
+    name.starts_with("c2o_JungleGym") || name.get(1..).is_some_and(|n| n.starts_with("2o_waterSlide_"))
 }
 
 /// A rider's clip (`riding`: on a horse, getting on and off it): its body drawn back from the
