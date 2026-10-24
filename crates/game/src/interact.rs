@@ -3491,7 +3491,7 @@ pub(crate) fn run_actions(
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
     mut conceive: MessageWriter<crate::little::Conceive>,
-    (upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable, real_estate): (
+    (upgraded, baked, paper_in_hand, prepped, serving_from, broken, unavailable, real_estate, famous): (
         Query<&crate::upgrades::Upgrades>,
         Option<Res<crate::baked::Baked>>,
         Query<&crate::surroundings::PaperInHand>,
@@ -3500,6 +3500,7 @@ pub(crate) fn run_actions(
         Query<(), With<Broken>>,
         Query<(), Or<(With<crate::buy::HeldObject>, With<crate::buyhistory::HistoryHidden>)>>,
         Res<crate::realestate::RealEstate>,
+        Query<&crate::celebrity::Famous>,
     ),
     (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q))): (
         MessageWriter<crate::journal::Did>,
@@ -4620,7 +4621,23 @@ pub(crate) fn run_actions(
                                         if crate::careermetrics::review_task(*activity).is_some() {
                                             price = 0.0;
                                         }
-                                        crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price);
+                                        // (A celebrity recognized: let in free, or at a discount: `celebrity`.)
+                                        let cost = (a.cost as f32 * price).round() as i64;
+                                        let mut recognized = None;
+                                        if cost > 0
+                                            && let Ok(f) = famous.get(me)
+                                        {
+                                            let d = crate::celebrity::discount(f.0, &mut rand::rng());
+                                            if d < 1.0 {
+                                                price *= d;
+                                                recognized = Some((cost, (cost as f32 * d) as i64));
+                                            }
+                                        }
+                                        if crate::rabbitholes::head_out(&mut commands, &clock, me, sim, *lot, a, place, household.as_deref_mut(), &mut notes, price)
+                                            && let Some((cost, paid)) = recognized
+                                        {
+                                            commands.queue(move |w: &mut World| crate::celebrity::recognized(w, me, cost, paid));
+                                        }
                                     }
                                 }
                                 finished = true;

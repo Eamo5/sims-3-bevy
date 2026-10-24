@@ -208,6 +208,13 @@ pub struct UiFillBar {
     fill: Option<Entity>,
 }
 
+impl UiFillBar {
+    /// Its colour (the game's `MainColor`).
+    pub fn set_color(&mut self, c: Color) {
+        self.colors.0 = c;
+    }
+}
+
 const FILL_CLIP: u32 = 0x000f_bc02;
 const FILL_FILL: u32 = 0x000f_bc01;
 

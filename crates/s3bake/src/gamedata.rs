@@ -1989,7 +1989,7 @@ pub fn decode_icon(png: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
 }
 
 /// The records of a tuning table: each `<row>` element's child tags and their text.
-fn records(xml: &str, row: &str) -> Vec<HashMap<String, String>> {
+pub fn records(xml: &str, row: &str) -> Vec<HashMap<String, String>> {
     let (open, close) = (format!("<{row}>"), format!("</{row}>"));
     let mut out = Vec::new();
     let mut rest = xml;

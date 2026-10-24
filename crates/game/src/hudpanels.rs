@@ -33,6 +33,7 @@ const ZODIAC_GENDER: u32 = 0xef98_4421;
 const FAMILY_TREE: u32 = 0xef98_4410;
 const BIO: u32 = 0xef98_4411;
 const CELEBRITY: u32 = 0xef98_4412;
+const CELEBRITY_GLOW: u32 = 0x2fa5_1c33;
 /// The days of a vacation (World Adventures), over the age bar.
 const TRAVEL_TIME: u32 = 0xef98_4402;
 /// A trait entry's (`HUDSimologyPanelEntry`) name and icon button.
@@ -144,7 +145,7 @@ fn simology_panel(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
-    sel: Query<(Entity, &Sim, Option<&crate::aging::Aging>), With<Selected>>,
+    sel: Query<(Entity, &Sim, Option<&crate::aging::Aging>, Option<&crate::celebrity::Famous>), With<Selected>>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut nodes, mut texts): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut Text>),
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -152,9 +153,14 @@ fn simology_panel(
     mut state: Local<(Option<Entity>, Option<Entity>, String)>,
     panel: Res<InfoPanel>,
     settings: Res<crate::options::Settings>,
+    mut journal: ResMut<crate::celebrity::Journal>,
 ) {
     let s: &Spawned = &hud.simology;
-    let (Some(mut ui), Ok((e, sim, aging))) = (ui, sel.single()) else { return };
+    let (Some(mut ui), Ok((e, sim, aging, famous))) = (ui, sel.single()) else { return };
+    // (A celebrity's journal: the game's dialog, `celebrity`.)
+    if pressed(&clicks, s.id(CELEBRITY)) {
+        journal.sim = Some(e);
+    }
     // The family tree: the game's own dialog (or the plain one, beside the relationships).
     if pressed(&clicks, s.id(FAMILY_TREE)) {
         if crate::familytree::available(&ui) {
@@ -187,17 +193,22 @@ fn simology_panel(
     let baby = sim.age == Age::Baby;
     set_visible(&mut vis, s.id(MALE), baby && !sim.female);
     set_visible(&mut vis, s.id(FEMALE), baby && sim.female);
-    for id in [ZODIAC, ZODIAC_GENDER, BIO, CELEBRITY, TRAVEL_TIME] {
+    for id in [ZODIAC, ZODIAC_GENDER, BIO, TRAVEL_TIME, CELEBRITY_GLOW] {
         set_visible(&mut vis, s.id(id), false);
     }
+    // (The Celebrity button, for a celebrity: `LowestVisibleCelebrityLevel`.)
+    set_visible(&mut vis, s.id(CELEBRITY), famous.is_some_and(|f| f.0 >= 1));
     let next = crate::aging::next_age(sim.age);
     set_visible(&mut vis, s.id(AGE_NEXT), next.is_some());
     // What changes rarely is redrawn on change.
-    let key = format!("{e:?} {:?} {:?} {:?} {} {} {:?} {}", sim.age, sim.traits, (&sim.favorites.food, &sim.favorites.music, &sim.favorites.color), lived.to_bits(), game_ui.is_some(), settings.lifespan, settings.aging);
+    let key = format!("{e:?} {:?} {:?} {:?} {} {} {:?} {} {:?}", sim.age, sim.traits, (&sim.favorites.food, &sim.favorites.music, &sim.favorites.color), lived.to_bits(), game_ui.is_some(), settings.lifespan, settings.aging, famous.map(|f| f.0));
     if state.2 == key && state.0.is_some_and(|h| vis.contains(h)) {
         return;
     }
     state.2 = key;
+    if let (Some(b), Some(f)) = (s.id(CELEBRITY), famous) {
+        tip(&mut commands, b, format!("{}\n{}", ui.localize("Ui/Caption/HUD/CelebrityJournal:DialogTitle").map_or_else(|| "Celebrity Journal".to_string(), |t| t.replace("{0.String}", &sim.first)), crate::celebrity::level_name(Some(&ui), f.0)));
+    }
     for (id, age) in [(AGE_CURRENT, Some(sim.age)), (AGE_NEXT, next)] {
         let (Some(win), Some(age)) = (s.id(id), age) else { continue };
         let t = ui.layout("HUDSimologyPanel").and_then(|l| l.find(id)).map_or(Color::WHITE, |w| crate::layout::color(w.shade));

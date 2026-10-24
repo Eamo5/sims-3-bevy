@@ -111,6 +111,9 @@ pub struct Tally {
     pub readings: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub readings_given: Vec<(u64, f64)>,
+    /// Their celebrity level (Film: `MetricCelebrityLevel`), kept in step by `celebrity`.
+    #[serde(default)]
+    pub celebrity: u8,
     /// Concerts performed in the career, and the next one's readiness (out of 100).
     #[serde(default)]
     pub concerts: u32,
@@ -429,6 +432,7 @@ impl Tally {
             "ArtWorkScanned" => Some(self.scans as f32),
             "CompetitionsPromoted" => Some(self.promoted as f32),
             "ReadingsPerformed" => Some(self.readings as f32),
+            "CelebrityLevel" => Some(self.celebrity as f32),
             "ConcertsPerformed" => Some(self.concerts as f32),
             "CampaignMoney" => Some(self.campaign as f32),
             "WinLossRecord" => Some(self.wins as f32 - self.losses as f32),

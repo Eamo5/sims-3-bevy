@@ -12,7 +12,7 @@ use crate::ddsw::encode_dds;
 use crate::pack::{read_value, write_value};
 use crate::types::Key;
 
-pub const PREMADES_VERSION: u32 = 5;
+pub const PREMADES_VERSION: u32 = 6;
 /// Household portraits in the world file (by household id).
 pub const T_HOUSEHOLD_PORTRAIT: u32 = 0x6B6D837E;
 
@@ -123,11 +123,22 @@ pub fn bake_premades(root: &BakeRoot, pkg: &Package, world: &str, strings: &Hash
             pets,
         });
     }
-    // Moonlight Falls is the Supernatural pack's town: the game fills it with vampires,
-    // werewolves, witches and fairies as it runs (its world file has none). A third of its
+    // What the world's `CharacterImport` table says of them as the game loads it (its
+    // `SetGameplayInformationMode`): celebrity levels, and life states (`SupernaturalData`).
+    let import = character_import(pkg);
+    for m in households.iter_mut().flat_map(|h| h.members.iter_mut()) {
+        if let Some(i) = import.get(&m.id) {
+            m.celebrity = i.0;
+            if i.1.is_some() {
+                m.occult = i.1.clone();
+            }
+        }
+    }
+    // Moonlight Falls is the Supernatural pack's town: where its table says nothing of them, the
+    // game fills it with vampires, werewolves, witches and fairies as it runs. A third of its
     // families are one kind or another, all of them alike, and one townie in four (the kinds
     // dealt round in turn, so there are some of each).
-    if world == "Moonlight Falls" {
+    if world == "Moonlight Falls" && !import.values().any(|i| i.1.is_some()) {
         const KINDS: [&str; 4] = ["Vampire", "Werewolf", "Witch", "Fairy"];
         let mut next = 0;
         for h in &mut households {
@@ -154,6 +165,37 @@ pub fn bake_premades(root: &BakeRoot, pkg: &Package, world: &str, strings: &Hash
     Ok(n)
 }
 
+/// The world's `CharacterImport` table (an XML table in its package, as the game reads it on
+/// load): each Sim's celebrity level and life state, by their `SimDescriptionId` (its
+/// `SupernaturalData` rows by the Sims' spreadsheet ids).
+pub fn character_import(pkg: &Package) -> HashMap<u64, (u8, Option<String>)> {
+    let Some(x) = pkg.of_type(0x0333_406C).filter_map(|e| pkg.read(e).ok()).map(|d| String::from_utf8_lossy(&d).into_owned()).find(|x| x.contains("<CharacterImport>")) else { return HashMap::new() };
+    import_rows(&x)
+}
+
+/// A `CharacterImport` table's rows: celebrity levels and life states by Sim id.
+fn import_rows(x: &str) -> HashMap<u64, (u8, Option<String>)> {
+    let mut out = HashMap::new();
+    let occults: HashMap<String, String> = crate::gamedata::records(x, "SupernaturalData")
+        .into_iter()
+        .filter_map(|r| Some((r.get("SpreadSheetUniqueID")?.clone(), r.get("OccultType").filter(|o| !o.is_empty())?.clone())))
+        .collect();
+    for table in ["Sims", "TownieSims", "ServiceNPCSims"] {
+        for r in crate::gamedata::records(x, table) {
+            let Some(id) = r.get("SimDescriptionId").and_then(|v| v.parse::<u64>().ok()) else { continue };
+            let celebrity = r.get("CelebrityLevel").and_then(|v| v.parse::<u8>().ok()).unwrap_or(0).min(5);
+            let occult = r
+                .get("OccultType")
+                .filter(|o| !o.is_empty())
+                .or_else(|| r.get("SpreadSheetUniqueID").and_then(|s| occults.get(s)))
+                .filter(|o| matches!(o.as_str(), "Vampire" | "Werewolf" | "Witch" | "Fairy" | "Zombie"))
+                .cloned();
+            out.insert(id, (celebrity, occult));
+        }
+    }
+    out
+}
+
 /// Bakes a world's premade households if they aren't yet, using the cached string table.
 pub fn ensure_premades(root: &BakeRoot, world_path: &std::path::Path, world: &str) -> Result<(), String> {
     if premades_ready(root, world) {
@@ -162,4 +204,19 @@ pub fn ensure_premades(root: &BakeRoot, world_path: &std::path::Path, world: &st
     let strings: HashMap<u64, String> = read_value(&root.global_dir().join("strings.bin")).map_err(|e| format!("strings: {e}"))?;
     let pkg = Package::open(world_path).map_err(|e| e.to_string())?;
     bake_premades(root, &pkg, world, &strings).map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_worlds_import_says_who_is_famous_and_what_they_are() {
+        let x = "<CharacterImport><Sims><SpreadSheetUniqueID>Sim_1</SpreadSheetUniqueID><SimDescriptionId>11</SimDescriptionId><CelebrityLevel>5</CelebrityLevel><OccultType></OccultType></Sims>\
+            <TownieSims><SpreadSheetUniqueID>Sim_2</SpreadSheetUniqueID><SimDescriptionId>22</SimDescriptionId><CelebrityLevel></CelebrityLevel></TownieSims>\
+            <SupernaturalData><SpreadSheetUniqueID>Sim_2</SpreadSheetUniqueID><OccultType>Werewolf</OccultType></SupernaturalData></CharacterImport>";
+        let rows = import_rows(x);
+        assert_eq!(rows.get(&11), Some(&(5, None)));
+        assert_eq!(rows.get(&22), Some(&(0, Some("Werewolf".to_string()))));
+    }
 }

@@ -57,6 +57,9 @@ pub struct PremadeSim {
     /// Their life state (`Vampire`, `Werewolf`, `Witch`, `Fairy`, `Zombie`), if supernatural.
     #[serde(default)]
     pub occult: Option<String>,
+    /// How famous they are (Late Night's celebrity level, 0 to 5: the world's `CharacterImport`).
+    #[serde(default)]
+    pub celebrity: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -263,6 +266,7 @@ fn read_sim(
         female: flags & FEMALE != 0,
         species: (flags >> 8) & 0xF,
         occult: None,
+        celebrity: 0,
         traits,
         skin_tone: key(get("mSkinToneKey")),
         skin_shade: get("mSkinToneIndex").and_then(|v| v.as_f32()).unwrap_or(0.5),

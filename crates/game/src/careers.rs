@@ -198,9 +198,16 @@ pub fn install_tracks(data: &s3bake::GameDataBaked) {
                             continue;
                         }
                         let start = l.start;
+                        // (A title in one, a man's and a woman's words in it: "TV {MA.Actor}{FA.Actress}".)
+                        let gendered = l.title.contains("{M") || l.title.contains("{F");
+                        let (title, title_female) = if gendered && (l.title_female.is_empty() || l.title_female == l.title) {
+                            (crate::layout::gendered(&l.title, false), crate::layout::gendered(&l.title, true))
+                        } else {
+                            (crate::layout::gendered(&l.title, false), crate::layout::gendered(&l.title_female, true))
+                        };
                         levels.push(CareerLevel {
-                            title: leak(if l.title.is_empty() { format!("Level {}", l.level) } else { l.title.clone() }),
-                            title_female: leak(if l.title_female == l.title { String::new() } else { l.title_female.clone() }),
+                            title: leak(if title.is_empty() { format!("Level {}", l.level) } else { title.clone() }),
+                            title_female: leak(if title_female == title { String::new() } else { title_female }),
                             hourly: l.hourly.round() as i64,
                             start,
                             end: (start + l.hours) % 24.0,
@@ -601,11 +608,14 @@ pub enum WorkTone {
     SleepInReadyRoom,
     PlayGolf,
     TakeARisk,
+    /// An actor's headshots (Film's Acting branch: `TakeHeadShotsTone`), celebrity points a
+    /// minute (`celebrity`).
+    TakeHeadshots,
 }
 
 /// The careers' study tones (their `CareerList` words) and the skills they practise, points a
 /// minute (each tone's `kSkillGainRate`...).
-const STUDY_TONES: [(&str, &[(&str, f32)]); 13] = [
+const STUDY_TONES: [(&str, &[(&str, f32)]); 14] = [
     ("PracticeCooking", &[("Cooking", 4.0)]),
     ("PracticeWriting", &[("Writing", 5.0)]),
     ("PracticeIllicitActivities", &[("Athletic", 4.0)]),
@@ -620,13 +630,18 @@ const STUDY_TONES: [(&str, &[(&str, f32)]); 13] = [
     ("PracticeCatchPhrases", &[("Charisma", 2.0)]),
     ("WorkResearch", &[("ArcadeMachine", 5.0)]),
     ("OnTheJobTraining", &[("Logic", 5.0), ("Painting", 5.0)]),
+    // (A director's script: Film's `WorkOnScriptTone`.)
+    ("WorkOnScript", &[("Writing", 5.0)]),
 ];
+
+/// The branch a study tone's offered on (`WorkOnScriptTone`: directors').
+const STUDY_BRANCH: [(&str, &str); 1] = [("WorkOnScript", "Directing")];
 
 /// The level a study tone's offered from (`kPaintingToneUnlockLevel`).
 const STUDY_UNLOCK: [(&str, usize); 1] = [("PracticePaintingSkill", 6)];
 
 impl WorkTone {
-    pub const ALL: [WorkTone; 19] = [
+    pub const ALL: [WorkTone; 20] = [
         WorkTone::Normal,
         WorkTone::WorkHard,
         WorkTone::TakeItEasy,
@@ -646,6 +661,7 @@ impl WorkTone {
         WorkTone::SleepInReadyRoom,
         WorkTone::PlayGolf,
         WorkTone::TakeARisk,
+        WorkTone::TakeHeadshots,
     ];
 
     /// The career's word for this way of working, where it has one (its `CareerList` column, or
@@ -684,6 +700,7 @@ impl WorkTone {
             WorkTone::SleepInReadyRoom => extra(&["SleepInReadyRoom"]),
             WorkTone::PlayGolf => extra(&["PlayGolf"]),
             WorkTone::TakeARisk => extra(&["ProposeNewCourseOfAction"]),
+            WorkTone::TakeHeadshots => extra(&["TakeHeadshots"]),
         }
     }
 
@@ -700,12 +717,15 @@ impl WorkTone {
             WorkTone::SuckUp => job.info().has_boss && job.boss.is_some(),
             WorkTone::HoldMeetings => counts("HoldMeetings"),
             WorkTone::GiveLectures => counts("GiveLectures"),
-            WorkTone::Study | WorkTone::Study2 => self.word(job).is_none_or(|w| STUDY_UNLOCK.iter().find(|u| u.0 == w).is_none_or(|u| job.level + 1 >= u.1)),
+            WorkTone::Study | WorkTone::Study2 => self.word(job).is_none_or(|w| {
+                STUDY_UNLOCK.iter().find(|u| u.0 == w).is_none_or(|u| job.level + 1 >= u.1) && STUDY_BRANCH.iter().find(|b| b.0 == w).is_none_or(|b| b.1 == job.path().branch)
+            }),
             WorkTone::Perform => counts("ConcertsPerformed"),
             WorkTone::PrepareForGame => counts("WinLossRecord"),
             WorkTone::SleepAtWork => traits.contains(&Trait::HeavySleeper) || traits.contains(&Trait::LightSleeper),
             WorkTone::PlayGolf => job.level + 1 >= 10,
             WorkTone::TakeARisk => job.level + 1 < 10,
+            WorkTone::TakeHeadshots => job.path().branch == "Acting",
             _ => true,
         }
     }
@@ -746,6 +766,7 @@ impl WorkTone {
             WorkTone::SleepInReadyRoom => "Sleep In Ready Room".into(),
             WorkTone::PlayGolf => "Play Golf".into(),
             WorkTone::TakeARisk => "Propose New Course of Action".into(),
+            WorkTone::TakeHeadshots => "Take Headshots".into(),
         }
     }
 
@@ -785,6 +806,7 @@ impl WorkTone {
             WorkTone::SleepInReadyRoom => "SleepInReadyRoom",
             WorkTone::PlayGolf => "PlayGolf",
             WorkTone::TakeARisk => "TakeARisk",
+            WorkTone::TakeHeadshots => "TakeHeadshots",
         }
     }
 
@@ -1206,6 +1228,11 @@ fn work_flow(
         if job.tone == WorkTone::Socialize && !coworkers.is_empty() {
             let d = 5.0 * charisma_boost(charisma, false) * charm * hours / coworkers.len() as f32;
             warmed.extend(coworkers.iter().map(|c| (*c, d)));
+        }
+        // (An actor's headshots: celebrity points, `celebrity`.)
+        if job.tone == WorkTone::TakeHeadshots {
+            let points = hours * 60.0 * crate::celebrity::HEADSHOT_POINTS;
+            commands.queue(move |w: &mut World| crate::celebrity::award(w, e, points));
         }
         // (The careers' own tones, and what comes of them: `careermetrics`.)
         for (need, per_hour) in job.tone.needs_per_hour() {

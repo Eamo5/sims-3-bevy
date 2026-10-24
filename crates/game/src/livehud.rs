@@ -1537,19 +1537,24 @@ fn interaction_queue(
     mut state: Local<(Option<Entity>, (Option<WorkItem>, Option<TalkItem>, Vec<(String, Option<QueuePicture>, bool)>))>,
     (convs, rels_q, people, time): (Res<crate::groups::Conversations>, Query<&crate::social::Relationships>, Query<&Sim>, Res<Time>),
     mut arrows: Local<(Option<(Entity, f32)>, f32, bool, Vec<Entity>)>,
-    (mut workers, tone_boxes, clock, mut play): (
+    (mut workers, tone_boxes, clock, mut play, mut picked): (
         Query<(&mut crate::careers::Job, Option<&mut crate::careers::AtWork>)>,
-        Query<(&crate::layout::UiCombo, &WorkTones)>,
+        Query<(Entity, &crate::layout::UiCombo, &WorkTones)>,
         Res<crate::clock::GameClock>,
         MessageWriter<crate::sound::PlaySound>,
+        Local<std::collections::HashMap<Entity, usize>>,
     ),
 ) {
     let (Some(mut ui), Some(root)) = (ui, hud.queue.root) else { return };
     let Ok((me, mut queue, motives)) = sel.single_mut() else { return };
-    // At work: the tone picked from the work item's combo box is how they work now.
+    // At work: the tone picked from the work item's combo box is how they work now (once it's
+    // picked: a tone set otherwise stands, the box redrawn for it).
+    picked.retain(|e, _| tone_boxes.contains(*e));
     if let Ok((mut job, Some(_))) = workers.get_mut(me) {
-        for (combo, tones) in &tone_boxes {
+        for (e, combo, tones) in &tone_boxes {
+            let was = picked.insert(e, combo.selected);
             if let Some(&tone) = tones.0.get(combo.selected)
+                && was.is_some_and(|w| w != combo.selected)
                 && tone != job.tone
                 && !combo.open
             {

@@ -71,6 +71,7 @@ mod estatedialog;
 mod sabotage;
 mod careerrewards;
 mod careermetrics;
+mod celebrity;
 mod basins;
 mod dreamfns;
 mod dreams;
@@ -302,7 +303,7 @@ fn main() {
         .add_plugins((midlife::MidLifePlugin, objanim::ObjectAnimPlugin, household::HouseholdPlugin, journal::JournalPlugin, jog::JogPlugin, doorbell::DoorbellPlugin, edittown::EditTownPlugin, style::StylePlugin, weather::WeatherPlugin, seasonal::SeasonalPlugin, pets::PetsPlugin, petneeds::PetNeedsPlugin, supernatural::SupernaturalPlugin, planlook::PlanLookPlugin, mirrorlook::MirrorLookPlugin))
         .add_plugins((mirrors::MirrorsPlugin, groups::GroupsPlugin, computertraits::ComputerTraitsPlugin, pranks::PranksPlugin, neurotic::NeuroticPlugin, toilets::ToiletsPlugin, timeoff::TimeOffPlugin, charity::CharityPlugin, bedowners::BedOwnersPlugin, dollhouse::DollhousePlugin, trashcans::TrashcansPlugin, meetups::MeetupsPlugin, telescope::TelescopePlugin))
         .add_plugins((layout::LayoutPlugin, livehud::LiveHudPlugin, hudpanels::HudPanelsPlugin, piemenu::PieMenuPlugin, buyhud::BuyHudPlugin, infopanels::InfoPanelsPlugin, buildhud::BuildHudPlugin, popupmenu::PopupMenuPlugin, mainmenu::MainMenuPlugin, loadscreen::LoadScreenPlugin, savepics::SavePicsPlugin, gamepopup::GamePopupPlugin, optionsdialog::OptionsDialogPlugin, gamedialogs::GameDialogsPlugin, (caslook::CasLookPlugin, cashair::CasHairPlugin, casclothing::CasClothingPlugin, caschar::CasCharPlugin, casface::CasFacePlugin, casfamily::CasFamilyPlugin, casstyle::CasStylePlugin, skilljournal::SkillJournalPlugin, (casgenetics::CasGeneticsPlugin, casportraits::CasPortraitsPlugin, casbrows::CasBrowsPlugin, casbodyhair::CasBodyHairPlugin, cap::CapPlugin), colljournal::CollJournalPlugin, familytree::FamilyTreePlugin, playflow::PlayFlowPlugin, edittownui::EditTownUiPlugin, familyinv::FamilyInventoryPlugin, (buildobjects::BuildObjectsPlugin, buildterrain::BuildTerrainPlugin, buildcats::BuildCatsPlugin, pondtool::PondToolPlugin, terrarium::TerrariumPlugin, blueprints::BlueprintsPlugin, riding::RidingPlugin, dogtricks::DogTricksPlugin))))
-        .add_plugins(jobpaper::JobPaperPlugin)
+        .add_plugins((jobpaper::JobPaperPlugin, celebrity::CelebrityPlugin))
         .add_plugins((carry::CarryPlugin, nausea::NauseaPlugin, dropins::DropInsPlugin, schoolfriends::SchoolFriendsPlugin, crowding::CrowdingPlugin, frontdoor::FrontDoorPlugin, repoman::RepomanPlugin, lessons::LessonsPlugin, stress::StressPlugin, cascolour::CasColourPlugin, movedialog::MoveDialogPlugin, servicesdialog::ServicesDialogPlugin))
         .add_plugins((grime::GrimePlugin, dressing::DressingPlugin, puddles::PuddlesPlugin, idles::IdlesPlugin, faces::FacesPlugin, reactions::ReactionsPlugin, laundry::LaundryPlugin, privacy::PrivacyPlugin, topics::TopicsPlugin, holidays::HolidaysPlugin, (decor::DecorPlugin, disturb::DisturbPlugin, traitmoods::TraitMoodsPlugin), tvchannels::TvChannelsPlugin, jealousy::JealousyPlugin, parties::PartiesPlugin))
         .add_plugins((homes::HomesPlugin, calls::CallsPlugin, classes::ClassesPlugin, learning::LearningPlugin, venues::VenuesPlugin, skillbooks::SkillBooksPlugin, tips::TipsPlugin, traitacts::TraitActsPlugin, potty::PottyPlugin, doorlocks::DoorLocksPlugin, curfew::CurfewPlugin, klepto::KleptoPlugin, shop::ShopPlugin, ambrosia::AmbrosiaPlugin, seatedtalk::SeatedTalkPlugin))

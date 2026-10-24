@@ -1032,8 +1032,10 @@ installation is unreachable.
   `PET_NEEDS=hungry|bladder|tired` and `PET_BOWL=1` (tests).
 - **Supernaturals**, from the Supernatural pack (and Late Night's vampires): vampires,
   werewolves, witches, fairies and zombies, chosen in Create a Sim's Life State row and kept in
-  saves. Moonlight Falls' families come as the pack has them, a third of them supernatural (the
-  Hoppcrafts are werewolves), and some of its townies. Vampires are pale
+  saves. Moonlight Falls' Sims come as the world's own table has them (its `CharacterImport`'s
+  `SupernaturalData`: the Wolffs and Gandillons werewolves, the Snypes and VanGoulds vampires, the
+  MacDuffs and Crumplebottoms witches, the Goodfellows and Summerdreams fairies, townies too).
+  Vampires are pale
   with red eyes, drink plasma juice from the fridge rather than eat, dash when they run and
   feel the daytime sun (Too Much Sun) out of doors; zombies are grey-green and shamble and
   groan. The moon waxes and wanes over the game's eight-day lunar cycle (shown on the clock),
@@ -1220,6 +1222,24 @@ installation is unreachable.
   statistics, metals, gems, insects and fish tabs, and the game's table of each kind's finds
   (picture and name, greyed until found; rarity; how many the household holds; what one
   fetches).
+- **Celebrities** (Late Night), as the game's `CelebrityManager` and `Celebrity` tables have
+  them: each Sim's level, Fame Leecher to Superstar, the world's own celebrities as its
+  `CharacterImport` says (Bridgeport's twenty: Matthew Hamming and Lola Belle Superstars), kept
+  with the town. Points come as a Sim gets closer to a celebrity (a Friend 1,000, a Good Friend 500,
+  a Best Friend 1,000, a Romantic Interest 1,100, a Partner 1,750, a Fiancée 2,000, a Spouse 3,000,
+  the first time each is reached and scaled by how they stand: twice and a quarter from a nobody
+  to a Superstar, nothing from a Superstar to a nobody), from an actor's Take Headshots at work (a
+  point a minute), a tenth more for a Film Sim from level 4; 100 to leave level 0, then 1,500,
+  2,000, 4,000, 6,000 and 10,000, each level told in the game's words. A celebrity paying at a
+  rabbit hole is let in free now and then or given a discount (half to seven tenths of the price,
+  likelier the more famous), with the game's words, and Got Recognized; the makers send free stuff
+  every 96 hours at level 1 down to every 48 at the top, the level's own objects put in the family
+  inventory. The town's celebrities rise and fall with story progression (a Sim high in their
+  career or of a household worth §100,000 likelier to rise and less to fall). The Simology panel's
+  star opens the game's Celebrity Journal: the level's stars, the bar to the next, and the counts
+  (celebrities known, discounts, freebies, money saved); Film's Celebrity Level metric counts it,
+  and actors work Take Headshots, directors Work On Script (Writing). `FAME=<level>[:<points>]`,
+  `FAME_JOURNAL=1` (tests).
 - **Vending machines** (Late Night): *Buy Soda* or *Buy Candy* (the healthy one has both),
   with the game's clips, the coins in and the can or the bar out of the tray, and had there
   and then (a little hunger, as the game's), §5 away from home, free at home. One in ten sticks

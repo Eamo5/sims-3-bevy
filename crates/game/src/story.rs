@@ -59,6 +59,14 @@ pub struct TownStory {
     /// New families moved to town (`storymoves::new_family`): the town's as the world's own are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created: Vec<s3bake::HouseholdBaked>,
+    /// Who's famous, and how (by Sim id: `celebrity`), the world's own celebrities read in once,
+    /// and the last day the town's rose and fell.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fame: BTreeMap<u64, crate::celebrity::Fame>,
+    #[serde(default)]
+    pub fame_seeded: bool,
+    #[serde(default)]
+    pub fame_day: u32,
 }
 
 /// The kinds of community lot a lot can be made in Edit Town (as the game's Change Lot Type):

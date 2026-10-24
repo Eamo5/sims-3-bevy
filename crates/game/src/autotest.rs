@@ -4482,6 +4482,9 @@ fn auto_action(
             let i = crate::venues::ACTS.iter().position(|a| a.activity.name.eq_ignore_ascii_case(what) && a.venue.iter().any(|v| n.contains(v)))?;
             Some((lot, i))
         });
+        if found.is_none() {
+            warn!("venue test: no {what} at {place}; the town's: {}", world.data.lots.iter().enumerate().filter(|(_, l)| !l.is_residential()).map(|(lot, l)| named(lot, l)).collect::<Vec<_>>().join(", "));
+        }
         if let (Some((lot, i)), Ok(mut q)) = (found, sel.single_mut()) {
             info!("venue test: {what} at lot {lot}");
             q.0.clear();
