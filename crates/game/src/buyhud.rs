@@ -28,7 +28,7 @@ pub(crate) struct CatalogueControls;
 impl Plugin for BuyHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(PlayMode::Live), spawn_buy_hud.after(crate::buy::reset_buy_mode))
-            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), tools, inventory_controls, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
+            .add_systems(Update, (show, catalogue_controls.in_set(CatalogueControls), collection_controls, tools, inventory_controls, fill_catalogue, preview_panel).chain().after(crate::hud::pointer_over_ui).before(crate::buyhistory::update).run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuyHud>));
     }
 }
 
@@ -76,6 +76,22 @@ const TABS_BY_FUNCTION: u32 = 0x2302;
 const SHOP_MODE: [u32; 4] = [0x0db8_fb90, 0x0db8_fb91, 0x0dd3_3980, 0x0dd3_3a70];
 const HOUSE_COST: u32 = 0x091b_e560;
 /// The preview panel and its pieces.
+// The collections' pane: its icons' grid and buttons, the chosen one's objects beside them.
+const COLL_PARENT: u32 = 0x410;
+const COLL_ONLY_BG: u32 = 0x411;
+const COLL_GRID: u32 = 0x412;
+const COLL_ORGANIZE: u32 = 0x413;
+const COLL_DELETE: u32 = 0x414;
+const COLL_EDIT: u32 = 0x415;
+const COLL_CONTENTS: u32 = 0x420;
+const COLL_CATALOG: u32 = 0x423;
+const COLL_FILTER: u32 = 0x426;
+const COLL_DELETE_ITEM: u32 = 0x427;
+const COLL_ORGANIZE_ITEMS: u32 = 0x428;
+const COLL_NEW: u32 = 0x429;
+const COLL_NONE: u32 = 0x42a;
+/// The preview's Add to Collection: with its designs, and alone (`grid patterns`).
+const PREVIEW_ADD: [u32; 2] = [0x06e2_3374, 0x06e2_3377];
 const PREVIEW: u32 = 0x06e2_3360;
 const PREVIEW_SCENE: u32 = 0x06e2_3361;
 const PREVIEW_TITLE: u32 = 0x06e2_3362;
@@ -178,8 +194,11 @@ const CELL_THUMB: u32 = 0x05ac_1600;
 /// closed and most rows open (`ExpandableCatalogGrid`), where the catalogue window starts on
 /// screen (the puck's place plus the mid-panel's), a tab's width (`TabControl.ButtonArea`), the
 /// preview panel's width and its place over the catalogue.
-const DEFAULT_WIDTH: [f32; 2] = [688.0, 700.0];
-const DEFAULT_COLUMNS: [i32; 2] = [6, 4];
+const DEFAULT_WIDTH: [f32; 3] = [688.0, 700.0, 667.0];
+const DEFAULT_COLUMNS: [i32; 3] = [6, 4, 3];
+/// Each way of listing's window and its catalogue grid's host: by function, by room, a collection.
+const LIST_WINDOWS: [u32; 3] = [WIN_BY_FUNCTION, WIN_BY_ROOM, COLL_CONTENTS];
+const GRID_HOSTS: [u32; 3] = [GRID_BY_FUNCTION, GRID_BY_ROOM, COLL_CATALOG];
 const CLOSED_ROWS: usize = 2;
 const MAX_ROWS: usize = 6;
 const CATALOGUE_X: f32 = 316.0;
@@ -193,19 +212,22 @@ pub struct BuyHud {
     s: Spawned,
     /// Its puck under the HUD puck's ids (the puck system works both).
     pub(crate) puck: Spawned,
-    /// The catalogue grids' own layouts (by function, by room), and the family inventory's.
-    grids: [Spawned; 2],
+    /// The catalogue grids' own layouts (by function, by room, a collection's), and the family
+    /// inventory's.
+    grids: [Spawned; 3],
     inventory_grid: Spawned,
     /// The family inventory showing in place of the catalogue, its cells and its first row.
     inventory: bool,
     inventory_cells: Option<Entity>,
     inventory_scroll: usize,
-    /// The game's collections showing (the puck's Collections), and which.
+    /// The collections showing (the puck's Collections), and the one chosen (`collections`).
     collections: bool,
-    collection: usize,
-    /// The collections' grid (in the categories' place) and its first row in view.
+    picked: Option<crate::collections::CollRef>,
+    /// The collections' icons' cells and their first row in view (turned to the one chosen, once,
+    /// when it's just been made).
     coll_cells: Option<Entity>,
     coll_scroll: usize,
+    coll_reveal: bool,
     flags: HashMap<Key, ObjBuy>,
     descriptions: HashMap<Key, String>,
     by_room: bool,
@@ -223,7 +245,7 @@ pub struct BuyHud {
     dirty: bool,
     /// What's on the grid: its cells' holder, the tabs' holders, and the window width it was
     /// laid out for.
-    cells: Option<Entity>,
+    cells: [Option<Entity>; 3],
     tabs: [Option<Entity>; 2],
     width: f32,
     rows: usize,
@@ -240,19 +262,11 @@ pub struct BuyHud {
 enum Tab {
     Sub(Option<u8>),
     Room(usize),
-    /// One of the game's collections (`GameDataBaked::collections`).
-    Collection(usize),
 }
 
 /// One of the collections' cells.
 #[derive(Component, Clone, Copy)]
-struct CollectionCell(usize);
-
-/// The collections' grid: columns, rows in view, a cell's side and the gap between.
-const COLL_COLUMNS: usize = 4;
-const COLL_ROWS: usize = 2;
-const COLL_CELL: f32 = 44.0;
-const COLL_GAP: f32 = 4.0;
+struct CollectionCell(crate::collections::CollRef);
 
 /// One of a room picture's buttons.
 #[derive(Component, Clone, Copy)]
@@ -275,8 +289,8 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
     let Some(root) = s.root else { return };
     commands.entity(root).insert((DespawnOnExit(AppState::InGame), GlobalZIndex(5), Visibility::Hidden));
     // The catalogue grids bring in their own layout (`LayoutName`), filling them.
-    let mut grids = [Spawned::default(), Spawned::default()];
-    for (k, id) in [GRID_BY_FUNCTION, GRID_BY_ROOM].into_iter().enumerate() {
+    let mut grids = [Spawned::default(), Spawned::default(), Spawned::default()];
+    for (k, id) in GRID_HOSTS.into_iter().enumerate() {
         if let (Some(e), Some(mut w)) = (s.id(id), ui.layout("BuyExpandableCatalogGrid").cloned()) {
             w.area = [0.0; 4];
             w.place = UiPlace::Simple(15);
@@ -305,6 +319,28 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
         }
+    }
+    // The collections' buttons, in the game's words.
+    let organize = ui.localize("Ui/Tooltip/BuildBuy/CatalogProductFilter:OrganizeCollections").unwrap_or_else(|| "Organize Collections".into());
+    let contents = ui.localize("Ui/Tooltip/BuildBuy/CatalogProductFilter:OrganizeCollectionContents").unwrap_or_else(|| "Organize Contents".into());
+    let tips: [(u32, String); 9] = [
+        (COLLECTIONS, "Collections".into()),
+        (COLL_NEW, ui.localize_key(0x4b9f_4a53_2c65_cd45).unwrap_or_else(|| "Create New Collection".into())),
+        (COLL_ORGANIZE, organize),
+        (COLL_EDIT, ui.localize_key(0x3a06_8c22_07e3_b4c9).unwrap_or_else(|| "Edit Collection".into())),
+        (COLL_DELETE, ui.localize_key(0x6c51_145b_9cc9_4000).unwrap_or_else(|| "Delete Collection".into())),
+        (COLL_DELETE_ITEM, ui.localize_key(0x75ff_9bee_b2f5_89d8).unwrap_or_else(|| "Delete item from Collection".into())),
+        (COLL_ORGANIZE_ITEMS, contents),
+        (PREVIEW_ADD[0], ui.localize_key(0x02b1_5198_e565_8246).unwrap_or_else(|| "Add to Collection".into())),
+        (PREVIEW_ADD[1], ui.localize_key(0x02b1_5198_e565_8246).unwrap_or_else(|| "Add to Collection".into())),
+    ];
+    for (id, tip) in tips {
+        if let Some(e) = s.id(id) {
+            commands.entity(e).insert(crate::icons::Tooltip(tip));
+        }
+    }
+    if let Some(g) = s.id(COLL_GRID) {
+        commands.entity(g).remove::<Pickable>().insert((Interaction::default(), crate::hud::BlocksWorld, bevy::ui::RelativeCursorPosition::default()));
     }
     if let Some(e) = s.id(INVENTORY_SELL_ONE) {
         commands.entity(e).insert(Visibility::Hidden);
@@ -346,7 +382,7 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
     }
     // (No store, collections, filters, blueprints or lot value here; the panels for
     // things other than the catalogue stay away.)
-    for id in SHOP_MODE.into_iter().chain([HOUSE_COST, PREVIEW_SCENE, PREVIEW_MOODLET, PREVIEW_BUFF]).chain(PREVIEW_BUTTONS) {
+    for id in SHOP_MODE.into_iter().chain([HOUSE_COST, PREVIEW_SCENE, PREVIEW_MOODLET, PREVIEW_BUFF]).chain(PREVIEW_BUTTONS.into_iter().filter(|b| !PREVIEW_ADD.contains(b))) {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(Visibility::Hidden);
         }
@@ -365,9 +401,10 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
         inventory_cells: None,
         inventory_scroll: 0,
         collections: false,
-        collection: 0,
+        picked: None,
         coll_cells: None,
         coll_scroll: 0,
+        coll_reveal: false,
         flags,
         descriptions,
         by_room: false,
@@ -380,7 +417,7 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
         scroll: 0,
         expanded: false,
         dirty: true,
-        cells: None,
+        cells: [None; 3],
         tabs: [None, None],
         width: 0.0,
         rows: CLOSED_ROWS,
@@ -395,6 +432,157 @@ fn spawn_buy_hud(mut commands: Commands, ui: Option<ResMut<UiAssets>>, (mut imag
 /// Whether the catalogue's up: buy mode (not build).
 fn showing(buy: &BuyMode) -> bool {
     buy.active && buy.category < WALLPAPER_TAB
+}
+
+impl BuyHud {
+    /// How the catalogue's listing: by function (0), by room (1), or a collection's (2).
+    fn mode(&self) -> usize {
+        if self.collections { 2 } else { self.by_room as usize }
+    }
+}
+
+/// The collections' pane, as `BuyController` has it: a collection chosen from the icons' grid
+/// (the wheel turning its rows), its objects beside; Create New Collection, Edit This
+/// Collection, Delete This Collection (the player's own), Organize Collections, Organize
+/// Contents, Delete Item From Collection (the one in hand); and the preview's Add to Collection.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn collection_controls(
+    mut hud: ResMut<BuyHud>,
+    buy: Res<BuyMode>,
+    ui: Option<Res<UiAssets>>,
+    (mut user, game_ui): (ResMut<crate::collections::UserCollections>, Option<Res<crate::icons::GameUi>>),
+    (mut dialogs, mut questions): (ResMut<crate::collections::CollDialogs>, ResMut<crate::dialog::Questions>),
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    cells: Query<(&Interaction, &CollectionCell), Changed<Interaction>>,
+    over: Query<&bevy::ui::RelativeCursorPosition>,
+    mut buttons: Query<&mut UiButton>,
+    mut wheel: MessageReader<MouseWheel>,
+    mut play: MessageWriter<crate::sound::PlaySound>,
+    mut tested: Local<bool>,
+) {
+    let scrolled: f32 = wheel.read().map(|w| if w.unit == bevy::input::mouse::MouseScrollUnit::Line { w.y } else { w.y / 40.0 }).sum();
+    if !showing(&buy) {
+        return;
+    }
+    let game: &[s3bake::gamedata::CollectionInfo] = game_ui.as_deref().map_or(&[], |g| &g.data.collections);
+    let shown = user.shown(game);
+    let h = &mut *hud;
+    // (BUY_COLLECTION=<n>|last (tests): the collections up, the nth (or last) chosen.)
+    if !*tested && let Ok(v) = std::env::var("BUY_COLLECTION") {
+        *tested = true;
+        h.collections = true;
+        h.picked = if v == "last" { shown.last() } else { v.parse::<usize>().ok().and_then(|n| shown.get(n)) }.map(|s| s.at);
+        h.coll_reveal = true;
+        h.dirty = true;
+        info!("collections: {}", shown.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", "));
+    }
+    // (One just made from here: the collections up, it chosen.)
+    if let Some(id) = dialogs.made.take() {
+        h.collections = true;
+        h.inventory = false;
+        h.picked = Some(crate::collections::CollRef::Mine(id));
+        h.coll_reveal = true;
+        h.dirty = true;
+    }
+    if user.is_changed() {
+        h.dirty = true;
+    }
+    if h.picked.is_some_and(|p| !shown.iter().any(|s| s.at == p)) {
+        h.picked = None;
+    }
+    let picked = h.picked.and_then(|p| shown.iter().find(|s| s.at == p));
+    let mine = picked.and_then(|s| s.mine());
+    if mine.is_some() && dialogs.previous != mine {
+        dialogs.previous = mine;
+    }
+    let in_hand = buy.placing.as_ref().filter(|p| !p.owned).map(|p| p.objd.2);
+    // The preview's Add to Collection, for the object in hand.
+    if let Some(p) = buy.placing.as_ref()
+        && PREVIEW_ADD.iter().any(|id| pressed(&clicks, h.s.id(*id)))
+    {
+        dialogs.choose_for(p.objd.2, mine);
+        play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
+    }
+    if !h.collections || h.inventory || dialogs.up() {
+        return;
+    }
+    for (i, c) in &cells {
+        if *i == Interaction::Pressed && h.picked != Some(c.0) {
+            h.picked = Some(c.0);
+            h.scroll = 0;
+            h.expanded = false;
+            h.dirty = true;
+            play.write(crate::sound::PlaySound::ui("ui_tertiary_button"));
+        }
+    }
+    let grid = h.s.id(COLL_GRID);
+    if scrolled != 0.0 && grid.and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over()) {
+        let cols = ui.as_deref().and_then(|u| u.find("Buy", COLL_GRID)).map_or(3, |w| crate::collections::grid_cells(w).1);
+        let rows = ui.as_deref().and_then(|u| u.find("Buy", COLL_GRID)).map_or(2, |w| crate::collections::grid_cells(w).2);
+        let most = shown.len().div_ceil(cols).saturating_sub(rows);
+        let to = if scrolled > 0.0 { h.coll_scroll.saturating_sub(1) } else { (h.coll_scroll + 1).min(most) };
+        if to != h.coll_scroll {
+            h.coll_scroll = to;
+            h.dirty = true;
+        }
+    }
+    let objects = picked.map_or(0, |s| s.objects.len());
+    let held_in = mine.is_some() && in_hand.is_some_and(|o| picked.is_some_and(|s| s.objects.contains(&o)));
+    if pressed(&clicks, h.s.id(COLL_NEW)) {
+        dialogs.new_collection();
+    }
+    if pressed(&clicks, h.s.id(COLL_EDIT))
+        && let Some(c) = mine.and_then(|id| user.get(id))
+    {
+        dialogs.edit_collection(c);
+    }
+    if pressed(&clicks, h.s.id(COLL_DELETE))
+        && let (Some(id), Some(s)) = (mine, picked)
+    {
+        let word = |k: &str, or: &str| ui.as_deref().and_then(|u| u.localize(k)).unwrap_or_else(|| or.to_string());
+        let answer = |l: String| crate::dialog::Answer { label: l, detail: String::new(), icon: String::new() };
+        questions.ask(crate::dialog::Ask {
+            about: crate::dialog::Question::DeleteCollection { id },
+            icon: String::new(),
+            heading: String::new(),
+            title: String::new(),
+            text: word("Ui/Caption/BuildBuy/DeleteCollectionDialog:Title", "Are you sure you wish to delete the collection \"{0.String}\"?").replace("{0.String}", &s.name),
+            answers: vec![answer(word("Ui/Caption/Global:Yes", "Yes")), answer(word("Ui/Caption/Global:No", "No"))],
+        });
+    }
+    if pressed(&clicks, h.s.id(COLL_ORGANIZE)) && shown.len() > 1 {
+        dialogs.organize(None);
+    }
+    if pressed(&clicks, h.s.id(COLL_ORGANIZE_ITEMS))
+        && let Some(id) = mine.filter(|_| objects > 1)
+    {
+        dialogs.organize(Some(id));
+    }
+    if pressed(&clicks, h.s.id(COLL_DELETE_ITEM))
+        && held_in
+        && let (Some(id), Some(o)) = (mine, in_hand)
+        && user.remove(id, o)
+    {
+        user.save();
+        info!("collection {id}: object {o:016x} taken out");
+    }
+    // (Greyed where there's nothing for them: the game's own collections aren't the player's to
+    // change; no filters here.)
+    for (id, off) in [
+        (COLL_EDIT, mine.is_none()),
+        (COLL_DELETE, mine.is_none()),
+        (COLL_ORGANIZE, shown.len() < 2),
+        (COLL_ORGANIZE_ITEMS, mine.is_none() || objects < 2),
+        (COLL_DELETE_ITEM, !held_in),
+        (COLL_FILTER, true),
+    ] {
+        if let Some(e) = h.s.id(id)
+            && let Ok(mut b) = buttons.get_mut(e)
+            && b.disabled != off
+        {
+            b.disabled = off;
+        }
+    }
 }
 
 /// In buy mode the layout comes up in place of the HUD's puck.
@@ -418,27 +606,17 @@ fn catalogue_controls(
     buy: Res<BuyMode>,
     ui: Option<Res<UiAssets>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
-    (tabs, picks, coll_cells): (Query<(&Interaction, &Tab), Changed<Interaction>>, Query<(&Interaction, &RoomPick), Changed<Interaction>>, Query<(&Interaction, &CollectionCell), Changed<Interaction>>),
-    over_coll: Query<&bevy::ui::RelativeCursorPosition>,
-    game_ui: Option<Res<crate::icons::GameUi>>,
+    (tabs, picks): (Query<(&Interaction, &Tab), Changed<Interaction>>, Query<(&Interaction, &RoomPick), Changed<Interaction>>),
     areas: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform, &InheritedVisibility)>,
     windows: Query<&Window, With<PrimaryWindow>>,
     scrollbars: Query<&crate::layout::UiScrollBar>,
     buttons: Query<&UiButton>,
     mut wheel: MessageReader<MouseWheel>,
     mut play: MessageWriter<crate::sound::PlaySound>,
-    mut tested: Local<bool>,
 ) {
     let scrolled: f32 = wheel.read().map(|w| if w.unit == bevy::input::mouse::MouseScrollUnit::Line { w.y } else { w.y / 40.0 }).sum();
     if !showing(&buy) {
         return;
-    }
-    // (BUY_COLLECTION=<n> (tests): the game's collections up, at the nth.)
-    if !*tested && let Some(n) = std::env::var("BUY_COLLECTION").ok().and_then(|v| v.parse::<usize>().ok()) {
-        *tested = true;
-        hud.collections = true;
-        hud.collection = n;
-        hud.dirty = true;
     }
     let Some(ui) = ui else { return };
     let cat = &ui.baked().buy;
@@ -447,7 +625,7 @@ fn catalogue_controls(
         h.expanded = false;
         h.dirty = true;
     }
-    if let Some(bar) = h.grids[h.by_room as usize].id(SCROLLBAR).and_then(|e| scrollbars.get(e).ok())
+    if let Some(bar) = h.grids[h.mode()].id(SCROLLBAR).and_then(|e| scrollbars.get(e).ok())
         && h.scroll != bar.value
     {
         h.scroll = bar.value;
@@ -471,7 +649,7 @@ fn catalogue_controls(
         h.collections = false;
         click(h);
     }
-    // (The game's collections, a tab each, in the catalogue's place.)
+    // (The collections, in the catalogue's place.)
     if pressed(&clicks, h.s.id(COLLECTIONS)) {
         h.collections = !h.collections;
         h.by_room = false;
@@ -503,7 +681,6 @@ fn catalogue_controls(
                 h.room = r;
                 h.room_button = None;
             }
-            Tab::Collection(c) => h.collection = c,
         }
         h.expanded = false;
         click(h);
@@ -514,24 +691,7 @@ fn catalogue_controls(
             click(h);
         }
     }
-    // (A collection chosen from their grid; the grid's rows turned by the wheel over it.)
-    for (i, c) in &coll_cells {
-        if *i == Interaction::Pressed && h.collection != c.0 {
-            h.collection = c.0;
-            click(h);
-        }
-    }
-    if h.collections && scrolled != 0.0 && h.coll_cells.and_then(|e| over_coll.get(e).ok()).is_some_and(|r| r.cursor_over()) {
-        let n = game_ui.as_deref().map_or(0, |g| g.data.collections.len());
-        let most = n.div_ceil(COLL_COLUMNS).saturating_sub(COLL_ROWS);
-        let to = if scrolled > 0.0 { h.coll_scroll.saturating_sub(1) } else { (h.coll_scroll + 1).min(most) };
-        if to != h.coll_scroll {
-            h.coll_scroll = to;
-            h.dirty = true;
-        }
-        return;
-    }
-    let k = h.by_room as usize;
+    let k = h.mode();
     if !buy.styling() && pressed(&clicks, h.grids[k].id(EXPAND)) && h.grids[k].id(EXPAND).and_then(|e| buttons.get(e).ok()).is_some_and(|b| !b.disabled) {
         h.expanded = !h.expanded;
         h.scroll = 0;
@@ -706,7 +866,7 @@ fn fill_inventory(
     family: &crate::familyinv::FamilyInventory,
     (vis, nodes, buttons): (&mut Query<&mut Visibility>, &mut Query<&mut Node>, &mut Query<&mut UiButton>),
 ) {
-    for (id, on) in [(WIN_INVENTORY, true), (WIN_BY_FUNCTION, false), (WIN_BY_ROOM, false), (WIN_ROOM_EMPTY, false), (CATEGORY_PANEL, false), (TABS_BY_FUNCTION, false), (TABS_BY_ROOM, false), (TOGGLE_PAGE, false)] {
+    for (id, on) in [(WIN_INVENTORY, true), (WIN_BY_FUNCTION, false), (WIN_BY_ROOM, false), (WIN_ROOM_EMPTY, false), (CATEGORY_PANEL, false), (TABS_BY_FUNCTION, false), (TABS_BY_ROOM, false), (TOGGLE_PAGE, false), (COLL_PARENT, false)] {
         set_visible(vis, h.s.id(id), on);
     }
     if let Some(words) = h.s.text(INVENTORY_WORDS) {
@@ -783,13 +943,13 @@ fn fill_catalogue(
     (mut vis, mut nodes, mut buttons): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut UiButton>),
     mut scrollbars: Query<&mut crate::layout::UiScrollBar>,
     mut held: Local<Option<Key>>,
-    (family, mut thumbs): (Res<crate::familyinv::FamilyInventory>, ResMut<crate::thumbs::ModelThumbs>),
+    (family, mut thumbs, user): (Res<crate::familyinv::FamilyInventory>, ResMut<crate::thumbs::ModelThumbs>, Res<crate::collections::UserCollections>),
 ) {
     if !showing(&buy) {
         return;
     }
     let (Some(mut ui), Ok(window)) = (ui, windows.single()) else { return };
-    if family.is_changed() {
+    if family.is_changed() || user.is_changed() {
         hud.dirty = true;
     }
     // (Laid out again for another screen width, and lit for the object in hand.)
@@ -812,20 +972,26 @@ fn fill_catalogue(
     set_visible(&mut vis, h.s.id(WIN_INVENTORY), false);
     let data = ui.baked().clone();
     let cat = &data.buy;
-    let k = h.by_room as usize;
-    // By function or by room.
+    let k = h.mode();
+    let shown = user.shown(game_ui.as_deref().map_or(&[], |g| &g.data.collections));
+    let picked = h.picked.and_then(|p| shown.iter().find(|s| s.at == p)).cloned();
+    // By function or by room, or the collections.
     for (id, on) in [
-        (WIN_BY_FUNCTION, !h.by_room),
+        (WIN_BY_FUNCTION, !h.by_room && !h.collections),
         (CATEGORY_PANEL, !h.by_room && !h.collections),
         (TABS_BY_FUNCTION, !h.by_room && !h.collections),
-        (TABS_BY_ROOM, h.by_room),
-        (WIN_BY_ROOM, h.by_room && h.room_button.is_some()),
-        (WIN_ROOM_EMPTY, h.by_room && h.room_button.is_none()),
+        (TABS_BY_ROOM, h.by_room && !h.collections),
+        (WIN_BY_ROOM, h.by_room && !h.collections && h.room_button.is_some()),
+        (WIN_ROOM_EMPTY, h.by_room && !h.collections && h.room_button.is_none()),
+        (COLL_PARENT, h.collections),
+        (COLL_ONLY_BG, h.collections && picked.is_none()),
+        (COLL_CONTENTS, h.collections && picked.is_some()),
+        (COLL_NONE, h.collections && shown.is_empty()),
     ] {
         set_visible(&mut vis, h.s.id(id), on);
     }
     for (i, room) in cat.rooms.iter().enumerate() {
-        set_visible(&mut vis, h.s.id(room.bit as u32), h.by_room && i == h.room);
+        set_visible(&mut vis, h.s.id(room.bit as u32), h.by_room && !h.collections && i == h.room);
     }
     if let (Some(e), Some(w)) = (h.s.id(WIN_ROOM_EMPTY), ui.find("Buy", ROOM_EMPTY_WIDTH))
         && let Ok(mut n) = nodes.get_mut(e)
@@ -870,17 +1036,16 @@ fn fill_catalogue(
     }
     // The tabs, and the objects.
     let (tab_list, items): (Vec<(Tab, String, u64)>, Vec<&CatalogEntry>) = if h.collections {
-        // The game's collections, a tab each (its icon), and the objects in the one chosen (those
-        // sold, one of each name, cheapest first).
-        let all = game_ui.as_deref().map(|g| g.data.collections.clone()).unwrap_or_default();
-        h.collection = h.collection.min(all.len().saturating_sub(1));
-        let tabs = Vec::new();
-        let wanted: std::collections::HashSet<u64> = all.get(h.collection).map(|c| c.objects.iter().copied().collect()).unwrap_or_default();
-        let mut items: Vec<&CatalogEntry> = catalog.entries.iter().filter(|e| e.price > 0 && !e.name.is_empty() && wanted.contains(&e.key.2)).collect();
-        items.sort_by(|a, b| a.price.cmp(&b.price).then(a.name.cmp(&b.name)));
-        let mut names = std::collections::HashSet::new();
-        items.retain(|e| names.insert(e.name.as_str()));
-        (tabs, items)
+        // The chosen collection's objects, in its order (those sold, once each).
+        let mut items: Vec<&CatalogEntry> = Vec::new();
+        for o in picked.iter().flat_map(|p| p.objects.iter()) {
+            if let Some(e) = catalog.entries.iter().find(|e| e.key.2 == *o && e.price > 0 && !e.name.is_empty())
+                && !items.iter().any(|i| i.key == e.key)
+            {
+                items.push(e);
+            }
+        }
+        (Vec::new(), items)
     } else if h.by_room {
         let tabs = cat.rooms.iter().enumerate().map(|(i, r)| (Tab::Room(i), r.label.clone(), r.image)).collect();
         let room = cat.rooms.get(h.room);
@@ -933,7 +1098,7 @@ fn fill_catalogue(
             tabs.push((Tab::Sub(None), "All".to_string(), s3pkg::fnv64("glb_i_all_r2")));
             let sub = *h.sub.get_or_insert(match tabs[0].0 {
                 Tab::Sub(s) => s,
-                Tab::Room(_) | Tab::Collection(_) => None,
+                Tab::Room(_) => None,
             });
             items = listed(&catalog, &h.flags, |f| f.in_category(c.bit) && sub.is_none_or(|s| f.in_sub(s)));
         }
@@ -944,7 +1109,7 @@ fn fill_catalogue(
     let tab_area = ui.find("Buy", if h.by_room { TABS_BY_ROOM } else { TABS_BY_FUNCTION }).map(|w| w.area).unwrap_or_default();
     let tab_width = tab_area[2] - tab_area[0];
     if let (Some(c), Some(template)) = (container, ui.layout("TabControl").cloned()) {
-        let holder = holder(&mut commands, c, &mut h.tabs[k], &vis);
+        let holder = holder(&mut commands, c, &mut h.tabs[h.by_room as usize], &vis);
         let n = tab_list.len();
         let total = n as f32 * TAB_STEP;
         let squeeze = if total > tab_width && n > 1 { (total - tab_width) / (n - 1) as f32 } else { 0.0 };
@@ -952,7 +1117,6 @@ fn fill_catalogue(
             let chosen = match tab {
                 Tab::Sub(s) => !h.by_room && Some(*s) == h.sub,
                 Tab::Room(r) => *r == h.room,
-                Tab::Collection(c) => *c == h.collection,
             };
             let mut w = template.clone();
             let x = (i as f32 * (TAB_STEP - squeeze)).round();
@@ -963,63 +1127,49 @@ fn fill_catalogue(
             if chosen {
                 commands.entity(r).insert((ZIndex(1), crate::layout::Selected));
             }
-            // (A collection's icon is the game's own, among its interface icons.)
-            let icon = match tab {
-                Tab::Collection(_) => game_ui.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::collection_icon_name(*image))),
-                _ => ui.image(&mut images, *image).map(|(i, _)| i),
-            };
-            if let Some(icon) = icon {
+            if let Some((icon, _)) = ui.image(&mut images, *image) {
                 commands.entity(r).insert(crate::layout::SetIcon(icon));
             }
         }
     }
-    // The collections' grid in the categories' place: each one's icon, the one chosen lit.
-    if let Some(e) = h.coll_cells {
-        set_visible(&mut vis, Some(e), h.collections);
-    }
+    // The collections' icons in the game's grid, the one chosen lit (`PopulateCollectionGrid`).
     if h.collections
-        && let (Some(win), Some(panel)) = (h.s.id(WIN_BY_FUNCTION), h.s.id(CATEGORY_PANEL).and_then(|e| nodes.get(e).ok()).cloned())
+        && let (Some(grid), Some(gw)) = (h.s.id(COLL_GRID), ui.find("Buy", COLL_GRID).cloned())
     {
-        let holder = match h.coll_cells.filter(|e| vis.contains(*e)) {
-            Some(e) => {
-                commands.entity(e).despawn_children();
-                e
-            }
-            None => {
-                let e = commands
-                    .spawn((
-                        Node { position_type: PositionType::Absolute, left: panel.left, top: Val::Px(12.0), width: panel.width, height: Val::Px(126.0), ..default() },
-                        Visibility::Inherited,
-                        Interaction::default(),
-                        bevy::ui::RelativeCursorPosition::default(),
-                        ChildOf(win),
-                    ))
-                    .id();
-                h.coll_cells = Some(e);
-                e
-            }
-        };
-        let all = game_ui.as_deref().map(|g| g.data.collections.clone()).unwrap_or_default();
-        h.coll_scroll = h.coll_scroll.min(all.len().div_ceil(COLL_COLUMNS).saturating_sub(COLL_ROWS));
-        let template = ui.layout("BuyCatalogItem").cloned();
-        for (i, coll) in all.iter().enumerate().skip(h.coll_scroll * COLL_COLUMNS).take(COLL_ROWS * COLL_COLUMNS) {
-            let n = i - h.coll_scroll * COLL_COLUMNS;
-            let (x, y) = (60.0 + (n % COLL_COLUMNS) as f32 * (COLL_CELL + COLL_GAP), 7.0 + (n / COLL_COLUMNS) as f32 * (COLL_CELL + COLL_GAP + 8.0));
+        let (step, cols, rows, pad) = crate::collections::grid_cells(&gw);
+        if std::mem::take(&mut h.coll_reveal)
+            && let Some(i) = h.picked.and_then(|p| shown.iter().position(|s| s.at == p))
+        {
+            h.coll_scroll = (i / cols).saturating_sub(rows - 1);
+        }
+        h.coll_scroll = h.coll_scroll.min(shown.len().div_ceil(cols).saturating_sub(rows));
+        let holder = holder(&mut commands, grid, &mut h.coll_cells, &vis);
+        let template = ui.layout("CollectionsPickerEntry").cloned();
+        for (i, coll) in shown.iter().enumerate().skip(h.coll_scroll * cols).take(rows * cols) {
+            let n = i - h.coll_scroll * cols;
+            let at = pad + Vec2::new((n % cols) as f32 * step.x, (n / cols) as f32 * step.y);
             let Some(mut w) = template.clone() else { break };
             w.cls = "Button".to_string();
-            w.area = [x, y, x + COLL_CELL, y + COLL_CELL];
+            w.place = UiPlace::Fixed;
+            w.area = [at.x, at.y, at.x + 54.0, at.y + 54.0];
             let cell = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, holder);
             let Some(r) = cell.root else { continue };
-            commands.entity(r).insert((CollectionCell(i), crate::icons::Tooltip(format!("{}\n{} objects", coll.name, coll.objects.len()))));
-            if i == h.collection {
-                commands.entity(r).insert(crate::layout::Selected);
+            commands.entity(r).insert((CollectionCell(coll.at), crate::icons::Tooltip(coll.name.clone())));
+            // (The one chosen in the grid's selection colour, as its `ItemGrid` lights it.)
+            match gw.grid.and_then(|g| g.cell_colors) {
+                Some((bg, sel)) => {
+                    commands.entity(r).insert(BackgroundColor(crate::layout::color(if Some(coll.at) == h.picked { sel } else { bg })));
+                }
+                None if Some(coll.at) == h.picked => {
+                    commands.entity(r).insert(Outline::new(Val::Px(2.0), Val::ZERO, Color::srgb(0.98, 0.84, 0.25)));
+                }
+                None => {}
             }
-            if let (Some(t), Some(icon)) = (cell.id(CELL_THUMB), game_ui.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::collection_icon_name(coll.icon)))) {
+            if let (Some(t), Some(icon)) = (cell.id(1), coll.image(&mut ui, game_ui.as_deref_mut(), &mut images)) {
                 crate::hudpanels::picture(&mut commands, t, icon, Color::WHITE);
             }
         }
-    }
-    // The catalogue's width: as designed, plus a column for every two objects more than it
+    }    // The catalogue's width: as designed, plus a column for every two objects more than it
     // shows (fewer for fewer), as far as the screen goes, and wide enough for the tabs.
     let count = items.len();
     let grid_win = ui.find("BuyExpandableCatalogGrid", ITEM_GRID).cloned();
@@ -1034,12 +1184,12 @@ fn fill_catalogue(
     }
     let width = w0 + extra as f32 * step.x;
     let columns = (c0 + extra).max(1) as usize;
-    let win = h.s.id(if h.by_room { WIN_BY_ROOM } else { WIN_BY_FUNCTION });
-    if let Some(e) = win
-        && let Ok(mut n) = nodes.get_mut(e)
-    {
-        n.width = Val::Px(width);
-        n.overflow = Overflow::visible();
+    let win = h.s.id(LIST_WINDOWS[k]);
+    for e in [win, h.s.id(COLL_PARENT).filter(|_| h.collections)].into_iter().flatten() {
+        if let Ok(mut n) = nodes.get_mut(e) {
+            n.width = Val::Px(width);
+            n.overflow = Overflow::visible();
+        }
     }
     // Expanded: up to six rows, growing upwards.
     let item_rows = count.div_ceil(columns);
@@ -1051,7 +1201,7 @@ fn fill_catalogue(
     let gs = &h.grids[k];
     // The custom grid's host is clipped in its source layout. Expanded rows deliberately
     // extend above it; only the actual item grid clips thumbnails to its visible rows.
-    if let Some(e) = h.s.id(if h.by_room { GRID_BY_ROOM } else { GRID_BY_FUNCTION })
+    if let Some(e) = h.s.id(GRID_HOSTS[k])
         && let Ok(mut node) = nodes.get_mut(e)
     {
         node.overflow = Overflow::visible();
@@ -1106,7 +1256,7 @@ fn fill_catalogue(
             b.disabled = disabled;
         }
     }
-    let holder = holder(&mut commands, grid, &mut h.cells, &vis);
+    let holder = holder(&mut commands, grid, &mut h.cells[k], &vis);
     let Some(template) = ui.layout("BuyCatalogItem").cloned() else { return };
     for (i, item) in items.iter().enumerate().skip(h.scroll * columns).take(rows * columns) {
         let n = i - h.scroll * columns;
@@ -1331,7 +1481,11 @@ fn preview_panel(
     } else {
         set_visible(&mut vis, h.s.id(PREVIEW_GRID_HOLDER), false);
         desc_bottom = desc_bottom.max(166.0);
-        desc_bottom + 25.0
+        // (One design: Add to Collection alone, on its strip under the words.)
+        let strip_y = desc_bottom + 4.0;
+        set_area(&mut nodes, h.s.id(PREVIEW_PATTERNS), [186.0, strip_y, 402.0, strip_y + 32.0]);
+        set_visible(&mut vis, h.s.id(PREVIEW_PATTERNS), true);
+        strip_y + 32.0 + 25.0
     };
     set_area(&mut nodes, h.s.id(PREVIEW_DESC_BACK), [181.0, desc_y, 542.0, desc_bottom]);
     // (The topics' box under the picture, down to near the panel's foot.)

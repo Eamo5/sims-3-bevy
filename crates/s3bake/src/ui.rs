@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 25;
+pub const UI_VERSION: u32 = 27;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -151,6 +151,10 @@ pub struct UiGrid {
     pub cell_padding: [f32; 4],
     pub columns: u32,
     pub rows: u32,
+    /// Its cells' own colours, where it fills them (`UseCellColors`): each cell's background
+    /// and the picked one's (ARGB; none: the cells are their windows alone).
+    #[serde(default)]
+    pub cell_colors: Option<(u32, u32)>,
 }
 
 /// A combo box's drop-down: its background picture, its words' colours (normal, background,
@@ -226,6 +230,43 @@ impl UiWindow {
 /// Pictures the interface's code loads by name (`ResourceKey.CreatePNGKey`), at fnv64 of the
 /// name: the life stages' icons (the Simology panel's age bar).
 pub const NAMED_IMAGES: &[&str] = &[
+    // (The scrapbook's pictures, a collection's icons: `EditCollectionDialog.kCollectionIconNames`.)
+    "scrapbook_mem_around_town",
+    "scrapbook_mem_books",
+    "scrapbook_mem_career",
+    "scrapbook_mem_cars",
+    "scrapbook_mem_celebrity",
+    "scrapbook_mem_clothes",
+    "scrapbook_mem_collecting",
+    "scrapbook_mem_dancing",
+    "scrapbook_mem_death",
+    "scrapbook_mem_eat_something",
+    "scrapbook_mem_enemies",
+    "scrapbook_mem_fight",
+    "scrapbook_mem_fire",
+    "scrapbook_mem_fitness",
+    "scrapbook_mem_fun_objects",
+    "scrapbook_mem_funny_fail",
+    "scrapbook_mem_growing_up",
+    "scrapbook_mem_household",
+    "scrapbook_mem_marriage",
+    "scrapbook_mem_money",
+    "scrapbook_mem_moving",
+    "scrapbook_mem_naughty",
+    "scrapbook_mem_party",
+    "scrapbook_mem_people",
+    "scrapbook_mem_police",
+    "scrapbook_mem_pregnancy",
+    "scrapbook_mem_real_estate",
+    "scrapbook_mem_romance",
+    "scrapbook_mem_school",
+    "scrapbook_mem_skill",
+    "scrapbook_mem_social",
+    "scrapbook_mem_tattoos",
+    "scrapbook_mem_tombs",
+    "scrapbook_mem_traits",
+    "scrapbook_mem_travel",
+    "scrapbook_mem_vampires",
     "cas_basics_i_age_baby_r2",
     "cas_basics_i_age_toddler_r2",
     "cas_basics_i_age_child_r2",
@@ -572,6 +613,7 @@ fn window(o: &XNode) -> Option<UiWindow> {
             cell_padding: [0, 1, 2, 3].map(|i| cell_pad.get(i).copied().unwrap_or(0.0)),
             columns: val("VisibleCols").map_or(0, num),
             rows: val("VisibleRows").map_or(0, num),
+            cell_colors: (val("UseCellColors").is_some_and(|v| v.eq_ignore_ascii_case("true"))).then(|| (val("BackgroundColor").map_or(0, num), val("SelectionColor").map_or(0, num))),
         });
     }
     // A slider's range and value (`Slider`: whole steps from its least to its most), its

@@ -388,7 +388,7 @@ fn question_dialogs(
             // (A child's wish to be their lifetime wish: yes or no.)
             crate::dialog::Question::ConfirmLifetimeWish { .. } => "TwoButtonDialog",
             // (Saving over another save: yes or no.)
-            crate::dialog::Question::Overwrite { .. } => "TwoButtonDialog",
+            crate::dialog::Question::Overwrite { .. } | crate::dialog::Question::DeleteCollection { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
             crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
@@ -410,7 +410,7 @@ fn question_dialogs(
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
-            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } | crate::dialog::Question::Overwrite { .. } => {
+            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } | crate::dialog::Question::Overwrite { .. } | crate::dialog::Question::DeleteCollection { .. } => {
                 // The offer's words; a button for each path (or yes and no), in the game's words.
                 let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");
                 if let Some(t) = s.comment("Message").and_then(|w| s.text_of(w)) {

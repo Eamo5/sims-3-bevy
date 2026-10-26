@@ -55,6 +55,8 @@ pub enum Question {
     NameObject { object: Entity, suggested: String },
     /// Another save has the name: to save over it (yes), or think of another (no).
     Overwrite { name: String },
+    /// One of the player's collections to be deleted (yes) or kept (`collections`).
+    DeleteCollection { id: u64 },
 }
 
 impl Question {
@@ -62,7 +64,7 @@ impl Question {
     pub fn sim(&self) -> Option<Entity> {
         match self {
             Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } => Some(*sim),
-            Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } => None,
+            Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } | Question::DeleteCollection { .. } => None,
         }
     }
 }

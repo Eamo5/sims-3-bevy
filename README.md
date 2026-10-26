@@ -1607,11 +1607,22 @@ installation is unreachable.
   put down free (back in if it isn't), with Sell All. It's kept with the game and goes along when
   the household moves or another is played, and Edit Town's Move Out With Home packs a household's
   furniture into it.
-- **Collections**: Buy mode's Collections button shows the game's own collections (the
-  install's `Collections` packages, base game and packs: each pack's things, Eco Glam, Seaside
-  Summer, Simply Elegant and the rest) in the categories' place, a grid of their icons (the
-  game's, named on hover with how many objects, turned by the wheel); the one chosen fills the
-  catalogue with its objects, cheapest first. `BUY_COLLECTION=<n>` (tests).
+- **Collections**, as UI.dll's `BuyController` and its dialogs have them: Buy mode's Collections
+  button brings up the game's collections pane, the game's own collections (the install's
+  `Collections` packages: each pack's things, Eco Glam, Seaside Summer, Simply Elegant and the
+  rest) and the player's, in the pane's grid of icons (turned by the wheel), the one chosen's
+  objects beside them in its order. Create New Collection and Edit This Collection put up the
+  game's `EditCollection`: the name typed into its box (its words asking for one while it's
+  empty; Accept needs one) and one of the scrapbook's 36 pictures for its icon, in the grid's own
+  colours. Delete This Collection asks first, in the game's words. Organize Collections and
+  Organize Contents put up `OrganizeCollections`: each dragged to its place, its picture under the
+  pointer, before or after another as the insertion handle shows. The catalogue preview's Add to
+  Collection puts up `EditCollections` to choose the collection for the object in hand (the
+  last chosen to start with, or a new one), and Delete Item From Collection takes the one in hand
+  out again. The game's own collections can be put in order, not changed. They're kept between
+  games in `collections.json`, as the game keeps them in the player's folder rather than a save.
+  `BUY_COLLECTION=<n>|last`, `COLL_TEST`, `COLL_DIALOG`, `COLL_TYPE`, `COLL_ACCEPT`,
+  `CLICK_AT`/`CURSOR_AT`'s `d<x,y>` and `u<x,y>` drags (tests).
 - **The game's own HUD**: the live-mode interface is the game's, drawn from its own layouts
   (`UI.package`'s window trees, pictures and fonts: every caption in its Helvetica Rounded),
   and driven as its own interface code drives it: the puck at the bottom left (live, buy and
@@ -1769,7 +1780,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal foundations, making and editing collections); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

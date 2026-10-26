@@ -984,13 +984,27 @@ fn pointer_script(time: Res<Time<InputTimeline>>, mut windows: Query<&mut Window
         Some(rest) => (MouseButton::Right, rest),
         None => (MouseButton::Left, xy),
     };
+    // (`d<x,y>`: the left button pressed there and held; `u<x,y>`: moved there and let go; a
+    // plain step between, CURSOR_AT's way, moves it: a drag.)
+    let (hold, drop, xy) = match (xy.strip_prefix('d'), xy.strip_prefix('u')) {
+        (Some(rest), _) => (true, false, rest),
+        (_, Some(rest)) => (false, true, rest),
+        _ => (false, false, xy),
+    };
     let Some((x, y)) = xy.split_once(',').and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))) else { return };
     if time.elapsed_secs() < at.parse::<f32>().unwrap_or(10.0) {
         return;
     }
     let Ok(mut window) = windows.single_mut() else { return };
     window.set_cursor_position(Some(Vec2::new(x, y)));
-    if click {
+    if hold || drop {
+        if hold {
+            mouse.press(MouseButton::Left);
+        } else {
+            mouse.release(MouseButton::Left);
+        }
+        *step += 1;
+    } else if click {
         mouse.press(button);
         *release = Some(button);
     } else {
