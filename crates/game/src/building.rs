@@ -1486,7 +1486,9 @@ pub(crate) fn cut_openings(
         }
         b.holes.retain(|(he, _)| *he != Some(e));
         let Some(bounds) = parts_bounds(&assets.object(&mut ctx, obj.objd)) else { continue };
-        let level = b.level_at_point(tf.translation);
+        // (In a wall: its storey by its height too, a window high in a hall open two storeys
+        // standing on no floor of its own.)
+        let level = b.level_at_point(tf.translation).max(b.level_at(tf.translation.y));
         let Some(door) = catalog.by_key(&obj.objd).and_then(|c| c.opening) else {
             // Paintings, mirrors and wall lamps hang on the wall behind them: cut away with it.
             if hangs_on_wall(bounds) {

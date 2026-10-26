@@ -661,7 +661,10 @@ pub fn bake_building(
             .or_else(|| [(-0.3, 0.0), (0.3, 0.0), (0.0, -0.3), (0.0, 0.3)].iter().filter_map(|&(dx, dz)| on(dx, dz)).max())
             .or_else(|| [(-1.0, -1.0), (0.0, -1.0), (1.0, -1.0), (-1.0, 0.0), (1.0, 0.0), (-1.0, 1.0), (0.0, 1.0), (1.0, 1.0)].iter().filter_map(|&(dx, dz)| on(dx, dz)).max());
         let by_height = levels.iter().enumerate().skip(1).filter(|(_, y)| p[1] >= **y - 0.3).map(|(s, _)| s as u32).last().unwrap_or(0);
-        let mut level = on_tile.unwrap_or(by_height) as u8;
+        // (A window or door high in a wall over a room open to the roof, a hall two storeys high,
+        // stands on no floor of its own storey: it's that storey's, by its height.)
+        let opening = o.script.as_deref().is_some_and(|s| s.contains(".Objects.Window.") || s.contains(".Objects.Door."));
+        let mut level = if opening { on_tile.unwrap_or(0).max(by_height) } else { on_tile.unwrap_or(by_height) } as u8;
         if o.script.as_deref().is_some_and(|s| s.ends_with(".Stairs")) {
             stair_levels.insert(o.guid, level as u32);
         }

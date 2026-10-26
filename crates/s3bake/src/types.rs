@@ -27,7 +27,7 @@ pub const T_HAT_LAYER: u32 = 0x0CA5_4A70;
 /// packs' objects whose patches name their models without the pack's byte.
 pub const OBJECTS_VERSION: u32 = 3;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 80;
+pub const WORLD_VERSION: u32 = 81;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);

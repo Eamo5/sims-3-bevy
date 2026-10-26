@@ -1769,7 +1769,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal foundations, collections); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal foundations, making and editing collections); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
