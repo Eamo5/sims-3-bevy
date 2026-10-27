@@ -3620,7 +3620,12 @@ fn auto_build(
                     let p = b.world(gx, gz, 0.0);
                     world.data.heightmap.sample(p.x, p.z)
                 };
-                let (ops, cost, why) = crate::build::plan_foundation(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1), ground);
+                // (With BUILD_DIAGONAL, the Diagonal foundation's diamond under the diagonal room.)
+                let (ops, cost, why) = if std::env::var("BUILD_DIAGONAL").is_ok() {
+                    crate::build::plan_diagonal_foundation(b, false, 1, IVec2::new(x, z), IVec2::new(x + w, z + d), ground)
+                } else {
+                    crate::build::plan_foundation(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1), ground)
+                };
                 info!("build test: foundation — {} tiles, §{cost} {why:?}", ops.len());
                 apply(&mut commands, &mut assets, b, &mut ctx, ops);
             }

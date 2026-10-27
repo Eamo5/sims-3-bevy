@@ -49,6 +49,9 @@ pub enum BuildTool {
     Pool,
     /// Lay a foundation, the ground floor raised on it (before the walls go up).
     Foundation,
+    /// A foundation turned 45°: a diamond, its edges along the tiles' diagonals (the game's
+    /// Diagonal foundation tool).
+    DiagonalFoundation,
     /// Dig a basement, a storey under the ground floor.
     Basement,
     /// Build a fountain out of doors on the ground floor (the game's Fountain tool).
@@ -75,6 +78,7 @@ impl BuildTool {
             BuildTool::Fence => "Fence Tool".to_string(),
             BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Foundation => format!("Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
+            BuildTool::DiagonalFoundation => format!("Diagonal Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::Basement => format!("Basement Tool\n§{BASEMENT_PRICE} a tile"),
             BuildTool::Fountain => format!("Fountain Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
@@ -94,6 +98,7 @@ impl BuildTool {
             BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
             BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
             BuildTool::Foundation => "Drag out a foundation to build the house on; Ctrl+drag takes it away. Lay it before the walls.",
+            BuildTool::DiagonalFoundation => "Drag out a diamond of foundation to build a house turned 45° on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::Basement => "Drag out a basement to dig under the house; Ctrl+drag fills it in. Page Down to go down and build there; stairs lead up from it.",
             BuildTool::Fountain => "Drag out a fountain on the ground out of doors; Ctrl+drag takes it out. Buy fountain jets to put in it.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
@@ -518,7 +523,7 @@ mod wall_placement_tests {
 pub fn edges(tool: BuildTool, start: IVec2, cur: IVec2) -> Vec<(IVec2, IVec2)> {
     match tool {
         BuildTool::Room => room(start, cur),
-        BuildTool::DiagonalRoom => diagonal_room(start, cur),
+        BuildTool::DiagonalRoom | BuildTool::DiagonalFoundation => diagonal_room(start, cur),
         _ => line(start, cur),
     }
 }
@@ -717,6 +722,54 @@ fn walled(b: &LotBuildingBaked, x: u16, z: u16) -> bool {
 /// house: not under walls, a staircase or a pool; and the first, raising the ground floor to it,
 /// only before any walls stand.
 pub fn plan_foundation(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2, ground: impl Fn(f32, f32) -> f32) -> (Vec<PaintOp>, i64, Option<&'static str>) {
+    let (lo, hi) = (start.min(cur), start.max(cur));
+    let tiles: Vec<(u16, u16, u8)> = (lo.y..=hi.y).flat_map(|z| (lo.x..=hi.x).map(move |x| (x as u16, z as u16, 0xF))).collect();
+    plan_foundation_tiles(b, removing, level, &tiles, ground)
+}
+
+/// A diagonal foundation dragged from grid point `start` towards `cur` (or taken away): the
+/// diamond `diagonal_room` draws, its tiles and the halves of the tiles its edges cut across.
+pub fn plan_diagonal_foundation(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2, ground: impl Fn(f32, f32) -> f32) -> (Vec<PaintOp>, i64, Option<&'static str>) {
+    let tiles: Vec<(u16, u16, u8)> = diamond_triangles(start, cur).into_iter().filter(|(x, z, _)| (*x as u32) < b.data.width && (*z as u32) < b.data.depth).collect();
+    plan_foundation_tiles(b, removing, level, &tiles, ground)
+}
+
+/// The tiles inside the diamond dragged from grid point `a` towards `b` (as `diagonal_room`
+/// draws it), each with its triangles inside (a floor's mask: a whole tile, or half of one along
+/// an edge).
+pub fn diamond_triangles(a: IVec2, b: IVec2) -> Vec<(u16, u16, u8)> {
+    let d = b - a;
+    let p = (d.x + d.y).div_euclid(2);
+    let q = d.x - p;
+    if p == 0 || q == 0 {
+        return Vec::new();
+    }
+    let corners = [a, a + IVec2::splat(p), a + IVec2::new(p + q, p - q), a + IVec2::new(q, -q)];
+    let lo = corners.iter().copied().reduce(IVec2::min).unwrap_or(a).max(IVec2::ZERO);
+    let hi = corners.iter().copied().reduce(IVec2::max).unwrap_or(a);
+    // (Each triangle's middle, by how far along the diamond's two sides it is.)
+    let inside = |c: Vec2| {
+        let r = c - a.as_vec2();
+        let (s, t) = ((r.x + r.y) * 0.5 / p as f32, (r.x - r.y) * 0.5 / q as f32);
+        s > 0.0 && s < 1.0 && t > 0.0 && t < 1.0
+    };
+    const MIDDLES: [(f32, f32); 4] = [(0.5, 1.0 / 6.0), (5.0 / 6.0, 0.5), (0.5, 5.0 / 6.0), (1.0 / 6.0, 0.5)];
+    let mut out = Vec::new();
+    for z in lo.y..hi.y {
+        for x in lo.x..hi.x {
+            let mask = (0..4).filter(|t| inside(Vec2::new(x as f32 + MIDDLES[*t].0, z as f32 + MIDDLES[*t].1))).fold(0u8, |m, t| m | 1 << t);
+            if mask != 0 {
+                out.push((x as u16, z as u16, mask));
+            }
+        }
+    }
+    out
+}
+
+/// A foundation laid over tiles (or their triangles), or taken away. As the game's, it goes down
+/// before the house: not under walls, a staircase or a pool; and the first, raising the ground
+/// floor to it, only before any walls stand. A tile costs the price, half a tile half of it.
+fn plan_foundation_tiles(b: &ActiveBuilding, removing: bool, level: u8, tiles: &[(u16, u16, u8)], ground: impl Fn(f32, f32) -> f32) -> (Vec<PaintOp>, i64, Option<&'static str>) {
     if level != 1 {
         return (Vec::new(), 0, Some("Foundations go on the ground floor."));
     }
@@ -726,30 +779,31 @@ pub fn plan_foundation(b: &ActiveBuilding, removing: bool, level: u8, start: IVe
     if !removing && !raised && (walls || !b.built_stairs.is_empty()) {
         return (Vec::new(), 0, Some("Lay the foundation before building walls on this lot."));
     }
-    let (lo, hi) = (start.min(cur), start.max(cur));
     let mut ops = Vec::new();
-    for z in lo.y..=hi.y {
-        for x in lo.x..=hi.x {
-            let (x, z) = (x as u16, z as u16);
-            let on = raised && d.floors.iter().any(|f| f.level == 1 && f.x == x && f.z == z && f.y.is_none());
-            let stairs = b.built_stairs.iter().any(|s| s.tiles().contains(&IVec2::new(x as i32, z as i32)));
-            if removing {
-                // (Not from under a room or a staircase.)
-                if on && !walled(d, x, z) && !stairs && d.floors.iter().any(|f| f.level == 1 && f.x == x && f.z == z && f.region == 0) {
-                    ops.push(PaintOp::RemoveFoundation { x, z });
-                }
-                continue;
+    let mut triangles = 0;
+    for &(x, z, mask) in tiles {
+        // (What of the tile's foundation already.)
+        let have = if raised { d.floors.iter().find(|f| f.level == 1 && f.x == x && f.z == z && f.y.is_none()).map_or(0, |f| f.mask) } else { 0 };
+        let stairs = b.built_stairs.iter().any(|s| s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+        if removing {
+            // (Not from under a room or a staircase.)
+            let gone = have & mask;
+            if gone != 0 && !walled(d, x, z) && !stairs && d.floors.iter().any(|f| f.level == 1 && f.x == x && f.z == z && f.region == 0) {
+                ops.push(PaintOp::RemoveFoundation { x, z, mask: gone });
             }
-            let pool = d.pool.iter().any(|f| f.x == x && f.z == z);
-            if !on && !pool && !stairs && !walled(d, x, z) {
-                // (The highest ground under it.)
-                let (fx, fz) = (x as f32, z as f32);
-                let ground = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].iter().map(|(dx, dz)| ground(fx + dx, fz + dz)).fold(f32::MIN, f32::max);
-                ops.push(PaintOp::AddFoundation { x, z, ground });
-            }
+            continue;
+        }
+        let pool = d.pool.iter().any(|f| f.x == x && f.z == z);
+        let laid = mask & !have;
+        if laid != 0 && !pool && !stairs && !walled(d, x, z) {
+            // (The highest ground under it.)
+            let (fx, fz) = (x as f32, z as f32);
+            let ground = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].iter().map(|(dx, dz)| ground(fx + dx, fz + dz)).fold(f32::MIN, f32::max);
+            ops.push(PaintOp::AddFoundation { x, z, ground, mask: laid });
+            triangles += laid.count_ones() as i64;
         }
     }
-    let cost = if removing { 0 } else { ops.len() as i64 * FOUNDATION_PRICE };
+    let cost = if removing { 0 } else { (triangles * FOUNDATION_PRICE + 3) / 4 };
     (ops, cost, None)
 }
 
@@ -1146,6 +1200,15 @@ fn build_tool(
             why = w;
             (ops, cost)
         }
+        (_, BuildTool::DiagonalFoundation) => {
+            let ground = |x: f32, z: f32| {
+                let p = b.world(x, z, 0.0);
+                world.data.heightmap.sample(p.x, p.z)
+            };
+            let (ops, cost, w) = plan_diagonal_foundation(b, removing, level, start, cur, ground);
+            why = w;
+            (ops, cost)
+        }
         (Some(style), BuildTool::Fence) => plan_fence(b, style, removing, level, start, cur),
         (None, BuildTool::Fence) => (Vec::new(), 0),
         (_, BuildTool::Pool) => plan_pool(b, removing, level, start, cur),
@@ -1175,9 +1238,23 @@ fn build_tool(
             }
         }
     } else {
+        // (A diagonal foundation's tiles and half tiles, faintly.)
+        if tool == BuildTool::DiagonalFoundation {
+            for (x, z, mask) in diamond_triangles(start, cur) {
+                let c = Vec2::new(x as f32 + 0.5, z as f32 + 0.5);
+                for t in 0..4usize {
+                    if mask & (1 << t) != 0 {
+                        let (p, q) = [(Vec2::new(1.0, 0.0), Vec2::new(0.0, 0.0)), (Vec2::new(1.0, 1.0), Vec2::new(1.0, 0.0)), (Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0)), (Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0))][t];
+                        let o = Vec2::new(x as f32, z as f32);
+                        gizmos.line(at(o + p, 0.03), at(o + q, 0.03), color.with_alpha(0.35));
+                        gizmos.line(at(c, 0.03), at(o + p, 0.03), color.with_alpha(0.2));
+                    }
+                }
+            }
+        }
         for (p, q) in edges(tool, start, cur) {
             let (p, q) = (p.as_vec2(), q.as_vec2());
-            let h = if removing { 0.3 } else if tool == BuildTool::Fence { 1.0 } else { wall_h };
+            let h = if removing { 0.3 } else if tool == BuildTool::Fence { 1.0 } else if tool == BuildTool::DiagonalFoundation { s3bake::building::FOUNDATION_HEIGHT } else { wall_h };
             gizmos.line(at(p, 0.02), at(q, 0.02), color);
             gizmos.line(at(p, h), at(q, h), color);
             gizmos.line(at(p, 0.0), at(p, h), color);
@@ -1226,7 +1303,7 @@ fn build_tool(
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
     }
-    let sold = if removing && !tiles && tool != BuildTool::Fence {
+    let sold = if removing && !tiles && !matches!(tool, BuildTool::Fence | BuildTool::DiagonalFoundation) {
         sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes)
     } else { Vec::new() };
     let funds = household.as_ref().map_or(0, |h| h.funds - funds_before);
@@ -1242,7 +1319,7 @@ fn build_tool(
     }
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
         (true, _) if matches!(tool, BuildTool::Pool | BuildTool::Fountain) => "ui_build_pool_mdown",
-        (true, _) if tool == BuildTool::Foundation => "ui_build_deck_section",
+        (_, _) if matches!(tool, BuildTool::Foundation | BuildTool::DiagonalFoundation) => "ui_build_deck_section",
         (true, _) if tool == BuildTool::Basement => "ui_build_pool_mdown",
         (true, _) => "ui_build_flooring_section",
         (false, true) => "ui_build_walldelete_section",

@@ -142,7 +142,7 @@ fn current(buy: &BuyMode) -> Option<Cat> {
         ROOFS_TAB => Some(Cat::Roofs),
         FENCES_TAB if buy.half_walls => Some(Cat::HalfWalls),
         FENCES_TAB => Some(Cat::Fences),
-        crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Foundation) => Some(Cat::Foundations),
+        crate::buy::BUILD_TAB if matches!(buy.tool, Some(BuildTool::Foundation | BuildTool::DiagonalFoundation)) => Some(Cat::Foundations),
         crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Blueprint) => Some(Cat::Blueprints),
         crate::buy::BUILD_TAB if buy.tool == Some(BuildTool::Stairs) => Some(if buy.railings_view { Cat::Railings } else { Cat::Stairs }),
         _ => None,

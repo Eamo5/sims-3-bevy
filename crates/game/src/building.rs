@@ -494,7 +494,7 @@ mod foundation_tests {
         let mut b = deck_lot();
         assert!(!founded(&b));
         for (x, z) in [(5, 5), (6, 5)] {
-            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0 });
+            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0, mask: 0xF });
         }
         assert!(founded(&b));
         // (The game's 0.75 m up; the deck kept at its own height, its sides theirs.)
@@ -511,7 +511,7 @@ mod foundation_tests {
         assert_eq!(b.walls[0].y, None);
         assert_eq!(b.walls[1].y, Some(0.12));
         // (A later one, wherever the ground is, is as high as the first.)
-        apply_paint(&mut b, &PaintOp::AddFoundation { x: 8, z: 8, ground: 0.4 });
+        apply_paint(&mut b, &PaintOp::AddFoundation { x: 8, z: 8, ground: 0.4, mask: 0xF });
         assert_eq!(b.levels[1], 0.75);
     }
 
@@ -546,13 +546,36 @@ mod foundation_tests {
     fn a_foundation_taken_away_leaves_its_neighbour_a_side() {
         let mut b = deck_lot();
         for (x, z) in [(5, 5), (6, 5)] {
-            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0 });
+            apply_paint(&mut b, &PaintOp::AddFoundation { x, z, ground: 0.0, mask: 0xF });
         }
-        apply_paint(&mut b, &PaintOp::RemoveFoundation { x: 6, z: 5 });
+        apply_paint(&mut b, &PaintOp::RemoveFoundation { x: 6, z: 5, mask: 0xF });
         assert!(!b.floors.iter().any(|f| f.level == 1 && f.x == 6 && f.z == 5));
         // (The one left has its four sides again, looking out.)
         assert_eq!(b.foundation.len(), 4 + 4);
         assert!(b.foundation.iter().any(|(a, c)| *a == [6.0, 6.0] && *c == [6.0, 5.0]));
+        assert_eq!(b.foundation_top.len(), b.foundation.len());
+    }
+
+    #[test]
+    fn half_a_tile_of_foundation_has_its_side_along_the_diagonal() {
+        let mut b = deck_lot();
+        // (A tile, and beside it the half towards it: the -X and -Z triangles.)
+        apply_paint(&mut b, &PaintOp::AddFoundation { x: 5, z: 5, ground: 0.0, mask: 0xF });
+        apply_paint(&mut b, &PaintOp::AddFoundation { x: 6, z: 5, ground: 0.0, mask: 0b1001 });
+        let half = b.floors.iter().find(|f| f.level == 1 && f.x == 6 && f.z == 5).unwrap();
+        assert_eq!((half.mask, half.y), (0b1001, None));
+        let sides: Vec<([f32; 2], [f32; 2])> = b.foundation[4..].to_vec();
+        let has = |p: [f32; 2], q: [f32; 2]| sides.iter().any(|s| *s == (p, q));
+        // (None between the tile and the half; the diagonal from corner to corner in two halves,
+        // looking out to +X and +Z.)
+        assert!(!sides.iter().any(|(a, c)| (*a == [6.0, 5.0] && *c == [6.0, 6.0]) || (*a == [6.0, 6.0] && *c == [6.0, 5.0])));
+        assert!(has([6.0, 6.0], [6.5, 5.5]) && has([6.5, 5.5], [7.0, 5.0]));
+        // (Round them: the tile's three sides, the half's one along -Z, and the diagonal's two.)
+        assert_eq!(sides.len(), 3 + 1 + 2);
+        // (Taken away again: the tile's side looking out over it.)
+        apply_paint(&mut b, &PaintOp::RemoveFoundation { x: 6, z: 5, mask: 0xF });
+        assert!(!b.floors.iter().any(|f| f.level == 1 && f.x == 6 && f.z == 5));
+        assert_eq!(b.foundation.len(), 4 + 4);
         assert_eq!(b.foundation_top.len(), b.foundation.len());
     }
 }
@@ -923,9 +946,21 @@ pub enum PaintOp {
     AddPool { x: u16, z: u16 },
     RemovePool { x: u16, z: u16 },
     /// A tile of foundation laid (the ground floor raised on it, the game's 0.75 m up, over the
-    /// highest ground under it, as it was when laid), or taken away again.
-    AddFoundation { x: u16, z: u16, ground: f32 },
-    RemoveFoundation { x: u16, z: u16 },
+    /// highest ground under it, as it was when laid), or taken away again: the whole tile, or
+    /// its triangles in `mask` (half a tile, along a diagonal foundation's edge).
+    AddFoundation {
+        x: u16,
+        z: u16,
+        ground: f32,
+        #[serde(default = "whole_tile")]
+        mask: u8,
+    },
+    RemoveFoundation {
+        x: u16,
+        z: u16,
+        #[serde(default = "whole_tile")]
+        mask: u8,
+    },
     /// A tile of basement dug (its floor a storey under the ground floor, walls round the dug
     /// area), or filled in again.
     AddBasement { x: u16, z: u16 },
@@ -946,6 +981,11 @@ pub struct PoolChanged;
 /// The active house's repaintings since it was built (kept in saves).
 #[derive(Resource, Default, Clone)]
 pub struct LotPaint(pub Vec<PaintOp>);
+
+/// A whole floor tile's triangles (as a foundation op made before half tiles names them).
+fn whole_tile() -> u8 {
+    0xF
+}
 
 /// A bought spiral staircase whose floor over it has been seen to.
 #[derive(Component)]
@@ -1669,8 +1709,8 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
             b.fountains.retain(|f| !f.cells.is_empty());
         }
-        PaintOp::AddFoundation { x, z, ground } => add_foundation(b, x, z, ground),
-        PaintOp::RemoveFoundation { x, z } => remove_foundation(b, x, z),
+        PaintOp::AddFoundation { x, z, ground, mask } => add_foundation(b, x, z, ground, mask),
+        PaintOp::RemoveFoundation { x, z, mask } => remove_foundation(b, x, z, mask),
         PaintOp::AddBasement { x, z } => add_basement(b, x, z),
         PaintOp::RemoveBasement { x, z } => remove_basement(b, x, z),
         PaintOp::RemoveFence { a, b: end, level } => {
@@ -1728,9 +1768,20 @@ fn remove_foundation_side(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2]) {
     }
 }
 
-/// The height of the ground-floor tile there (its own, or the storey's), if there's one.
-fn ground_floor_at(b: &LotBuildingBaked, x: i32, z: i32) -> Option<f32> {
-    b.floors.iter().find(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z).map(|f| f.y.unwrap_or(b.levels[1]))
+/// The height of a ground-floor tile's triangle (`t`: 0 -Z, 1 +X, 2 +Z, 3 -X), if it's floored.
+fn ground_triangle_at(b: &LotBuildingBaked, x: i32, z: i32, t: u8) -> Option<f32> {
+    b.floors.iter().find(|f| f.level == 1 && f.x as i32 == x && f.z as i32 == z && f.mask & (1 << t) != 0).map(|f| f.y.unwrap_or(b.levels[1]))
+}
+
+/// The edges of a tile's triangle (`t`, as a floor's mask has them), each turning so its face
+/// looks out of the triangle (as the foundation's sides are drawn), with the triangle beyond it:
+/// its side of the tile (the next tile's facing triangle), and the two half diagonals to the
+/// tile's middle (the tile's own triangles either side).
+fn triangle_sides(x: u16, z: u16, t: u8) -> [([f32; 2], [f32; 2], (i32, i32, u8)); 3] {
+    let (p, q, (nx, nz)) = tile_sides(x, z)[3 - t as usize];
+    let c = [x as f32 + 0.5, z as f32 + 0.5];
+    let (x, z) = (x as i32, z as i32);
+    [(p, q, (nx, nz, (t + 2) % 4)), (q, c, (x, z, (t + 3) % 4)), (c, p, (x, z, (t + 1) % 4))]
 }
 
 /// Whether the lot's ground floor stands on a foundation: one laid in build mode (a ground-floor
@@ -1743,9 +1794,11 @@ pub fn founded(b: &LotBuildingBaked) -> bool {
 /// Lays a tile of foundation: the ground floor raised on it. The first sets its height, the
 /// game's 0.75 m over the highest ground under it, the lot's ground floor going to it (up or
 /// down), what's on the floor already (the starter deck) staying where it stands; the
-/// foundation's sides go round its edge, where the floor beside isn't as high.
-fn add_foundation(b: &mut LotBuildingBaked, x: u16, z: u16, ground: f32) {
-    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 {
+/// foundation's sides go round its edge, where the floor beside isn't as high. Half a tile (a
+/// diagonal foundation's edge: `mask`, its triangles) has its side along the diagonal.
+fn add_foundation(b: &mut LotBuildingBaked, x: u16, z: u16, ground: f32, mask: u8) {
+    let mask = mask & 0xF;
+    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 || mask == 0 {
         return;
     }
     if !founded(b) {
@@ -1765,44 +1818,74 @@ fn add_foundation(b: &mut LotBuildingBaked, x: u16, z: u16, ground: f32) {
         }
     }
     let top = b.levels[1];
-    match b.floors.iter_mut().find(|f| f.level == 1 && f.x == x && f.z == z) {
-        // (A deck tile under it now: foundation, as high as the rest.)
-        Some(f) => {
+    let here = |f: &FloorBaked| f.level == 1 && f.x == x && f.z == z;
+    // (A deck tile under it now: foundation, as high as the rest; under half of it, that half,
+    // the rest of the deck where it was.)
+    let mut covers = [NO_COVER; 4];
+    if let Some(i) = b.floors.iter().position(|f| here(f) && f.y.is_some() && f.mask & mask != 0) {
+        if b.floors[i].mask & !mask != 0 {
+            // (Its planks go up with it.)
+            covers = b.floors[i].cover;
+            b.floors[i].mask &= !mask;
+        } else if !b.floors.iter().any(|f| here(f) && f.y.is_none()) {
+            let f = &mut b.floors[i];
             f.y = None;
             if f.kind == s3bake::ROOM_PORCH {
                 f.kind = ROOM_OUTSIDE;
             }
+        } else {
+            b.floors.remove(i);
         }
-        None => b.floors.push(FloorBaked { level: 1, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4], y: None }),
     }
-    for (p, q, (nx, nz)) in tile_sides(x, z) {
-        remove_foundation_side(b, p, q);
-        match ground_floor_at(b, nx, nz) {
-            // (Beside floor as high: one floor, no side between.)
-            Some(h) if (h - top).abs() < 0.05 => {}
-            // (Beside lower floor or the ground: the side, looking out.)
-            _ => {
-                let n = b.foundation.len();
-                b.foundation_top.resize(n, top);
-                b.foundation.push((p, q));
-                b.foundation_top.push(top);
+    let laid = match b.floors.iter_mut().find(|f| here(f) && f.y.is_none()) {
+        Some(f) => {
+            for t in (0..4).filter(|t| mask & !f.mask & (1 << t) != 0) {
+                f.cover[t] = covers[t];
+            }
+            f.mask |= mask;
+            f.mask
+        }
+        None => {
+            b.floors.push(FloorBaked { level: 1, x, z, mask, kind: ROOM_OUTSIDE, region: 0, cover: covers, y: None });
+            mask
+        }
+    };
+    for t in (0..4u8).filter(|t| laid & (1 << t) != 0) {
+        for (p, q, (nx, nz, nt)) in triangle_sides(x, z, t) {
+            remove_foundation_side(b, p, q);
+            match ground_triangle_at(b, nx, nz, nt) {
+                // (Beside floor as high: one floor, no side between.)
+                Some(h) if (h - top).abs() < 0.05 => {}
+                // (Beside lower floor or the ground: the side, looking out.)
+                _ => {
+                    let n = b.foundation.len();
+                    b.foundation_top.resize(n, top);
+                    b.foundation.push((p, q));
+                    b.foundation_top.push(top);
+                }
             }
         }
     }
 }
 
-/// Takes a tile of foundation away: its floor, its sides, and the side of the foundation beside
-/// it looking out over it now.
-fn remove_foundation(b: &mut LotBuildingBaked, x: u16, z: u16) {
+/// Takes a tile of foundation away (its triangles in `mask`): its floor, its sides, and the side
+/// of the foundation beside it looking out over it now.
+fn remove_foundation(b: &mut LotBuildingBaked, x: u16, z: u16, mask: u8) {
     let Some(i) = b.floors.iter().position(|f| f.level == 1 && f.x == x && f.z == z && f.y.is_none()) else { return };
-    b.floors.remove(i);
-    for (p, q, (nx, nz)) in tile_sides(x, z) {
-        remove_foundation_side(b, p, q);
-        if let Some(h) = ground_floor_at(b, nx, nz) {
-            let n = b.foundation.len();
-            b.foundation_top.resize(n, b.levels[1]);
-            b.foundation.push((q, p));
-            b.foundation_top.push(h);
+    let gone = b.floors[i].mask & mask;
+    b.floors[i].mask &= !mask;
+    if b.floors[i].mask == 0 {
+        b.floors.remove(i);
+    }
+    for t in (0..4u8).filter(|t| gone & (1 << t) != 0) {
+        for (p, q, (nx, nz, nt)) in triangle_sides(x, z, t) {
+            remove_foundation_side(b, p, q);
+            if let Some(h) = ground_triangle_at(b, nx, nz, nt) {
+                let n = b.foundation.len();
+                b.foundation_top.resize(n, b.levels[1]);
+                b.foundation.push((q, p));
+                b.foundation_top.push(h);
+            }
         }
     }
 }

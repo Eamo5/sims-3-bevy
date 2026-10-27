@@ -1391,7 +1391,11 @@ installation is unreachable.
   walls built on the deck standing on it), the foundation's brick sides round its edge and
   none between tiles laid side by side; not under walls, a staircase or a pool, and before
   the house's walls go up; Ctrl+drag takes it away again where no room stands on it. Sims
-  step up onto it as onto the game's own houses' foundations. The Basement tool (the game's
+  step up onto it as onto the game's own houses' foundations. The panel's Diagonal tool lays a
+  foundation turned 45°, for a diagonal house: a diamond dragged out as the Diagonal Room tool's,
+  its whole tiles and the half tiles its edges cut across (§10 a half), its sides along the
+  diagonals; a half tile of the starter deck under its edge goes up with it, the deck's other
+  half left where it stood. The Basement tool (the game's
   Basement panel) digs a basement (§60 a tile): its floor a storey under the ground floor,
   walls round the dug area and none between tiles dug side by side, never under a pool or
   paving; Ctrl+drag fills it in. Page Down goes down into it, to look or to build: walls
@@ -1795,7 +1799,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's Advanced coat painting, fur shapes, a horse's feathering and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting, fur shapes, a horse's feathering and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

@@ -93,7 +93,7 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::Basement | BuildTool::Sledgehammer))
+        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::DiagonalFoundation | BuildTool::Basement | BuildTool::Sledgehammer))
 }
 
 fn spawn(
@@ -146,13 +146,14 @@ fn spawn(
         (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
         (FOUNDATION_SQUARE, Action::Tool(BuildTool::Foundation)),
+        (FOUNDATION_DIAGONAL, Action::Tool(BuildTool::DiagonalFoundation)),
         (BASEMENT_SQUARE, Action::Tool(BuildTool::Basement)),
     ] {
         let e = if matches!(id, 0x301 | 0x302 | 0x304) { s.id(WALLS).and_then(|p| s.within(p, id)) } else { s.id(id) };
         if let Some(e) = e { commands.entity(e).insert(action); }
     }
-    // (The diagonal foundation isn't laid here yet, nor the foundation styles offered.)
-    for id in [FOUNDATION_DIAGONAL, BASEMENT_DIAGONAL] {
+    // (The diagonal basement isn't dug here yet.)
+    for id in [BASEMENT_DIAGONAL] {
         if let Some(e) = s.id(id) {
             commands.entity(e).insert(Unavailable);
         }
@@ -247,7 +248,7 @@ pub(crate) fn show(
     if !on { return; }
     let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Sledgehammer));
     let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
-    let foundation = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Foundation);
+    let foundation = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Foundation | BuildTool::DiagonalFoundation));
     let basement = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Basement);
     let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy) || crate::buildterrain::showing(&buy) || crate::buildcats::showing(&buy);
     set_visible(&mut visibility, s.id(HOME), !wall && !pool && !foundation && !basement && !covers);
@@ -282,6 +283,15 @@ pub(crate) fn show(
     ] {
         if let Some(e) = s.id(id) && let Ok((mut button, _)) = buttons.get_mut(e) { button.selected = selected; }
     }
+    // (The foundations' and basements' square and diagonal tools, the one in hand lit.)
+    for (id, tool) in [(FOUNDATION_SQUARE, BuildTool::Foundation), (FOUNDATION_DIAGONAL, BuildTool::DiagonalFoundation), (BASEMENT_SQUARE, BuildTool::Basement)] {
+        if let Some(e) = s.id(id)
+            && let Ok((mut button, _)) = buttons.get_mut(e)
+            && button.selected != (buy.tool == Some(tool))
+        {
+            button.selected = buy.tool == Some(tool);
+        }
+    }
     for (id, tool) in [(0x301, BuildTool::Wall), (0x302, BuildTool::Room), (0x304, BuildTool::DiagonalRoom)] {
         if let Some(e) = s.id(WALLS).and_then(|p| s.within(p, id))
             && let Ok((mut button, _)) = buttons.get_mut(e)
@@ -301,7 +311,7 @@ mod tests {
         buy.build_look = true;
         buy.show(BUILD_TAB);
         assert!(native_panel(&buy));
-        for tool in [BuildTool::Wall, BuildTool::Room, BuildTool::Pool, BuildTool::Foundation, BuildTool::Basement, BuildTool::Sledgehammer] {
+        for tool in [BuildTool::Wall, BuildTool::Room, BuildTool::Pool, BuildTool::Foundation, BuildTool::DiagonalFoundation, BuildTool::Basement, BuildTool::Sledgehammer] {
             buy.tool = Some(tool);
             assert!(native_panel(&buy));
         }
