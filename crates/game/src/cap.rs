@@ -22,7 +22,7 @@ use rand::seq::IndexedRandom;
 use crate::AppState;
 use crate::cas::CasAction;
 use crate::home::PendingHousehold;
-use crate::layout::{SetIcon, Spawned, UiAssets, UiButton, UiScrollBar};
+use crate::layout::{SetIcon, Spawned, UiAssets, UiButton, UiScrollBar, UiSlider};
 use crate::pets::SavedPet;
 
 pub struct CapPlugin;
@@ -31,8 +31,9 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, coat_panel, tmh_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
+            .add_systems(PreUpdate, minimap_hits.after(bevy::ui::UiSystems::Focus).run_if(in_state(AppState::CreateHousehold)))
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
                 *cap = Cap::default();
                 UP.store(false, Ordering::Relaxed);
@@ -109,6 +110,21 @@ pub struct Cap {
     shape_bar: Option<Entity>,
     shape_scroll: usize,
     shape_shown: Option<(usize, String, u32, Vec<u64>, usize, bool)>,
+    /// Shape's Advanced: its panel, whether it's up, the region (and whether on the body's
+    /// picture), the region picked on the minimap, the hit masks, the sliders' rows, bar and first
+    /// row, each slider (its entity, its index, its value last seen), and what they show.
+    adv: Option<Spawned>,
+    adv_open: bool,
+    adv_region: u32,
+    adv_body: bool,
+    adv_pick: Option<u32>,
+    adv_masks: HashMap<u64, Option<(u32, u32, Vec<u8>)>>,
+    adv_rows: Option<Entity>,
+    adv_bar: Option<Entity>,
+    adv_scroll: usize,
+    adv_sliders: Vec<(Entity, usize, f32)>,
+    adv_shown: Option<(usize, String, bool, u32, usize)>,
+    adv_slid: bool,
     /// Coat's panel and its frame, its cells, bar, first row and swatches, and what they show.
     coat: Option<Spawned>,
     ccm: Option<Spawned>,
@@ -183,6 +199,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         tail: None,
         mane: None,
         hooves: None,
+        sliders: Vec::new(),
     })
 }
 
@@ -392,7 +409,15 @@ fn pet_sheet(
         open = if open == Some(Panel::Coat) { None } else { Some(Panel::Coat) };
     }
     if pressed(within(SHEET_FACE)) {
-        open = if open == Some(Panel::Shape) { None } else { Some(Panel::Shape) };
+        // (From the sliders, back to the shapes.)
+        open = match open {
+            Some(Panel::Shape) if cap.adv_open => {
+                cap.adv_open = false;
+                Some(Panel::Shape)
+            }
+            Some(Panel::Shape) => None,
+            _ => Some(Panel::Shape),
+        };
     }
     if dressable && pressed(within(SHEET_ACCESSORIES)) {
         open = if open == Some(Panel::Accessories) { None } else { Some(Panel::Accessories) };
@@ -400,6 +425,7 @@ fn pet_sheet(
     if open != cap.panel {
         cap.panel = open;
         cap.typing = None;
+        cap.adv_open = false;
     }
     // Randomize: another pet of its species (breed, name, sex and traits).
     if pressed(s.id(SHEET_RANDOMIZE))
@@ -771,6 +797,342 @@ const SHAPE_TABS: [(u32, u32, &str, &str); 6] = [
     (0x40f2_2214, s3bake::pets::PET_EARS, "Ui/Caption/CAS/CAP/Ears:Title", "Ears"),
 ];
 
+// `CAPFBDAdvanced`'s windows (`ControlIDs`): the species' minimaps, each with its head and body
+// pictures, the toggles between them and its sides; the sliders' label and grid; what isn't here.
+const ADV_MINIMAPS: [(&str, u32); 3] = [("d", 0x03cf_2621), ("c", 0x03cf_2622), ("h", 0x03cf_2623)];
+const ADV_HEAD: u32 = 0x03cf_262a;
+const ADV_BODY: u32 = 0x03cf_262b;
+const ADV_TO_HEAD: u32 = 0x03cf_2613;
+const ADV_TO_BODY: u32 = 0x03cf_2614;
+const ADV_SIDES: [u32; 2] = [0x03cf_2611, 0x03cf_2612];
+const ADV_LABEL: u32 = 0x03cf_2616;
+const ADV_GRID: u32 = 0x03cf_2661;
+const ADV_NOT_HERE: [u32; 5] = [0x03cf_2615, 0x03cf_2653, 0x03cf_2680, 0x03cf_2690, 0x03cf_2601];
+const ADV_LONG: u32 = 0x03cf_2655;
+/// A slider row's (`CASBodySlider`) name and slider.
+const ROW_TITLE: u32 = 2;
+const ROW_SLIDER: u32 = 4;
+/// The minimap's regions (`FacialBlendRegions`): the body's head, full body and legs.
+const REGION_HEAD: u32 = 2;
+const REGION_BODY: u32 = 0x200;
+const REGION_EARS: u32 = 0x20;
+/// A dog's sliders for ears that stand up (`EarsAlt`).
+const REGION_EARS_UP: u32 = 0x1000;
+
+/// One of the minimap's regions, its picture (its hit mask: where on the button it is).
+#[derive(Component, Clone, Copy)]
+struct RegionButton {
+    region: u32,
+    mask: u64,
+}
+
+/// Where Shape's tab opens the sliders (`SetDefaultPart`): its region, and whether that's the
+/// body's picture (or the head's).
+fn advanced_region(tab: u32, horse: bool) -> (u32, bool) {
+    match tab {
+        s3bake::pets::PET_EYES => (0x80, false),
+        s3bake::pets::PET_SNOUT => (if horse { 8 } else { 0x10 }, false),
+        s3bake::pets::PET_EARS => (REGION_EARS, false),
+        s3bake::pets::PET_HEAD => (REGION_HEAD, true),
+        _ => (REGION_BODY, true),
+    }
+}
+
+/// The first picture a window draws (a minimap button's: its hit mask).
+fn first_image(d: &s3bake::ui::UiDrawable) -> Option<u64> {
+    match d {
+        s3bake::ui::UiDrawable::Std { images, .. } => images.iter().copied().find(|i| *i != 0),
+        s3bake::ui::UiDrawable::Image { image, .. } => (*image != 0).then_some(*image),
+        s3bake::ui::UiDrawable::Multi(list) => list.iter().find_map(first_image),
+    }
+}
+
+/// A pet's blends' amounts as its sliders show them: its breed's and shapes', those set by the
+/// sliders over them.
+fn slider_amounts(d: &s3bake::PetsBaked, pet: &SavedPet) -> Vec<(u64, f32)> {
+    let Some(breed) = d.breeds.iter().find(|b| b.outfit == pet.outfit) else { return Vec::new() };
+    let mut a = d.amounts(breed, &pet.shapes);
+    for (b, v) in &pet.sliders {
+        match a.iter_mut().find(|x| x.0 == *b) {
+            Some(x) => x.1 = *v,
+            None => a.push((*b, *v)),
+        }
+    }
+    a
+}
+
+/// A slider's value (-1 to 1 both ways, else 0 to 1), as the game's `FacialBlendData.Value`:
+/// its second blend's, the other way, where that's set.
+pub fn slider_value(s: &s3bake::pets::PetSlider, amounts: &[(u64, f32)]) -> f32 {
+    let of = |b: u64| amounts.iter().find(|x| x.0 == b && b != 0).map_or(0.0, |x| x.1);
+    let (a, b) = (of(s.blends[0]), of(s.blends[1]));
+    if s.blends[1] != 0 && b > 0.0 { -b } else { a }
+}
+
+/// A slider moved to a value: its blends' amounts (the one way's, and the other's nothing).
+pub fn slider_set(s: &s3bake::pets::PetSlider, v: f32) -> Vec<(u64, f32)> {
+    match (s.blends[1], v >= 0.0) {
+        (0, _) => vec![(s.blends[0], v.max(0.0))],
+        (b, true) => vec![(s.blends[0], v), (b, 0.0)],
+        (b, false) => vec![(s.blends[0], 0.0), (b, -v)],
+    }
+}
+
+/// The minimap's regions under the pointer, by their pictures' hit masks: the one hit lit as the
+/// pointer's over it (and pressed), the others not (their buttons lie one over another).
+#[allow(clippy::type_complexity)]
+fn minimap_hits(
+    mut cap: ResMut<Cap>,
+    ui: Option<Res<UiAssets>>,
+    mut buttons: Query<(&RegionButton, &bevy::ui::RelativeCursorPosition, &InheritedVisibility, &mut Interaction)>,
+    mouse: Res<ButtonInput<MouseButton>>,
+) {
+    let Some(ui) = ui else { return };
+    if !cap.adv_open {
+        return;
+    }
+    let mut hit: Option<u32> = None;
+    for (b, at, vis, _) in &buttons {
+        if hit.is_some() || !vis.get() || !at.cursor_over() {
+            continue;
+        }
+        let Some(p) = at.normalized else { continue };
+        let mask = cap.adv_masks.entry(b.mask).or_insert_with(|| ui.image_pixels(b.mask)).as_ref();
+        if let Some((w, h, px)) = mask {
+            let (x, y) = (((p.x + 0.5) * *w as f32) as u32, ((p.y + 0.5) * *h as f32) as u32);
+            if x < *w && y < *h && px[((y * w + x) * 4 + 3) as usize] > 127 {
+                hit = Some(b.region);
+            }
+        }
+    }
+    for (b, _, _, mut i) in &mut buttons {
+        let want = match hit {
+            Some(r) if r == b.region && mouse.pressed(MouseButton::Left) => Interaction::Pressed,
+            Some(r) if r == b.region => Interaction::Hovered,
+            _ => Interaction::None,
+        };
+        i.set_if_neq(want);
+    }
+    if let Some(r) = hit.filter(|_| mouse.just_pressed(MouseButton::Left)) {
+        cap.adv_pick = Some(r);
+    }
+}
+
+/// Shape's Advanced (`CAPFBDAdvanced`): the species' minimap, its head or its body (the toggle
+/// turning between them), a region clicked on it (where its picture is: its hit mask); and the
+/// region's sliders in the game's rows (`CASBodySlider`), the species' own and those cats and
+/// dogs share, both ways or one, their values the pet's blends' amounts. Moved, the pet's shaped
+/// so as it moves; kept with the pet. The wheel or the bar turns the rows.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn advanced_panel(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    (mut vis, mut buttons, mut bars, sliders): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiScrollBar>, Query<&UiSlider>),
+    (regions, over, mut skels): (Query<(Entity, &RegionButton)>, Query<&bevy::ui::RelativeCursorPosition>, Query<&mut crate::pets::PetSkeleton>),
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+) {
+    let Some(mut ui) = ui else { return };
+    let on = cap.panel == Some(Panel::Shape) && cap.adv_open;
+    if on && cap.adv.is_none() && ui.layout("CAPFBDAdvanced").is_some() {
+        let Some(s) = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFBDAdvanced", 7) else { return };
+        if let Some(r) = s.root {
+            commands.entity(r).entry::<Node>().and_modify(|mut n| n.left = Val::Px(ADV_LEFT));
+        }
+        for (_, id) in ADV_MINIMAPS {
+            if let Some(e) = s.id(id) {
+                commands.entity(e).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+            }
+        }
+        for id in ADV_NOT_HERE.into_iter().chain(ADV_SIDES).chain([ADV_LONG]) {
+            for e in s.all_with(id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+        // (The regions' buttons, on the head's and the body's pictures, as the game finds where
+        // the pointer is on them: by their pictures.)
+        let layout = ui.layout("CAPFBDAdvanced").cloned();
+        for (_, map) in ADV_MINIMAPS {
+            for part in [ADV_HEAD, ADV_BODY] {
+                let (Some(win), Some(pe)) = (layout.as_ref().and_then(|l| l.find(map)).and_then(|m| m.find(part)), s.id(map).and_then(|m| s.within(m, part))) else { continue };
+                for c in win.children.iter().filter(|c| c.cls.contains("Button") && c.id != 0) {
+                    let (Some(e), Some(mask)) = (s.within(pe, c.id), c.drawable.as_ref().and_then(first_image)) else { continue };
+                    let tip = ui.localize(&c.tooltip).filter(|t| !t.is_empty()).unwrap_or_else(|| c.comment.clone());
+                    commands.entity(e).insert((RegionButton { region: c.id, mask }, bevy::ui::RelativeCursorPosition::default(), bevy::ui::FocusPolicy::Pass, crate::icons::Tooltip(tip)));
+                }
+            }
+        }
+        if let (Some(grid), Some(g), Some(mut b)) = (s.id(ADV_GRID), ui.find("CAPFBDAdvanced", ADV_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
+            let (w, h) = (g.area[2] - g.area[0], g.area[3] - g.area[1]);
+            b.flags |= s3bake::ui::WIN_VISIBLE;
+            b.place = s3bake::ui::UiPlace::Fixed;
+            b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+            cap.adv_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+            commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+        }
+        cap.adv = Some(s);
+        return;
+    }
+    let Some(s) = cap.adv.clone() else { return };
+    crate::livehud::set_visible(&mut vis, s.root, on);
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.adv_shown = None;
+        return;
+    };
+    let pet = pending.pets[i].clone();
+    let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
+    let map = ADV_MINIMAPS.iter().find(|m| m.0 == species).and_then(|m| s.id(m.1));
+    // The head or the body.
+    if crate::livehud::pressed(&clicks, map.and_then(|m| s.within(m, ADV_TO_HEAD))) {
+        (cap.adv_body, cap.adv_region) = (false, REGION_EARS);
+        cap.adv_scroll = 0;
+    }
+    if crate::livehud::pressed(&clicks, map.and_then(|m| s.within(m, ADV_TO_BODY))) {
+        (cap.adv_body, cap.adv_region) = (true, REGION_BODY);
+        cap.adv_scroll = 0;
+    }
+    if let Some(r) = cap.adv_pick.take()
+        && r != cap.adv_region
+    {
+        cap.adv_region = r;
+        cap.adv_scroll = 0;
+    }
+    // (A dog whose ears stand has their sliders: `GetCurrentEarSliderRegion`.)
+    let breed = d.breeds.iter().find(|b| b.outfit == pet.outfit);
+    let region = if cap.adv_region == REGION_EARS && species == "d" && breed.and_then(|b| b.ears.as_deref()).is_some_and(|e| e.contains("Up")) { REGION_EARS_UP } else { cap.adv_region };
+    let list: Vec<usize> = d.sliders_for(&pet.kind, region).iter().filter_map(|x| d.sliders.iter().position(|y| std::ptr::eq(*x, y))).collect();
+    // A slider moved: the pet's blends so, and the pet shaped so there and then.
+    let mut moved = false;
+    // (CAP_SLIDE=<slider>:<value, -1 to 1> (tests): that slider of the region's moved so, once.)
+    if let Some((name, v)) = std::env::var("CAP_SLIDE").ok().and_then(|v| v.split_once(':').and_then(|(n, x)| Some((n.to_string(), x.parse::<f32>().ok()?))))
+        && cap.adv_shown.is_some()
+        && !cap.adv_slid
+        && let Some(&n) = list.iter().find(|n| d.sliders[**n].name.eq_ignore_ascii_case(&name))
+    {
+        cap.adv_slid = true;
+        let p = &mut pending.pets[i];
+        for (b, a) in slider_set(&d.sliders[n], v) {
+            match p.sliders.iter_mut().find(|x| x.0 == b) {
+                Some(x) => x.1 = a,
+                None => p.sliders.push((b, a)),
+            }
+        }
+        info!("create a pet test: {name} at {v}");
+        moved = true;
+        cap.adv_shown = None;
+    }
+    for (e, n, last) in cap.adv_sliders.clone() {
+        let Ok(sl) = sliders.get(e) else { continue };
+        if (sl.value - last).abs() < 0.5 {
+            continue;
+        }
+        let v = sl.value / 256.0;
+        let p = &mut pending.pets[i];
+        for (b, a) in slider_set(&d.sliders[n], v) {
+            match p.sliders.iter_mut().find(|x| x.0 == b) {
+                Some(x) => x.1 = a,
+                None => p.sliders.push((b, a)),
+            }
+        }
+        if let Some(x) = cap.adv_sliders.iter_mut().find(|x| x.0 == e) {
+            x.2 = sl.value;
+        }
+        moved = true;
+    }
+    if moved
+        && let (Some((model, _)), Some(breed)) = (cap.model, breed)
+        && let Ok(mut skel) = skels.get_mut(model)
+    {
+        let p = &pending.pets[i];
+        skel.reshape(&d.shape(&p.kind, breed, &p.shapes, &p.sliders));
+    }
+    let Some(g) = ui.find("CAPFBDAdvanced", ADV_GRID).and_then(|w| w.grid) else { return };
+    let rows = g.rows.max(1) as usize;
+    let most = list.len().saturating_sub(rows);
+    let over_grid = s.id(ADV_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_grid && wheel.delta.y != 0.0 {
+        cap.adv_scroll = (cap.adv_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+        if let Some(mut b) = cap.adv_bar.and_then(|e| bars.get_mut(e).ok()) {
+            b.value = cap.adv_scroll;
+        }
+    } else if let Some(b) = cap.adv_bar.and_then(|e| bars.get(e).ok())
+        && b.value != cap.adv_scroll
+    {
+        cap.adv_scroll = b.value.min(most);
+    }
+    if let Some(mut b) = cap.adv_bar.and_then(|e| bars.get_mut(e).ok())
+        && (b.total, b.visible) != (list.len(), rows)
+    {
+        (b.total, b.visible) = (list.len(), rows);
+    }
+    crate::livehud::set_visible(&mut vis, cap.adv_bar, list.len() > rows);
+    let want = (i, pet.kind.clone(), cap.adv_body, region, cap.adv_scroll);
+    if cap.adv_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.adv_shown = Some(want);
+    // The species' minimap, at the head or the body; the region lit.
+    for (sp, id) in ADV_MINIMAPS {
+        crate::livehud::set_visible(&mut vis, s.id(id), sp == species);
+    }
+    if let Some(m) = map {
+        crate::livehud::set_visible(&mut vis, s.within(m, ADV_HEAD), !cap.adv_body);
+        crate::livehud::set_visible(&mut vis, s.within(m, ADV_BODY), cap.adv_body);
+        crate::livehud::set_visible(&mut vis, s.within(m, ADV_TO_BODY), !cap.adv_body);
+        crate::livehud::set_visible(&mut vis, s.within(m, ADV_TO_HEAD), cap.adv_body);
+    }
+    let mut label = String::new();
+    for (e, r) in &regions {
+        let lit = r.region == cap.adv_region;
+        if let Ok(mut b) = buttons.get_mut(e)
+            && b.selected != lit
+        {
+            b.selected = lit;
+        }
+        if lit && label.is_empty() {
+            label = ui.layout("CAPFBDAdvanced").and_then(|l| l.find(r.region)).map(|w| ui.localize(&w.tooltip).filter(|t| !t.is_empty()).unwrap_or_else(|| w.comment.clone())).unwrap_or_default();
+        }
+    }
+    if let Some(t) = s.text(ADV_LABEL) {
+        commands.entity(t).insert(Text::new(label));
+    }
+    // The region's sliders.
+    if let Some(old) = cap.adv_rows.take() {
+        commands.entity(old).try_despawn();
+    }
+    cap.adv_sliders.clear();
+    let (Some(grid), Some(template)) = (s.id(ADV_GRID), ui.layout("CASBodySlider").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(grid).insert_children(0, &[holder]);
+    cap.adv_rows = Some(holder);
+    let amounts = slider_amounts(&d, &pending.pets[i]);
+    let step = g.cell[1] + g.cell_padding[1] + g.cell_padding[3];
+    for (k, &n) in list.iter().enumerate().skip(cap.adv_scroll).take(rows) {
+        let sl = &d.sliders[n];
+        let (x, y) = (g.padding[0], g.padding[1] + (k - cap.adv_scroll) as f32 * step);
+        let mut row = template.clone();
+        row.area = [x, y, x + g.cell[0], y + g.cell[1]];
+        crate::layout::edit_windows(&mut row, ROW_TITLE, &mut |t| t.caption = sl.name.clone());
+        let v = (slider_value(sl, &amounts) * 256.0).round();
+        crate::layout::edit_windows(&mut row, ROW_SLIDER, &mut |w| {
+            if let Some(range) = w.slider.as_mut() {
+                (range[0], range[1], range[2]) = (if sl.bidirectional { -256.0 } else { 0.0 }, 256.0, v);
+            }
+        });
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &row, holder);
+        if let Some(e) = c.id(ROW_SLIDER) {
+            cap.adv_sliders.push((e, n, v));
+        }
+    }
+}
+
+/// Where the Advanced panel sits (its layout's at the screen's edge).
+const ADV_LEFT: f32 = 91.0;
+
 /// A shape's cell in the grid (its compound blend's instance).
 #[derive(Component)]
 struct ShapeCell(u64);
@@ -801,7 +1163,7 @@ fn shape_panel(
     wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
 ) {
     let Some(mut ui) = ui else { return };
-    let on = cap.panel == Some(Panel::Shape);
+    let on = cap.panel == Some(Panel::Shape) && !cap.adv_open;
     if on && cap.fbd.is_none() && ui.layout("CAPFBDBasic").is_some() && ui.layout("CAPFaceBody").is_some() {
         cap.fbd = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFBDBasic", 6);
         cap.face_body = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFaceBody", 7);
@@ -823,10 +1185,11 @@ fn shape_panel(
             }
         }
         if let Some(s) = &cap.face_body {
-            // (Its sliders, the Advanced mode, aren't here.)
+            // (Advanced: the sliders, `CAPFBDAdvanced`.)
+            let tip = ui.localize("Ui/Tooltip/CAS/CAP/FaceBody:Advanced").filter(|t| !t.is_empty()).unwrap_or_else(|| "Advanced".into());
             for id in SHAPE_ADVANCED {
                 if let Some(e) = s.id(id) {
-                    commands.entity(e).insert(Visibility::Hidden);
+                    commands.entity(e).insert(crate::icons::Tooltip(tip.clone()));
                 }
             }
             if let (Some(grid), Some(g), Some(mut b)) = (s.id(SHAPE_GRID), ui.find("CAPFaceBody", SHAPE_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
@@ -854,6 +1217,15 @@ fn shape_panel(
     let pet = pending.pets[i].clone();
     let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
     let tabs = FBD_TABS.iter().find(|t| t.0 == species).and_then(|t| fbd.id(t.1));
+    // (The species' Advanced button: to its sliders, at the region shown, as `SetDefaultPart`.)
+    for (sp, id) in ["d", "c", "h"].into_iter().zip(SHAPE_ADVANCED) {
+        crate::livehud::set_visible(&mut vis, s.id(id), sp == species);
+        if sp == species && crate::livehud::pressed(&clicks, s.id(id)) {
+            let (region, body) = advanced_region(cap.shape_region, species == "h");
+            (cap.adv_open, cap.adv_region, cap.adv_body, cap.adv_scroll, cap.adv_shown) = (true, region, body, 0, None);
+            return;
+        }
+    }
     let offered: Vec<(u32, u32, &str, &str)> = SHAPE_TABS.iter().copied().filter(|t| !d.presets_for(&pet.kind, t.1).is_empty()).collect();
     if !offered.iter().any(|t| t.1 == cap.shape_region) {
         cap.shape_region = offered.first().map_or(s3bake::pets::PET_FULL_BODY, |t| t.1);
@@ -873,6 +1245,10 @@ fn shape_panel(
             let shapes = &mut pending.pets[i].shapes;
             shapes.retain(|s| d.presets.iter().find(|p| p.instance == *s).is_none_or(|p| p.region != region));
             shapes.push(c.0);
+            // (Its blends as it has them, not as the sliders last left them.)
+            if let Some(p) = d.presets.iter().find(|p| p.instance == c.0) {
+                pending.pets[i].sliders.retain(|(b, _)| !p.blends.iter().any(|x| x.0 == *b));
+            }
             info!("create a pet: shaped {}", d.presets.iter().find(|p| p.instance == c.0).map_or("", |p| p.name.as_str()));
         }
     }
@@ -1734,6 +2110,10 @@ fn cap_test(
                 Ok("hooves") => cap.ccm_tab = CcmTab::Hooves,
                 _ => {}
             }
+            // (CAP_ADV=<region, hex> (tests): Shape's sliders up, at that region.)
+            if let Some(r) = std::env::var("CAP_ADV").ok().and_then(|r| u32::from_str_radix(r.trim_start_matches("0x"), 16).ok()) {
+                (cap.adv_open, cap.adv_region, cap.adv_body) = (true, r, matches!(r, 2 | 0x200 | 0x400 | 0x800));
+            }
             if let Some(r) = std::env::var("CAP_REGION").ok().and_then(|r| r.parse::<u32>().ok()) {
                 cap.shape_region = r;
             }
@@ -1782,6 +2162,22 @@ mod tests {
         assert_eq!(accessory_kind(51, "ah"), "Bridle");
         assert_eq!(accessory_kind(51, "ad"), "Collar");
         assert_eq!(accessory_kind(52, "ah"), "Saddle");
+    }
+
+    #[test]
+    fn a_slider_sets_one_blend_or_the_other() {
+        let both = s3bake::pets::PetSlider { bidirectional: true, blends: [1, 2], ..Default::default() };
+        let one = s3bake::pets::PetSlider { blends: [3, 0], ..Default::default() };
+        // (Right: the first blend; left: the second, the first let go.)
+        assert_eq!(slider_set(&both, 0.5), vec![(1, 0.5), (2, 0.0)]);
+        assert_eq!(slider_set(&both, -0.25), vec![(1, 0.0), (2, 0.25)]);
+        assert_eq!(slider_set(&one, -1.0), vec![(3, 0.0)]);
+        assert_eq!(slider_value(&both, &[(1, 0.3), (2, 0.0)]), 0.3);
+        assert_eq!(slider_value(&both, &[(1, 0.3), (2, 0.6)]), -0.6);
+        assert_eq!(slider_value(&one, &[]), 0.0);
+        // (Where Shape's tabs open the sliders.)
+        assert_eq!(advanced_region(s3bake::pets::PET_SNOUT, true), (8, false));
+        assert_eq!(advanced_region(s3bake::pets::PET_FULL_BODY, false), (0x200, true));
     }
 
     #[test]

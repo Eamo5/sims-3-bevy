@@ -516,6 +516,12 @@ impl UiAssets {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find(|w| w.0 == id)).map(|w| &w.1)
     }
 
+    /// An interface picture's pixels (its width, height and RGBA): a hit mask's, to see where a
+    /// shaped button is.
+    pub fn image_pixels(&self, key: u64) -> Option<(u32, u32, Vec<u8>)> {
+        self.pack.get::<Vec<u8>>(&(s3bake::ui::T_IMAGE, 0, key)).and_then(|png| s3bake::gamedata::decode_icon(&png))
+    }
+
     /// An interface picture and its size.
     pub fn image(&mut self, images: &mut Assets<Image>, key: u64) -> Option<(Handle<Image>, Vec2)> {
         if key == 0 {

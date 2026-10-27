@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 9;
+pub const PETS_VERSION: u32 = 10;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -26,6 +26,59 @@ pub struct PetsBaked {
     /// Create a Pet's shapes (its compound blends, CBLN: `CAPFaceBody`'s presets).
     #[serde(default)]
     pub presets: Vec<PetPreset>,
+    /// Create a Pet's Advanced sliders (`CAPFBDAdvanced`).
+    #[serde(default)]
+    pub sliders: Vec<PetSlider>,
+}
+
+/// One of Create a Pet's Advanced sliders (a blend unit, BUNI): its name, the minimap's region
+/// it's under (`FacialBlendRegions`: 1 cheeks, 2 head, 8 muzzle, 0x10 nose, 0x20 ears, 0x80 eyes,
+/// 0x200 body, 0x400 legs, 0x1000 a dog's other ears), the species it's for
+/// (`FacialBlendCategories`: `SLIDERS_*`), its place, and its blends: the one it sets to the right
+/// (and, both ways, the one to the left).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PetSlider {
+    pub name: String,
+    pub region: u32,
+    pub category: u32,
+    pub sort: u32,
+    pub bidirectional: bool,
+    pub blends: [u64; 2],
+}
+
+/// The blend units' resource type.
+const T_BLEND_UNIT: u32 = 0xB52F_5055;
+/// The slider categories: cats and dogs alike, cats, dogs, little dogs, horses.
+pub const SLIDERS_COMMON: u32 = 0x1_0000;
+pub const SLIDERS_CAT: u32 = 0x2_0000;
+pub const SLIDERS_DOG: u32 = 0x4_0000;
+pub const SLIDERS_LITTLE_DOG: u32 = 0x8_0000;
+pub const SLIDERS_HORSE: u32 = 0x10_0000;
+
+/// A blend unit (BUNI, version 3): `u32` version, its keys' offset and size, the slider's name's
+/// string key, its blends (a count, each an index into the keys), whether it goes both ways, its
+/// region, category and place; then its keys (a count, each type, group, instance).
+pub fn parse_blend_unit(d: &[u8]) -> Option<(u64, [u64; 2], bool, u32, u32, u32)> {
+    let u32_at = |o: usize| d.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let tgi = 8 + u32_at(4)? as usize;
+    let loc = u64::from_le_bytes(d.get(12..20)?.try_into().ok()?);
+    let n = u32_at(20)? as usize;
+    let at = 24 + 4 * n;
+    let bidirectional = *d.get(at)? != 0;
+    let (region, category, sort) = (u32_at(at + 1)?, u32_at(at + 5)?, u32_at(at + 9)?);
+    let keys = u32_at(tgi)? as usize;
+    let key = |i: usize| -> Option<u64> {
+        let o = tgi + 4 + i * 16;
+        if i >= keys {
+            return None;
+        }
+        Some(u64::from_le_bytes(d.get(o + 8..o + 16)?.try_into().ok()?))
+    };
+    let mut blends = [0u64; 2];
+    for (k, b) in blends.iter_mut().enumerate().take(n.min(2)) {
+        *b = key(u32_at(24 + 4 * k)? as usize).unwrap_or(0);
+    }
+    Some((loc, blends, bidirectional, region, category, sort))
 }
 
 /// One of the pets' face or body blends ("muzzleShort"), and its bones' adjustments for each kind
@@ -60,14 +113,13 @@ pub const PET_EYES: u32 = 0x101;
 impl PetsBaked {
     /// A pet's bones' adjustments: its breed's blends, each region's shape chosen laid over them
     /// (a shape's blends at its amounts, in the breed's place), for its kind.
-    pub fn shape(&self, kind: &str, breed: &PetBreed, presets: &[u64]) -> Vec<crate::gamedata::FaceBone> {
-        let mut amounts: Vec<(u64, f32)> = breed.blends.clone();
-        for p in presets.iter().filter_map(|i| self.presets.iter().find(|p| p.instance == *i)) {
-            for (b, a) in &p.blends {
-                match amounts.iter_mut().find(|x| x.0 == *b) {
-                    Some(x) => x.1 = *a,
-                    None => amounts.push((*b, *a)),
-                }
+    pub fn shape(&self, kind: &str, breed: &PetBreed, presets: &[u64], set: &[(u64, f32)]) -> Vec<crate::gamedata::FaceBone> {
+        let mut amounts = self.amounts(breed, presets);
+        // (The Advanced sliders' amounts last, over the rest.)
+        for (b, a) in set {
+            match amounts.iter_mut().find(|x| x.0 == *b) {
+                Some(x) => x.1 = *a,
+                None => amounts.push((*b, *a)),
             }
         }
         let mut out = Vec::new();
@@ -77,6 +129,34 @@ impl PetsBaked {
             }
         }
         out
+    }
+
+    /// A pet's blends' amounts: its breed's, each shape chosen laid over them.
+    pub fn amounts(&self, breed: &PetBreed, presets: &[u64]) -> Vec<(u64, f32)> {
+        let mut amounts: Vec<(u64, f32)> = breed.blends.clone();
+        for p in presets.iter().filter_map(|i| self.presets.iter().find(|p| p.instance == *i)) {
+            for (b, a) in &p.blends {
+                match amounts.iter_mut().find(|x| x.0 == *b) {
+                    Some(x) => x.1 = *a,
+                    None => amounts.push((*b, *a)),
+                }
+            }
+        }
+        amounts
+    }
+
+    /// The Advanced sliders for a kind of pet under a region of the minimap: its species' own,
+    /// then (but for horses) those cats and dogs share (`PopulateSliderGrid`).
+    pub fn sliders_for(&self, kind: &str, region: u32) -> Vec<&PetSlider> {
+        let own = match kind.get(1..) {
+            Some("c") => SLIDERS_CAT,
+            Some("d") => SLIDERS_DOG,
+            Some("l") => SLIDERS_LITTLE_DOG,
+            _ => SLIDERS_HORSE,
+        };
+        let common = (own != SLIDERS_HORSE).then_some(SLIDERS_COMMON);
+        let mine = |c: u32| self.sliders.iter().filter(move |s| s.category == c && s.region == region);
+        mine(own).chain(common.into_iter().flat_map(mine)).collect()
     }
 
     /// The shapes Create a Pet offers a kind of pet for a region (its species'), in the game's order.
@@ -512,7 +592,23 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         let digits: String = p.name.chars().filter(|c| c.is_ascii_digit()).collect();
         (p.region, p.name.to_ascii_lowercase().trim_end_matches(|c: char| c.is_ascii_digit()).to_string(), digits.parse::<u32>().unwrap_or(0))
     });
-    let mut wanted: Vec<u64> = breeds.iter().flat_map(|b| b.blends.iter().map(|x| x.0)).chain(presets.iter().flat_map(|p| p.blends.iter().map(|x| x.0))).collect();
+    // Create a Pet's Advanced sliders (its blend units, BUNI: their names, regions, the species
+    // they're for, their order, and their blends either way).
+    let strings = s3formats::stbl::load_english(pkgs);
+    let mut sliders: Vec<PetSlider> = pkgs
+        .keys_of_type(T_BLEND_UNIT)
+        .filter(|k| k.g == 0x4800_0000)
+        .filter_map(|k| parse_blend_unit(&read(k)?))
+        .map(|(loc, blends, bidirectional, region, category, sort)| PetSlider { name: strings.get(&loc).cloned().unwrap_or_default(), region, category, sort, bidirectional, blends })
+        .collect();
+    sliders.sort_by_key(|s| (s.category, s.region, s.sort, s.name.clone()));
+    sliders.dedup_by(|a, b| (a.category, a.region, &a.name, a.blends) == (b.category, b.region, &b.name, b.blends));
+    let mut wanted: Vec<u64> = breeds
+        .iter()
+        .flat_map(|b| b.blends.iter().map(|x| x.0))
+        .chain(presets.iter().flat_map(|p| p.blends.iter().map(|x| x.0)))
+        .chain(sliders.iter().flat_map(|s| s.blends).filter(|b| *b != 0))
+        .collect();
     wanted.sort();
     wanted.dedup();
     const SHAPED: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
@@ -528,7 +624,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
     .into_iter()
     .flatten()
     .collect();
-    write_value(&root.global_dir().join("pets.bin"), &PetsBaked { version: PETS_VERSION, kinds, breeds, blends, presets }).map_err(|e| e.to_string())?;
+    write_value(&root.global_dir().join("pets.bin"), &PetsBaked { version: PETS_VERSION, kinds, breeds, blends, presets, sliders }).map_err(|e| e.to_string())?;
     Ok(n)
 }
 
@@ -547,14 +643,35 @@ mod tests {
         };
         let breed = PetBreed { kind: "ad".into(), blends: vec![(1, 0.5)], ..Default::default() };
         let y = |bones: &[crate::gamedata::FaceBone], b: u32| bones.iter().find(|x| x.bone == b).map_or(0.0, |x| x.offset[1]);
-        let plain = data.shape("ad", &breed, &[]);
+        let plain = data.shape("ad", &breed, &[], &[]);
         assert_eq!((y(&plain, 7), y(&plain, 8)), (0.5, 0.0));
         // (The shape's amounts in place of the breed's; its own blends besides.)
-        let shaped = data.shape("ad", &breed, &[9]);
+        let shaped = data.shape("ad", &breed, &[9], &[]);
         assert_eq!((y(&shaped, 7), y(&shaped, 8)), (0.25, 1.0));
-        assert!(data.shape("ac", &breed, &[9]).is_empty(), "a dog's blends aren't a cat's");
+        assert!(data.shape("ac", &breed, &[9], &[]).is_empty(), "a dog's blends aren't a cat's");
+        // (A slider's over both.)
+        let slid = data.shape("ad", &breed, &[9], &[(2, 0.0)]);
+        assert_eq!((y(&slid, 7), y(&slid, 8)), (0.25, 0.0));
         assert_eq!(data.presets_for("ad", PET_SNOUT).len(), 1);
         assert!(data.presets_for("ac", PET_SNOUT).is_empty());
+        // (A dog's sliders: its own, then those cats and dogs share; a horse's, its own.)
+        let slider = |c: u32, name: &str| PetSlider { name: name.into(), region: 8, category: c, ..Default::default() };
+        let data = PetsBaked { sliders: vec![slider(SLIDERS_COMMON, "Muzzle Depth"), slider(SLIDERS_DOG, "Muzzle Height"), slider(SLIDERS_HORSE, "Muzzle Length")], ..Default::default() };
+        let names = |k: &str| data.sliders_for(k, 8).iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names("ad"), ["Muzzle Height", "Muzzle Depth"]);
+        assert_eq!(names("ah"), ["Muzzle Length"]);
+    }
+
+    #[test]
+    fn a_blend_unit_names_its_slider_and_its_blends() {
+        // (The pack's: a slider one way, then one both ways.)
+        let one = [3u8, 0, 0, 0, 0x21, 0, 0, 0, 0x14, 0, 0, 0, 0x54, 0x14, 0xB8, 0x3A, 0x7F, 0x8D, 0xD5, 0x4B, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0x20, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0x8A, 0xB0, 0x58, 3, 0, 0, 0, 0x48, 0xE0, 0x99, 0xCA, 0xE4, 0x47, 0x8C, 0x14, 0x93];
+        let (loc, blends, both, region, category, _) = parse_blend_unit(&one).unwrap();
+        assert_eq!((loc, blends, both), (0x4BD5_8D7F_3AB8_1454, [0x9314_8C47_E4CA_99E0, 0], false));
+        assert_eq!((region, category), (0x20, SLIDERS_CAT));
+        let two = [3u8, 0, 0, 0, 0x25, 0, 0, 0, 0x24, 0, 0, 0, 0xA7, 0x94, 0x96, 0x30, 0x30, 0xE7, 0x1B, 0x1D, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0x10, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0x8A, 0xB0, 0x58, 3, 0, 0, 0, 0x48, 0x0A, 0xA8, 0x26, 0xF7, 0x7E, 0x04, 0xA6, 0x5E, 0x8A, 0xB0, 0x58, 3, 0, 0, 0, 0x48, 0xF7, 0x47, 0xB8, 0x4A, 0, 0x9C, 0xF5, 0x67];
+        let (_, blends, both, region, category, _) = parse_blend_unit(&two).unwrap();
+        assert_eq!((blends, both, region, category), ([0x5EA6_047E_F726_A80A, 0x67F5_9C00_4AB8_47F7], true, 0x1000, SLIDERS_DOG));
     }
 
     #[test]

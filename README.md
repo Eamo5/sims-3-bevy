@@ -1604,7 +1604,11 @@ installation is unreachable.
   body, head, eyes, snout and ears, those it has shapes for, and the chosen one's shapes, the
   pack's compound blends, two by two with the game's own pictures of each for the pet's species,
   age and sex; a click shapes the pet so, the shape's blends laid over its breed's, one shape a
-  region, the latest over the rest); and Coat (`CAPCoat` in its `CAPCCMBasic` frame: the coats of
+  region, the latest over the rest; Advanced, `CAPFBDAdvanced`: the species' minimap, its head or
+  its body, a region clicked where its picture is, as the game's hit masks find it, and the
+  region's sliders in the game's rows, the pack's blend units, BUNI: the species' own and those
+  cats and dogs share, both ways or one, set from the pet's blends and shaping it as they move,
+  kept with the pet; a shape picked after sets its blends afresh); and Coat (`CAPCoat` in its `CAPCCMBasic` frame: the coats of
   its kind, each breed's, two by two with the game's pictures, a click giving the pet that coat on
   its own build, as the game's `colorationOnly`; under them, colours to shift the coat to, the
   picker for any other, the bin back to its own: its hue the colour's and its markings kept,
@@ -1619,7 +1623,7 @@ installation is unreachable.
   listed breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker|accessories|shape|coat]`
   with `CAP_SHOT=<png>`, `CAP_WEAR=<part>,...`, `CAP_BREED=<outfit>`, `CAP_SHAPE=<shape>,...`,
   `CAP_REGION=<region>`, `CAP_COAT=<outfit>`, `CAP_TINT=r,g,b`, `CAP_CCM=tail|mane|hooves`,
-  `CAP_PICK=<n>` (tests).
+  `CAP_PICK=<n>`, `CAP_ADV=<region>`, `CAP_SLIDE=<slider>:<value>` (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -1815,7 +1819,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting, fur shapes and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting and fur shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
