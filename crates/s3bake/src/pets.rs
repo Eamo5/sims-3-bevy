@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 8;
+pub const PETS_VERSION: u32 = 9;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -102,6 +102,9 @@ pub struct PetBreed {
     pub tail: Option<String>,
     pub ears: Option<String>,
     pub mane: Option<String>,
+    /// A horse's hoof hair (none: bare hooves).
+    #[serde(default)]
+    pub hooves: Option<String>,
     /// Its name, as Create a Pet's breeds list has it (`CAPPetBreeds`: the mixed breed's
     /// "Create Cat"…), and its place in that list (the mixed breed first, then by name); none
     /// for an outfit not on it.
@@ -140,6 +143,9 @@ pub struct PetKind {
     pub tails: Vec<PetPart>,
     pub ears: Vec<PetPart>,
     pub manes: Vec<PetPart>,
+    /// A horse's hoof hair (Create a Pet's Feathering).
+    #[serde(default)]
+    pub hooves: Vec<PetPart>,
     /// Coat regions and markings.
     pub regions: Vec<PetRegion>,
     /// A horse's riding tack (`TACK`: the English saddle and the bridle), each mesh in its
@@ -188,13 +194,15 @@ const KINDS: [(&str, &str); 8] = [("ac", "acRig"), ("cc", "ccRig"), ("ad", "adRi
 const PT_SADDLE: u32 = 52;
 const PT_BRIDLE: u32 = 51;
 /// The CAS part types Create a Pet's Accessories dresses a pet in: a collar or bridle (51), a
-/// saddle (52), and a horse's blankets, leg wraps and the rest (55 to 59).
-pub const ACCESSORY_TYPES: [u32; 7] = [51, 52, 55, 56, 57, 58, 59];
+/// saddle (52), a horse's blanket (57) and breast collar (58). (A horse's hoof hair, 55, is the coat
+/// frame's Feathering; a unicorn's horn and beard, 56 and 59, its own.)
+pub const ACCESSORY_TYPES: [u32; 4] = [51, 52, 57, 58];
 /// The riding tack a horse wears ridden: the game's English saddle and plain bridle.
 pub const TACK: [&str; 2] = ["ahSaddleEnglishRiding", "ahBridle"];
 const PT_TAIL: u32 = 48;
 const PT_EARS: u32 = 49;
 const PT_MANE: u32 = 50;
+const PT_HOOVES: u32 = 55;
 const PT_REGION: u32 = 53;
 const PT_BASE: u32 = 54;
 const PT_BODY: u32 = 47;
@@ -328,7 +336,9 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
             .collect();
         textures.extend(regions.iter().map(|r| (r.mask, false)));
         let (tails, ears, manes) = (parts(PT_TAIL), parts(PT_EARS), parts(PT_MANE));
-        for m in tails.iter().chain(&ears).chain(&manes).flat_map(|p| &p.meshes) {
+        // (The unicorn's hoof hair is the unicorn's.)
+        let hooves: Vec<PetPart> = parts(PT_HOOVES).into_iter().filter(|p| !p.name.contains("Unicorn")).collect();
+        for m in tails.iter().chain(&ears).chain(&manes).chain(&hooves).flat_map(|p| &p.meshes) {
             textures.extend(m.texture.map(|t| (t, false)));
         }
         // (The tack, its default preset drawn as its texture.)
@@ -370,7 +380,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 (!meshes.is_empty()).then(|| PetAccessory { name: c.name.clone(), instance: instance_of.get(&c.name).copied().unwrap_or(0), part_type: c.clothing_type, meshes })
             })
             .collect();
-        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, regions, tack, accessories });
+        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, hooves, regions, tack, accessories });
     }
     // The breeds: each outfit's coat painted.
     progress("Converting: pet breeds…");
@@ -442,7 +452,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         }
         // Its build: the outfit's face and body blends, at their amounts.
         let blends = o.faces.iter().map(|(k, a)| (k.i, *a)).collect();
-        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), name: String::new(), listed: None, thumb: Vec::new(), blends })
+        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), hooves: part(PT_HOOVES), name: String::new(), listed: None, thumb: Vec::new(), blends })
     })
     .into_iter()
     .flatten()

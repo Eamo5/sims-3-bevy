@@ -123,7 +123,7 @@ pub struct Cap {
     tmh_cells: Option<Entity>,
     tmh_bar: Option<Entity>,
     tmh_scroll: usize,
-    tmh_shown: Option<(usize, bool, Option<String>, usize, bool)>,
+    tmh_shown: Option<(usize, CcmTab, String, usize, bool)>,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -182,6 +182,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         tint: None,
         tail: None,
         mane: None,
+        hooves: None,
     })
 }
 
@@ -263,7 +264,7 @@ fn pet_stage(
     // (Made again for another breed, or another shape.)
     let want = pet.map(|p| {
         let tint = p.tint.map_or(0, |c| c.iter().fold(1u64, |a, v| a << 8 | (v * 255.0) as u64));
-        let parts = [&p.tail, &p.mane].map(|n| n.as_deref().map_or(0, s3pkg::fnv64));
+        let parts = [&p.tail, &p.mane, &p.hooves].map(|n| n.as_deref().map_or(0, |n| s3pkg::fnv64(n) | 1));
         p.shapes.iter().chain(p.coat.iter()).chain(std::iter::once(&tint)).chain(parts.iter()).fold(p.outfit, |h, s| h.rotate_left(7) ^ s)
     });
     if cap.model.map(|m| m.1) != want {
@@ -962,6 +963,8 @@ const CCM_LONG: u32 = 0x05db_9d00;
 const CCM_SHORT: u32 = 0x05db_9d01;
 /// The long backing's height under Coat (`SetLongPanelHeight`: down past its colours).
 const CCM_LONG_HEIGHT: f32 = 530.0;
+/// The short one's under the tail, mane and feathering (down past their grid).
+const CCM_SHORT_HEIGHT: f32 = 370.0;
 /// The frame's buttons, and the tab each opens (none: not here): Coat, Fur Shape, Mane, Tail,
 /// Hooves, Unicorn.
 const CCM_BUTTONS: [(u32, Option<CcmTab>); 6] = [
@@ -969,7 +972,7 @@ const CCM_BUTTONS: [(u32, Option<CcmTab>); 6] = [
     (0x05db_9c06, None),
     (0x05db_9c09, Some(CcmTab::Mane)),
     (0x05db_9c0a, Some(CcmTab::Tail)),
-    (0x05db_9c0c, None),
+    (0x05db_9c0c, Some(CcmTab::Hooves)),
     (0x05db_9c0f, None),
 ];
 
@@ -980,6 +983,8 @@ enum CcmTab {
     Coat,
     Tail,
     Mane,
+    /// A horse's feathering (its hoof hair).
+    Hooves,
 }
 
 /// A tail's or mane's cell (its part's name).
@@ -1030,31 +1035,35 @@ fn tmh_panel(
     };
     let pet = pending.pets[i].clone();
     let (Some(kind), Some(breed)) = (d.kinds.iter().find(|k| k.code == pet.kind), d.breeds.iter().find(|b| b.outfit == pet.outfit)) else { return };
-    let mane = cap.ccm_tab == CcmTab::Mane;
-    let list = if mane { &kind.manes } else { &kind.tails };
-    let own = if mane { breed.mane.clone() } else { breed.tail.clone() };
+    let tab = cap.ccm_tab;
+    // (Its parts; a horse's feathering has bare hooves first: an empty name.)
+    let (parts, own): (Vec<(String, u64)>, String) = match tab {
+        CcmTab::Mane => (kind.manes.iter().map(|p| (p.name.clone(), p.instance)).collect(), breed.mane.clone().unwrap_or_default()),
+        CcmTab::Hooves => (std::iter::once((String::new(), 0)).chain(kind.hooves.iter().map(|p| (p.name.clone(), p.instance))).collect(), breed.hooves.clone().unwrap_or_default()),
+        _ => (kind.tails.iter().map(|p| (p.name.clone(), p.instance)).collect(), breed.tail.clone().unwrap_or_default()),
+    };
+    fn slot(p: &mut SavedPet, tab: CcmTab) -> &mut Option<String> {
+        match tab {
+            CcmTab::Mane => &mut p.mane,
+            CcmTab::Hooves => &mut p.hooves,
+            _ => &mut p.tail,
+        }
+    }
     for (x, c) in &cells {
         if *x == Interaction::Pressed {
-            let pick = (Some(&c.0) != own.as_ref()).then(|| c.0.clone());
-            if mane {
-                pending.pets[i].mane = pick;
-            } else {
-                pending.pets[i].tail = pick;
-            }
+            *slot(&mut pending.pets[i], tab) = (c.0 != own).then(|| c.0.clone());
         }
     }
     // (CAP_PICK=<n> (tests): the nth chosen, once.)
     if let Some(n) = std::env::var("CAP_PICK").ok().and_then(|v| v.parse::<usize>().ok()).filter(|_| cap.tmh_shown.is_none())
-        && let Some(p) = list.get(n)
+        && let Some((p, _)) = parts.get(n)
     {
-        if mane {
-            pending.pets[i].mane = Some(p.name.clone());
-        } else {
-            pending.pets[i].tail = Some(p.name.clone());
-        }
-        info!("create a pet test: the {} {}", if mane { "mane" } else { "tail" }, p.name);
+        *slot(&mut pending.pets[i], tab) = Some(p.clone());
+        info!("create a pet test: the {tab:?} {p:?}");
     }
-    let worn = if mane { pending.pets[i].mane.clone() } else { pending.pets[i].tail.clone() }.or(own);
+    let worn = slot(&mut pending.pets[i], tab).clone().unwrap_or(own);
+    let list = parts;
+    let mane = tab;
     let Some(g) = ui.find("CAPColoringTMH", COATS_GRID).and_then(|w| w.grid) else { return };
     let cols = g.columns.max(1) as usize;
     let rows = list.len().div_ceil(cols);
@@ -1081,7 +1090,11 @@ fn tmh_panel(
     }
     cap.tmh_shown = Some(want);
     if let Some(t) = s.text(COAT_TITLE) {
-        let (key, or) = if mane { ("Ui/Caption/CAS/CAP/Mane:Title", "Mane") } else { ("Ui/Caption/CAS/CAP/Tail:Title", "Tail") };
+        let (key, or) = match tab {
+            CcmTab::Mane => ("Ui/Caption/CAS/CAP/Mane:Title", "Mane"),
+            CcmTab::Hooves => ("Ui/Caption/CAS/CAP/Hooves:Title", "Feathering"),
+            _ => ("Ui/Caption/CAS/CAP/Tail:Title", "Tail"),
+        };
         commands.entity(t).insert(Text::new(ui.localize(key).filter(|t| !t.is_empty()).unwrap_or_else(|| or.into())));
     }
     if let Some(old) = cap.tmh_cells.take() {
@@ -1092,7 +1105,7 @@ fn tmh_panel(
     commands.entity(grid).insert_children(0, &[holder]);
     cap.tmh_cells = Some(holder);
     let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
-    for (n, p) in list.iter().enumerate().skip(cap.tmh_scroll * cols).take(cols * g.rows.max(1) as usize) {
+    for (n, (name, instance)) in list.iter().enumerate().skip(cap.tmh_scroll * cols).take(cols * g.rows.max(1) as usize) {
         let k = n - cap.tmh_scroll * cols;
         let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
         let mut cell = template.clone();
@@ -1100,11 +1113,14 @@ fn tmh_panel(
         cell.cls = "Button".into();
         let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
         let Some(root) = c.root else { continue };
-        commands.entity(root).insert((PartCell(p.name.clone()), crate::icons::Tooltip(part_words(&p.name))));
-        if worn.as_deref() == Some(p.name.as_str()) {
+        let tip = if name.is_empty() { "None".to_string() } else { part_words(name) };
+        commands.entity(root).insert((PartCell(name.clone()), crate::icons::Tooltip(tip)));
+        if worn == *name {
             commands.entity(root).insert(crate::layout::Selected);
         }
-        if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(p.instance)))) {
+        // (Bare hooves: the game's empty cell, `AddHairTypeGridItem(null)`.)
+        let pic = (*instance != 0).then(|| gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(*instance)))).flatten();
+        if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), pic) {
             crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
         }
     }
@@ -1155,6 +1171,9 @@ fn coat_panel(
             if let Some(e) = f.id(CCM_LONG) {
                 commands.entity(e).entry::<Node>().and_modify(|mut n| n.height = Val::Px(CCM_LONG_HEIGHT));
             }
+            if let Some(e) = f.id(CCM_SHORT) {
+                commands.entity(e).entry::<Node>().and_modify(|mut n| n.height = Val::Px(CCM_SHORT_HEIGHT));
+            }
             if let Some(e) = f.id(CCM_CLOSE) {
                 commands.entity(e).insert(crate::icons::Tooltip("Close".into()));
             }
@@ -1199,7 +1218,7 @@ fn coat_panel(
         // (The frame's tabs for its species: Coat, Tail, a horse's Mane; the fur's shape, hooves
         // and horn aren't here.)
         let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
-        let offered = |tab: CcmTab| tab != CcmTab::Mane || species == "h";
+        let offered = |tab: CcmTab| !matches!(tab, CcmTab::Mane | CcmTab::Hooves) || species == "h";
         for (sp, panel) in CCM_TABS {
             crate::livehud::set_visible(&mut vis, frame.id(panel), sp == species);
             let Some(p) = frame.id(panel) else { continue };
@@ -1225,6 +1244,11 @@ fn coat_panel(
         if !offered(cap.ccm_tab) {
             cap.ccm_tab = CcmTab::Coat;
         }
+        // (The long backing under the coat and its colours; the short one, cut to the grid, under
+        // the parts: `SetLongPanel`, `SetShortPanelHeight`.)
+        let long = cap.ccm_tab == CcmTab::Coat;
+        crate::livehud::set_visible(&mut vis, frame.id(CCM_LONG), long);
+        crate::livehud::set_visible(&mut vis, frame.id(CCM_SHORT), !long);
     }
     let on = on && cap.ccm_tab == CcmTab::Coat;
     crate::livehud::set_visible(&mut vis, s.root, on);
@@ -1353,10 +1377,8 @@ fn accessory_kind(part_type: u32, kind: &str) -> &'static str {
         (51, "ah") => "Bridle",
         (51, _) => "Collar",
         (52, _) => "Saddle",
-        (55, _) => "Blanket",
-        (56, _) => "Leg Wraps",
-        (57, _) => "Breastplate",
-        (58, _) => "Saddle Pad",
+        (57, _) => "Blanket",
+        (58, _) => "Breast Collar",
         _ => "Accessory",
     }
 }
@@ -1709,6 +1731,7 @@ fn cap_test(
             match std::env::var("CAP_CCM").as_deref() {
                 Ok("tail") => cap.ccm_tab = CcmTab::Tail,
                 Ok("mane") => cap.ccm_tab = CcmTab::Mane,
+                Ok("hooves") => cap.ccm_tab = CcmTab::Hooves,
                 _ => {}
             }
             if let Some(r) = std::env::var("CAP_REGION").ok().and_then(|r| r.parse::<u32>().ok()) {

@@ -1608,8 +1608,9 @@ installation is unreachable.
   its kind, each breed's, two by two with the game's pictures, a click giving the pet that coat on
   its own build, as the game's `colorationOnly`; under them, colours to shift the coat to, the
   picker for any other, the bin back to its own: its hue the colour's and its markings kept,
-  lighter and darker as they were), the frame's Tail and a horse's Mane (`CAPColoringTMH`: the
-  kind's tails or manes with the game's pictures, a click putting one on). Every breed is built as
+  lighter and darker as they were), the frame's Tail, and a horse's Mane and Feathering
+  (`CAPColoringTMH`: the kind's tails, manes or hoof hair with the game's pictures, a click putting
+  one on; Feathering's first cell bare hooves, as the game's empty cell). Every breed is built as
   the game builds it: its outfit's
   face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
   long legs), their bone adjustments for its kind added to its skeleton under its animations.
@@ -1617,7 +1618,7 @@ installation is unreachable.
   what they were given, shaped and coated as they were (kept in saves). Adopted pets are of the
   listed breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker|accessories|shape|coat]`
   with `CAP_SHOT=<png>`, `CAP_WEAR=<part>,...`, `CAP_BREED=<outfit>`, `CAP_SHAPE=<shape>,...`,
-  `CAP_REGION=<region>`, `CAP_COAT=<outfit>`, `CAP_TINT=r,g,b`, `CAP_CCM=tail|mane`,
+  `CAP_REGION=<region>`, `CAP_COAT=<outfit>`, `CAP_TINT=r,g,b`, `CAP_CCM=tail|mane|hooves`,
   `CAP_PICK=<n>` (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
@@ -1814,7 +1815,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting, fur shapes, a horse's feathering and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting, fur shapes and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
