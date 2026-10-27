@@ -34,6 +34,8 @@ pub enum PickFor {
     Eyes,
     Brows,
     Hair,
+    /// A pet's coat's colour (Create a Pet's Coat: `cap`).
+    Coat,
 }
 
 impl PickFor {
@@ -43,6 +45,7 @@ impl PickFor {
             PickFor::Eyes => ("Ui/Caption/CAS/Physical:EyeColor", "Eye Color"),
             PickFor::Brows => ("Ui/Caption/CAS/Physical:EyebrowColor", "Eyebrow Color"),
             PickFor::Hair => ("Ui/Caption/CAS/Hair:HairColor", "Hair Color"),
+            PickFor::Coat => ("Ui/Caption/CAS/CAP/Coat:Title", "Coat Color"),
         }
     }
 
@@ -51,7 +54,7 @@ impl PickFor {
     fn swatches(self) -> Vec<[f32; 3]> {
         match self {
             PickFor::Eyes => crate::sim::EYES.iter().map(|c| [c.0, c.1, c.2]).collect(),
-            PickFor::Brows | PickFor::Hair => crate::sim::HAIRS.iter().map(|c| [c.0, c.1, c.2]).collect(),
+            PickFor::Brows | PickFor::Hair | PickFor::Coat => crate::sim::HAIRS.iter().map(|c| [c.0, c.1, c.2]).collect(),
         }
     }
 
@@ -61,6 +64,7 @@ impl PickFor {
             PickFor::Eyes => CasAction::EyeRgb(rgb),
             PickFor::Brows => CasAction::BrowRgb(rgb),
             PickFor::Hair => CasAction::HairRgb(rgb),
+            PickFor::Coat => CasAction::CoatRgb(rgb),
         }
     }
 }

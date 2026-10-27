@@ -156,6 +156,11 @@ impl ObjectAssets {
         handle
     }
 
+    /// A texture already made (none: not yet asked for; Some(None): asked for, not to be had).
+    pub fn cached_texture(&self, key: Key) -> Option<Option<Handle<Image>>> {
+        self.textures.get(&key).cloned()
+    }
+
     pub fn ingest_texture(&mut self, images: &mut Assets<Image>, key: Key, img: Option<Image>) {
         if !self.textures.contains_key(&key) {
             let h = img.map(|i| images.add(i));

@@ -93,6 +93,8 @@ pub enum CasAction {
     EyeRgb([f32; 3]),
     /// Their hair's colour, and their eyebrows', their own (from the game's colour picker).
     HairRgb([f32; 3]),
+    /// A pet's coat's colour (`cap`'s: no Sim's).
+    CoatRgb([f32; 3]),
     BrowRgb([f32; 3]),
     /// Voice `i` (of the three).
     Voice(u8),
@@ -728,6 +730,7 @@ fn cas_actions(
             CasAction::BrowRgb([r, g, b]) => {
                 pending.members[k].brow_hair = Some(Color::srgb(r, g, b));
             }
+            CasAction::CoatRgb(_) => {}
             CasAction::LifeState(o) => {
                 pending.members[k].occult = o.and_then(|i| crate::sim::Occult::ALL.get(i).copied());
             }

@@ -59,8 +59,8 @@ pub struct Pet {
     pub breed: usize,
     pub name: String,
     pub female: bool,
-    /// Its shapes (Create a Pet's Shape presets, by instance).
-    pub shapes: Vec<u64>,
+    /// How it looks beyond its breed (Create a Pet's Shape and Coat).
+    pub look: PetLook,
 }
 
 impl Pet {
@@ -426,7 +426,7 @@ pub fn spawn_pet(
     (name, female): (String, bool),
     pos: Vec3,
     yaw: f32,
-    shapes: &[u64],
+    look: &PetLook,
     ctx: &mut AssetCtx,
     assets: &mut ObjectAssets,
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
@@ -438,14 +438,14 @@ pub fn spawn_pet(
         .spawn((
             Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
             Visibility::default(),
-            Pet { kind: b.kind.clone(), breed, name, female, shapes: shapes.to_vec() },
+            Pet { kind: b.kind.clone(), breed, name, female, look: look.clone() },
             PetAnim::default(),
             DespawnOnExit(AppState::InGame),
         ))
         .id();
     // The skeleton, as a Sim's: the skin bound to the rig as it is, the breed's build moving its
     // bones from there.
-    let build = bone_shapes(&data.shape(&b.kind, b, shapes));
+    let build = bone_shapes(&data.shape(&b.kind, b, &look.shapes));
     let mut joints = Vec::with_capacity(rig.bones.len());
     let mut bind = Vec::with_capacity(rig.bones.len());
     let mut shape = Vec::with_capacity(rig.bones.len());
@@ -469,8 +469,20 @@ pub fn spawn_pet(
         commands.entity(p).add_child(joints[i]);
     }
     let inverse = bindposes.add(SkinnedMeshInverseBindposes::from(world.iter().map(|m| m.inverse()).collect::<Vec<_>>()));
-    // The coat over the fur, nose and pads; dark glossy eyes.
-    let coat = assets.texture(ctx, b.coat);
+    // The coat over the fur, nose and pads (another breed's of its kind, where it has one; its
+    // colour shifted, where it's been given one); dark glossy eyes.
+    let coat_key = look.coat.and_then(|o| data.breeds.iter().find(|x| x.outfit == o && x.kind == b.kind)).map_or(b.coat, |x| x.coat);
+    let coat = match look.tint {
+        Some(t) => {
+            let key = tint_key(coat_key, t);
+            if assets.cached_texture(key).is_none() {
+                let img = ctx.baked.texture_bytes(&coat_key).and_then(|d| hue_shifted(&d, t));
+                assets.ingest_texture(ctx.images, key, img);
+            }
+            assets.cached_texture(key).flatten().or_else(|| assets.texture(ctx, coat_key))
+        }
+        None => assets.texture(ctx, coat_key),
+    };
     let fur = ctx.materials.add(StandardMaterial { base_color_texture: coat, perceptual_roughness: 0.92, reflectance: 0.15, ..default() });
     let eyes = ctx.materials.add(StandardMaterial { base_color: Color::srgb(0.06, 0.05, 0.04), perceptual_roughness: 0.15, reflectance: 0.6, ..default() });
     let named = |list: &[s3bake::pets::PetPart], name: &Option<String>| -> Vec<s3bake::SkinMesh> {
@@ -497,6 +509,83 @@ pub fn spawn_pet(
     }
     commands.entity(root).insert(PetSkeleton { rig, joints, bind, inverse, shape });
     Some(root)
+}
+
+/// The texture-store key of a coat shifted to a colour.
+fn tint_key(k: s3bake::Key, c: [f32; 3]) -> s3bake::Key {
+    let rgb = c.iter().fold(0u32, |a, v| a << 8 | (v.clamp(0.0, 1.0) * 255.0) as u32);
+    (k.0 ^ 0x6000_0000 ^ rgb, k.1, k.2)
+}
+
+/// A colour's hue, saturation and value (0 to 1 each).
+fn hsv([r, g, b]: [f32; 3]) -> [f32; 3] {
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let d = mx - mn;
+    let h = if d <= 0.0 {
+        0.0
+    } else if mx == r {
+        ((g - b) / d).rem_euclid(6.0) / 6.0
+    } else if mx == g {
+        ((b - r) / d + 2.0) / 6.0
+    } else {
+        ((r - g) / d + 4.0) / 6.0
+    };
+    [h, if mx > 0.0 { d / mx } else { 0.0 }, mx]
+}
+
+fn rgb([h, s, v]: [f32; 3]) -> [f32; 3] {
+    let i = (h.rem_euclid(1.0) * 6.0).floor();
+    let f = h.rem_euclid(1.0) * 6.0 - i;
+    let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
+    match i as u32 {
+        0 => [v, t, p],
+        1 => [q, v, p],
+        2 => [p, v, t],
+        3 => [p, q, v],
+        4 => [t, p, v],
+        _ => [v, p, q],
+    }
+}
+
+/// A coat's pixel shifted to a colour (the game's `RequestPeltHueShift`): its hue the colour's,
+/// its saturation and brightness moved as the colour's are from the coat's own on the whole, so
+/// its markings stay as they were, lighter and darker.
+pub fn shift_pixel(px: [f32; 3], mean: [f32; 2], target: [f32; 3]) -> [f32; 3] {
+    let [_, s, v] = hsv(px);
+    let [th, ts, tv] = hsv(target);
+    // (A coat of greys has no saturation of its own to keep: the colour's, even.)
+    // (A greyish coat's saturation is the fur's noise: kept the less, the greyer it is.)
+    let keep = ((mean[0] - 0.15) / 0.25).clamp(0.0, 1.0);
+    let rel = (1.0 + (s / mean[0].max(0.01) - 1.0) * keep).clamp(0.0, 1.6);
+    let s = (ts * rel).clamp(0.0, 1.0);
+    // (Its light and shade as they were about the colour's brightness, no stronger than they were.)
+    let v = (tv + (v - mean[1]) * (tv / mean[1].max(0.05)).min(1.0)).clamp(0.0, 1.0);
+    rgb([th, s, v])
+}
+
+/// A coat (DDS bytes) shifted to a colour.
+fn hue_shifted(dds: &[u8], target: [f32; 3]) -> Option<Image> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let mut img = s3formats::dds::decode(dds, 1024)?;
+    let px = |p: &[u8]| [p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0];
+    let n = (img.data.len() / 4).max(1) as f32;
+    let sum = img.data.chunks_exact(4).fold([0.0f32; 2], |a, p| {
+        let [_, s, v] = hsv(px(p));
+        [a[0] + s, a[1] + v]
+    });
+    let mean = [sum[0] / n, sum[1] / n];
+    for p in img.data.chunks_exact_mut(4) {
+        let c = shift_pixel(px(p), mean, target);
+        for k in 0..3 {
+            p[k] = (c[k] * 255.0).round() as u8;
+        }
+    }
+    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::new(Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, mips, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    out.texture_descriptor.mip_level_count = levels;
+    out.sampler = crate::objects::sampler();
+    Some(out)
 }
 
 /// A pet's bones' shapes, by bone (its breed's build and the shapes chosen for it: `PetsBaked::shape`).
@@ -720,6 +809,28 @@ pub struct SavedPet {
     /// Its shapes (Create a Pet's Shape: a preset's instance for each region chosen).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shapes: Vec<u64>,
+    /// Its coat, where it's another breed's (Create a Pet's Coat: that breed's outfit), and the
+    /// colour it's shifted to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coat: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tint: Option<[f32; 3]>,
+}
+
+impl SavedPet {
+    /// How it looks, beyond its breed.
+    pub fn look(&self) -> PetLook {
+        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint }
+    }
+}
+
+/// How a pet looks beyond its breed: its shapes (Create a Pet's Shape), its coat (another breed's)
+/// and the colour its coat's shifted to (Coat's colours).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PetLook {
+    pub shapes: Vec<u64>,
+    pub coat: Option<u64>,
+    pub tint: Option<[f32; 3]>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -781,7 +892,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new() });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -809,7 +920,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new() })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None })
     }
 }
 
@@ -848,7 +959,7 @@ fn spawn_household_pets(
         });
         let y = pet.position.map_or_else(|| world.data.heightmap.sample(at.x, at.y), |q| q[1]);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-        if let Some(e) = spawn_pet(&mut commands, p, breed, (pet.name.clone(), pet.female), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &pet.shapes, &mut ctx, &mut assets, &mut bindposes) {
+        if let Some(e) = spawn_pet(&mut commands, p, breed, (pet.name.clone(), pet.female), Vec3::new(at.x, y, at.y), rng.random_range(0.0..6.28), &pet.look(), &mut ctx, &mut assets, &mut bindposes) {
             let motives = pet.motives.map(crate::petneeds::PetMotives).unwrap_or_else(|| crate::petneeds::PetMotives::new(&pet.kind, &mut rng));
             let traits = if pet.traits.is_empty() { crate::pettraits::random(&pet.kind, &mut rng) } else { pet.traits.clone() };
             commands.entity(e).insert((HomePet { id: pet.id, path: Vec::new(), until: 0.0 }, motives, PetBonds(pet.bonds.iter().copied().collect()), PetTraits(traits)));
@@ -964,7 +1075,7 @@ pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::
         .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.shapes.clone() })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint })
         })
         .collect()
 }
@@ -1009,7 +1120,7 @@ fn spawn_strays(
         let pos = Vec3::new(at.x, world.data.heightmap.sample(at.x, at.y), at.y);
         let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
         let name = if i % 2 == 0 { "Stray Cat" } else { "Stray Dog" };
-        if let Some(e) = spawn_pet(&mut commands, p, breed, (name.to_string(), rng.random()), pos, rng.random_range(0.0..6.28), &[], &mut ctx, &mut assets, &mut bindposes) {
+        if let Some(e) = spawn_pet(&mut commands, p, breed, (name.to_string(), rng.random()), pos, rng.random_range(0.0..6.28), &PetLook::default(), &mut ctx, &mut assets, &mut bindposes) {
             commands.entity(e).insert(Stray { home: at, target: None, until: 0.0 });
         }
     }
@@ -1063,6 +1174,25 @@ fn strays(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_coat_shifts_to_a_colour_keeping_its_markings() {
+        // (A brown coat's mid-brown to blue, its dark patch darker still; a grey coat's grey to the
+        // colour, whatever noise its fur has.)
+        let brown = [0.5, 0.3, 0.15];
+        let mean = [hsv(brown)[1], hsv(brown)[2]];
+        let to = [0.2, 0.3, 0.7];
+        let mid = shift_pixel(brown, mean, to);
+        assert!((hsv(mid)[0] - hsv(to)[0]).abs() < 0.01 && mid[2] > mid[0]);
+        let dark = shift_pixel([0.15, 0.09, 0.05], mean, to);
+        assert!(hsv(dark)[2] < hsv(mid)[2] - 0.2, "its markings stay darker");
+        let grey = shift_pixel([0.5, 0.48, 0.47], [0.05, 0.5], [0.85, 0.7, 0.4]);
+        assert!((hsv(grey)[1] - hsv([0.85, 0.7, 0.4])[1]).abs() < 0.02);
+        for c in [[0.1f32, 0.7, 0.3], [0.9, 0.2, 0.6], [0.4, 0.4, 0.4]] {
+            let r = rgb(hsv(c));
+            assert!((0..3).all(|k| (r[k] - c[k]).abs() < 1e-4), "{c:?} {r:?}");
+        }
+    }
 
     #[test]
     fn fetch_is_played_in_turn_for_dogs() {

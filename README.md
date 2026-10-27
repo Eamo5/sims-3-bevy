@@ -1585,14 +1585,18 @@ installation is unreachable.
   body, head, eyes, snout and ears, those it has shapes for, and the chosen one's shapes, the
   pack's compound blends, two by two with the game's own pictures of each for the pet's species,
   age and sex; a click shapes the pet so, the shape's blends laid over its breed's, one shape a
-  region, the latest over the rest). Every breed is built as the game builds it: its outfit's
+  region, the latest over the rest); and Coat (`CAPCoat` in its `CAPCCMBasic` frame: the coats of
+  its kind, each breed's, two by two with the game's pictures, a click giving the pet that coat on
+  its own build, as the game's `colorationOnly`; under them, colours to shift the coat to, the
+  picker for any other, the bin back to its own: its hue the colour's and its markings kept,
+  lighter and darker as they were). Every breed is built as the game builds it: its outfit's
   face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
   long legs), their bone adjustments for its kind added to its skeleton under its animations.
   Randomize draws another pet of its species. The pets come home with the household, wearing
-  what they were given and shaped as they were (kept in saves). Adopted pets are of the listed
-  breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker|accessories|shape]` with
-  `CAP_SHOT=<png>`, `CAP_WEAR=<part>,...`, `CAP_BREED=<outfit>`, `CAP_SHAPE=<shape>,...`,
-  `CAP_REGION=<region>` (tests).
+  what they were given, shaped and coated as they were (kept in saves). Adopted pets are of the
+  listed breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker|accessories|shape|coat]`
+  with `CAP_SHOT=<png>`, `CAP_WEAR=<part>,...`, `CAP_BREED=<outfit>`, `CAP_SHAPE=<shape>,...`,
+  `CAP_REGION=<region>`, `CAP_COAT=<outfit>`, `CAP_TINT=r,g,b` (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -1788,7 +1792,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's coat painting and its shapes' Advanced sliders; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's Advanced coat painting, fur shapes and shape sliders; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
