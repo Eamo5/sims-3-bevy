@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, coat_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, coat_panel, tmh_panel).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
                 *cap = Cap::default();
@@ -117,6 +117,13 @@ pub struct Cap {
     coat_scroll: usize,
     coat_swatches: Option<Entity>,
     coat_shown: Option<(usize, String, u64, Option<[u8; 3]>, usize)>,
+    /// The coat frame's tab, and Tail and Mane's panel, cells, bar, first row and what they show.
+    ccm_tab: CcmTab,
+    tmh: Option<Spawned>,
+    tmh_cells: Option<Entity>,
+    tmh_bar: Option<Entity>,
+    tmh_scroll: usize,
+    tmh_shown: Option<(usize, bool, Option<String>, usize, bool)>,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -173,6 +180,8 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         shapes: Vec::new(),
         coat: None,
         tint: None,
+        tail: None,
+        mane: None,
     })
 }
 
@@ -254,7 +263,8 @@ fn pet_stage(
     // (Made again for another breed, or another shape.)
     let want = pet.map(|p| {
         let tint = p.tint.map_or(0, |c| c.iter().fold(1u64, |a, v| a << 8 | (v * 255.0) as u64));
-        p.shapes.iter().chain(p.coat.iter()).chain(std::iter::once(&tint)).fold(p.outfit, |h, s| h.rotate_left(7) ^ s)
+        let parts = [&p.tail, &p.mane].map(|n| n.as_deref().map_or(0, s3pkg::fnv64));
+        p.shapes.iter().chain(p.coat.iter()).chain(std::iter::once(&tint)).chain(parts.iter()).fold(p.outfit, |h, s| h.rotate_left(7) ^ s)
     });
     if cap.model.map(|m| m.1) != want {
         if let Some((e, _)) = cap.model.take() {
@@ -952,6 +962,153 @@ const CCM_LONG: u32 = 0x05db_9d00;
 const CCM_SHORT: u32 = 0x05db_9d01;
 /// The long backing's height under Coat (`SetLongPanelHeight`: down past its colours).
 const CCM_LONG_HEIGHT: f32 = 530.0;
+/// The frame's buttons, and the tab each opens (none: not here): Coat, Fur Shape, Mane, Tail,
+/// Hooves, Unicorn.
+const CCM_BUTTONS: [(u32, Option<CcmTab>); 6] = [
+    (CCM_COAT, Some(CcmTab::Coat)),
+    (0x05db_9c06, None),
+    (0x05db_9c09, Some(CcmTab::Mane)),
+    (0x05db_9c0a, Some(CcmTab::Tail)),
+    (0x05db_9c0c, None),
+    (0x05db_9c0f, None),
+];
+
+/// Which of the coat frame's panels is up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum CcmTab {
+    #[default]
+    Coat,
+    Tail,
+    Mane,
+}
+
+/// A tail's or mane's cell (its part's name).
+#[derive(Component)]
+struct PartCell(String);
+
+/// Tail and Mane (`CAPColoringTMH` in the coat's frame): the kind's tails (or a horse's manes),
+/// two by two with the game's pictures of them, the pet's lit; a click puts it on the pet.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn tmh_panel(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts, mut gu): (ResMut<Assets<Image>>, ResMut<Assets<Font>>, Option<ResMut<crate::icons::GameUi>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    (cells, over): (Query<(&Interaction, &PartCell), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    (mut vis, mut bars): (Query<&mut Visibility>, Query<&mut UiScrollBar>),
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+) {
+    let Some(mut ui) = ui else { return };
+    let on = cap.panel == Some(Panel::Coat) && cap.ccm_tab != CcmTab::Coat;
+    if on && cap.tmh.is_none() && ui.layout("CAPColoringTMH").is_some() {
+        cap.tmh = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPColoringTMH", 7);
+        if let Some(s) = cap.tmh.clone() {
+            // (Its colours, filter and saving aren't here: the coat's colour is the tail's.)
+            for id in [0x05db_b90f, 0x05db_cf30, 0x05db_cf20] {
+                if let Some(e) = s.id(id) {
+                    commands.entity(e).insert(Visibility::Hidden);
+                }
+            }
+            if let (Some(grid), Some(g), Some(mut b)) = (s.id(COATS_GRID), ui.find("CAPColoringTMH", COATS_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
+                let (w, h) = (g.area[2] - g.area[0], g.area[3] - g.area[1]);
+                b.flags |= s3bake::ui::WIN_VISIBLE;
+                b.place = s3bake::ui::UiPlace::Fixed;
+                b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+                cap.tmh_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+                commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+            }
+        }
+        return;
+    }
+    let Some(s) = cap.tmh.clone() else { return };
+    crate::livehud::set_visible(&mut vis, s.root, on);
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.tmh_shown = None;
+        return;
+    };
+    let pet = pending.pets[i].clone();
+    let (Some(kind), Some(breed)) = (d.kinds.iter().find(|k| k.code == pet.kind), d.breeds.iter().find(|b| b.outfit == pet.outfit)) else { return };
+    let mane = cap.ccm_tab == CcmTab::Mane;
+    let list = if mane { &kind.manes } else { &kind.tails };
+    let own = if mane { breed.mane.clone() } else { breed.tail.clone() };
+    for (x, c) in &cells {
+        if *x == Interaction::Pressed {
+            let pick = (Some(&c.0) != own.as_ref()).then(|| c.0.clone());
+            if mane {
+                pending.pets[i].mane = pick;
+            } else {
+                pending.pets[i].tail = pick;
+            }
+        }
+    }
+    // (CAP_PICK=<n> (tests): the nth chosen, once.)
+    if let Some(n) = std::env::var("CAP_PICK").ok().and_then(|v| v.parse::<usize>().ok()).filter(|_| cap.tmh_shown.is_none())
+        && let Some(p) = list.get(n)
+    {
+        if mane {
+            pending.pets[i].mane = Some(p.name.clone());
+        } else {
+            pending.pets[i].tail = Some(p.name.clone());
+        }
+        info!("create a pet test: the {} {}", if mane { "mane" } else { "tail" }, p.name);
+    }
+    let worn = if mane { pending.pets[i].mane.clone() } else { pending.pets[i].tail.clone() }.or(own);
+    let Some(g) = ui.find("CAPColoringTMH", COATS_GRID).and_then(|w| w.grid) else { return };
+    let cols = g.columns.max(1) as usize;
+    let rows = list.len().div_ceil(cols);
+    let most = rows.saturating_sub(g.rows.max(1) as usize);
+    let over_grid = s.id(COATS_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_grid && wheel.delta.y != 0.0 {
+        cap.tmh_scroll = (cap.tmh_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+        if let Some(mut b) = cap.tmh_bar.and_then(|e| bars.get_mut(e).ok()) {
+            b.value = cap.tmh_scroll;
+        }
+    } else if let Some(b) = cap.tmh_bar.and_then(|e| bars.get(e).ok())
+        && b.value != cap.tmh_scroll
+    {
+        cap.tmh_scroll = b.value.min(most);
+    }
+    if let Some(mut b) = cap.tmh_bar.and_then(|e| bars.get_mut(e).ok())
+        && (b.total, b.visible) != (rows, g.rows.max(1) as usize)
+    {
+        (b.total, b.visible) = (rows, g.rows.max(1) as usize);
+    }
+    let want = (i, mane, worn.clone(), cap.tmh_scroll, gu.is_some());
+    if cap.tmh_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.tmh_shown = Some(want);
+    if let Some(t) = s.text(COAT_TITLE) {
+        let (key, or) = if mane { ("Ui/Caption/CAS/CAP/Mane:Title", "Mane") } else { ("Ui/Caption/CAS/CAP/Tail:Title", "Tail") };
+        commands.entity(t).insert(Text::new(ui.localize(key).filter(|t| !t.is_empty()).unwrap_or_else(|| or.into())));
+    }
+    if let Some(old) = cap.tmh_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    let (Some(grid), Some(template)) = (s.id(COATS_GRID), ui.layout("GenericCasItemGrow_landscape").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(grid).insert_children(0, &[holder]);
+    cap.tmh_cells = Some(holder);
+    let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+    for (n, p) in list.iter().enumerate().skip(cap.tmh_scroll * cols).take(cols * g.rows.max(1) as usize) {
+        let k = n - cap.tmh_scroll * cols;
+        let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
+        let mut cell = template.clone();
+        cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+        cell.cls = "Button".into();
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+        let Some(root) = c.root else { continue };
+        commands.entity(root).insert((PartCell(p.name.clone()), crate::icons::Tooltip(part_words(&p.name))));
+        if worn.as_deref() == Some(p.name.as_str()) {
+            commands.entity(root).insert(crate::layout::Selected);
+        }
+        if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(p.instance)))) {
+            crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+        }
+    }
+}
 
 /// A coat's cell (its breed's outfit), and a colour's.
 #[derive(Component)]
@@ -1032,32 +1189,50 @@ fn coat_panel(
         return;
     }
     let (Some(s), Some(frame)) = (cap.coat.clone(), cap.ccm.clone()) else { return };
-    crate::livehud::set_visible(&mut vis, s.root, on);
     crate::livehud::set_visible(&mut vis, frame.root, on);
+    let pet = cap.pet.filter(|_| on).and_then(|i| pending.pets.get(i)).cloned();
+    if let Some(pet) = &pet {
+        if crate::livehud::pressed(&clicks, frame.id(CCM_CLOSE)) {
+            cap.panel = None;
+            return;
+        }
+        // (The frame's tabs for its species: Coat, Tail, a horse's Mane; the fur's shape, hooves
+        // and horn aren't here.)
+        let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
+        let offered = |tab: CcmTab| tab != CcmTab::Mane || species == "h";
+        for (sp, panel) in CCM_TABS {
+            crate::livehud::set_visible(&mut vis, frame.id(panel), sp == species);
+            let Some(p) = frame.id(panel) else { continue };
+            for (id, tab) in CCM_BUTTONS {
+                let e = frame.within(p, id);
+                if sp == species
+                    && let Some(t) = tab.filter(|t| offered(*t))
+                    && crate::livehud::pressed(&clicks, e)
+                    && cap.ccm_tab != t
+                {
+                    cap.ccm_tab = t;
+                    cap.coat_shown = None;
+                    cap.tmh_shown = None;
+                }
+                if let Some(mut b) = e.and_then(|e| buttons.get_mut(e).ok()) {
+                    let (sel, off) = (tab == Some(cap.ccm_tab), !tab.is_some_and(offered));
+                    if (b.selected, b.disabled) != (sel, off) {
+                        (b.selected, b.disabled) = (sel, off);
+                    }
+                }
+            }
+        }
+        if !offered(cap.ccm_tab) {
+            cap.ccm_tab = CcmTab::Coat;
+        }
+    }
+    let on = on && cap.ccm_tab == CcmTab::Coat;
+    crate::livehud::set_visible(&mut vis, s.root, on);
     let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
         cap.coat_shown = None;
         return;
     };
-    if crate::livehud::pressed(&clicks, frame.id(CCM_CLOSE)) {
-        cap.panel = None;
-        return;
-    }
     let pet = pending.pets[i].clone();
-    // (The frame's tabs for its species: Coat lit; the fur's shape, the tail's, a horse's mane,
-    // hooves and horn aren't here.)
-    let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
-    for (sp, panel) in CCM_TABS {
-        crate::livehud::set_visible(&mut vis, frame.id(panel), sp == species);
-        let Some(p) = frame.id(panel) else { continue };
-        for id in [CCM_COAT, 0x05db_9c06, 0x05db_9c09, 0x05db_9c0a, 0x05db_9c0c, 0x05db_9c0f] {
-            if let Some(mut b) = frame.within(p, id).and_then(|e| buttons.get_mut(e).ok()) {
-                let (sel, off) = (id == CCM_COAT, id != CCM_COAT);
-                if (b.selected, b.disabled) != (sel, off) {
-                    (b.selected, b.disabled) = (sel, off);
-                }
-            }
-        }
-    }
     for (x, c) in &cells {
         if *x == Interaction::Pressed {
             pending.pets[i].coat = (c.0 != pet.outfit).then_some(c.0);
@@ -1529,6 +1704,12 @@ fn cap_test(
                 if let Some(t) = std::env::var("CAP_TINT").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
                     p.tint = Some([t[0], t[1], t[2]]);
                 }
+            }
+            // (CAP_CCM=tail|mane: the coat frame turned to it.)
+            match std::env::var("CAP_CCM").as_deref() {
+                Ok("tail") => cap.ccm_tab = CcmTab::Tail,
+                Ok("mane") => cap.ccm_tab = CcmTab::Mane,
+                _ => {}
             }
             if let Some(r) = std::env::var("CAP_REGION").ok().and_then(|r| r.parse::<u32>().ok()) {
                 cap.shape_region = r;

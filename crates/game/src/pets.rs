@@ -488,7 +488,8 @@ pub fn spawn_pet(
     let named = |list: &[s3bake::pets::PetPart], name: &Option<String>| -> Vec<s3bake::SkinMesh> {
         name.as_ref().and_then(|n| list.iter().find(|p| &p.name == n)).map(|p| p.meshes.clone()).unwrap_or_default()
     };
-    let parts = kind.body.iter().cloned().chain(named(&kind.tails, &b.tail)).chain(named(&kind.ears, &b.ears)).chain(named(&kind.manes, &b.mane));
+    let (tail, mane) = (look.tail.clone().or_else(|| b.tail.clone()), look.mane.clone().or_else(|| b.mane.clone()));
+    let parts = kind.body.iter().cloned().chain(named(&kind.tails, &tail)).chain(named(&kind.ears, &b.ears)).chain(named(&kind.manes, &mane));
     for m in parts {
         let material = match m.shader {
             SHADER_EYES => eyes.clone(),
@@ -815,12 +816,18 @@ pub struct SavedPet {
     pub coat: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tint: Option<[f32; 3]>,
+    /// Its tail and (a horse's) mane, where they're not its breed's (Create a Pet's Tail and Mane:
+    /// the parts' names).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mane: Option<String>,
 }
 
 impl SavedPet {
     /// How it looks, beyond its breed.
     pub fn look(&self) -> PetLook {
-        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint }
+        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone() }
     }
 }
 
@@ -831,6 +838,8 @@ pub struct PetLook {
     pub shapes: Vec<u64>,
     pub coat: Option<u64>,
     pub tint: Option<[f32; 3]>,
+    pub tail: Option<String>,
+    pub mane: Option<String>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -892,7 +901,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -920,7 +929,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None })
     }
 }
 
@@ -1075,7 +1084,7 @@ pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::
         .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone() })
         })
         .collect()
 }

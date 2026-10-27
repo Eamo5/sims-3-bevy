@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 7;
+pub const PETS_VERSION: u32 = 8;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -167,6 +167,9 @@ pub struct PetAccessory {
 pub struct PetPart {
     pub name: String,
     pub meshes: Vec<SkinMesh>,
+    /// Its CAS part's instance (its picture's, among the CAS thumbnails).
+    #[serde(default)]
+    pub instance: u64,
 }
 
 /// A coat region or marking: where (its mask, in the coat's layout) and the colours its preset
@@ -309,7 +312,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         let coat = |c: &&&CasPart| c.name.starts_with(code) || c.name.starts_with(&grown);
         let base = pets.iter().filter(coat).find(|c| c.clothing_type == PT_BASE).and_then(|c| c.presets.first()).map(|p| preset_colors(p)).unwrap_or_default();
         let parts = |t: u32| -> Vec<PetPart> {
-            pets.iter().filter(named).filter(|c| c.clothing_type == t).map(|c| PetPart { name: c.name.clone(), meshes: meshes(c) }).filter(|p| !p.meshes.is_empty()).collect()
+            pets.iter().filter(named).filter(|c| c.clothing_type == t).map(|c| PetPart { name: c.name.clone(), meshes: meshes(c), instance: instance_of.get(&c.name).copied().unwrap_or(0) }).filter(|p| !p.meshes.is_empty()).collect()
         };
         let regions: Vec<PetRegion> = pets
             .iter()
@@ -344,7 +347,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 for m in &mut meshes {
                     m.texture = root.tex_path(key).exists().then_some(key).or(m.texture);
                 }
-                (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes })
+                (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes, instance: 0 })
             })
             .collect();
         // (Its accessories likewise, with their parts' instances for their pictures.)
