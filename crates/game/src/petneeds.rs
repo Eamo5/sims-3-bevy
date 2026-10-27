@@ -365,7 +365,7 @@ fn choose(
     clock: Res<GameClock>,
     grid: Option<Res<crate::nav::NavGrid>>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>)>,
     objects: Query<(Entity, &GameObject, &Transform, Option<&BowlFood>, Option<&crate::grime::Grime>), Without<crate::visit::LotObject>>,
     taken: Query<&PetTask>,
 ) {

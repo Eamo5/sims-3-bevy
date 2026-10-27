@@ -1003,6 +1003,15 @@ installation is unreachable.
   clips' visibility events swap the dangling rope for the held one and back. Fun for both, and
   tiring for the dog (`kTugOfWarEnergyCommodityUpdate`). `PET_YAW`, `PET_PITCH` with `PET_CAM`
   (tests).
+  Pets seek company of their own accord, as the pack's autonomous socials have them: one short of
+  company or fun goes to one of the family standing free, or another of the household's pets, and
+  greets them the pack's way, each playing its side of the pack's clip turned to the other: a dog
+  licks a Sim it likes, a cat rubs round their legs (Mark Sim), a horse nuzzles them; one it
+  hardly knows it sniffs; and one that dislikes them a dog pees on, a cat scratches, a horse bites
+  at. Pets nuzzle and sniff each other, and cats and dogs short of fun play together
+  (`PlayPetToPet`: its start, then rounds of play and swapping who chases). A Sim busy at
+  something is waited for; company and fun for the pet, company for the other, and the pet's
+  liking up a little, or down for a mean one. `PET_GREET=<pet>[:<whom>]` (tests).
   Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
   teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
   Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the

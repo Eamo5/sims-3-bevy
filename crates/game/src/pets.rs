@@ -1016,7 +1016,7 @@ fn home_pets(
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     household: Option<Res<crate::interact::Household>>,
-    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>)>,
+    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>)>,
 ) {
     let Some(grid) = grid else { return };
     let lot = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index));

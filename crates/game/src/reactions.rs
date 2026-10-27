@@ -60,7 +60,7 @@ pub struct Pending {
 
 /// Turning to face what they react to.
 #[derive(Component)]
-struct Facing(Quat);
+pub(crate) struct Facing(pub Quat);
 
 /// A reaction played sitting down, over what they're doing there: the clip it took the place
 /// of (put back after), the action it was over, and how long it has left (seconds at the

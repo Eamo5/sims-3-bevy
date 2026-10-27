@@ -831,8 +831,20 @@ pub const PROP_ACTORS: &[&str] = &[
 /// `_pool`, the drum kit's `_drumKit`, the waste chute's `_trashchute`).
 pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit", "trashChute", "washer", "machine"];
 
+/// A pet's social of its own with a Sim or another pet (`ad2a_soc_neutral_lick_friendly_neutral_x`,
+/// `ac2ad_soc_neutral_play_start_y`): its side and the other's.
+fn pet_social(name: &str) -> bool {
+    const PETS: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
+    let Some((who, rest)) = name.split_once('_') else { return false };
+    let Some((p, t)) = who.split_once('2') else { return false };
+    PETS.contains(&p) && (t == "a" || t == "c" || PETS.contains(&t)) && rest.starts_with("soc_neutral_")
+}
+
 /// Whether a clip should be baked.
 pub fn wanted(name: &str) -> bool {
+    if pet_social(name) {
+        return true;
+    }
     // (The Sim's side, a prop's, or the object's own: `a2o_fridge_openDoor_fridge` swings its
     // door as the Sim opens it.)
     let actor_side = |n: &str| {
