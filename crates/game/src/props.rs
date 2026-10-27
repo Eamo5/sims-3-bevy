@@ -94,6 +94,9 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("treat", "accessoryDogTreat", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (A game of fetch's stick: thrown, and carried back in the dog's mouth.)
     ("stick", "accessoryPetFetchStick", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (Tug of war's rope, a rig of its own: in the Sim's hand, and taken in the dog's mouth.)
+    ("ropeFK", "accessoryToyRopeFK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("ropeIK", "accessoryToyRopeIK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wand", "magicWandClassic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (The packs' games and instruments.)
     ("cue", "PoolCue", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
@@ -120,7 +123,7 @@ pub fn prop_actor(suffix: &str) -> bool {
 /// The props a Sim is holding: which one, its entity and the slot (rig bone) it hangs from, and
 /// the object put away while its copy is in hand (the guitar played from where it stood).
 #[derive(Component, Default)]
-struct HeldProps(Vec<(usize, Entity, usize)>, Option<Entity>);
+struct HeldProps(Vec<(usize, Entity, usize)>, Option<Entity>, HashMap<usize, bool>);
 
 /// A prop in a Sim's hand.
 #[derive(Component)]
@@ -153,6 +156,8 @@ fn hold_props(
     (mut props, mut shown): (Query<&mut Transform, With<Prop>>, Query<&mut Visibility, (With<Prop>, Without<crate::interact::GameObject>)>),
     mut placed: Query<(&crate::interact::GameObject, &mut Visibility), Without<Prop>>,
     pets: Query<&crate::pets::PetSkeleton>,
+    (rigs, kids, mut bones): (Query<&crate::objanim::ObjectRig>, Query<&Children>, Query<&mut Transform, (Without<Prop>, Without<crate::sim::Sim>, Without<crate::interact::GameObject>)>),
+    (globals, parents): (Query<&GlobalTransform>, Query<&ChildOf>),
     mut objects: Local<Option<HashMap<String, Key>>>,
     mut companions: Local<HashMap<String, Vec<(usize, String)>>>,
 ) {
@@ -223,13 +228,18 @@ fn hold_props(
         // Put away what the action no longer uses (props stay in hand through the action's
         // clips that don't move them, like reading between page turns), or that went with a
         // rebuilt body.
+        let mut gone = Vec::new();
         held.0.retain(|(i, e, _)| {
             let keep = ((acting && carry.is_none()) || want.iter().any(|(w, _)| w == i)) && props.contains(*e);
             if !keep {
                 commands.entity(*e).try_despawn();
+                gone.push(*i);
             }
             keep
         });
+        for i in gone {
+            held.2.remove(&i);
+        }
         for (i, clip_name) in &want {
             let (_, object, slot, bind, nudge) = PROPS[*i];
             let entity = match held.0.iter().find(|(h, ..)| h == i) {
@@ -275,11 +285,28 @@ fn hold_props(
                     commands.entity(joint).add_child(entity);
                 }
             }
+            // (Shown and hidden as the clip says, as it last said through clips that don't: the
+            // rope in the hand swapped for the one the dog's taken hold of.)
+            if let Some(on) = clip.visibility.iter().rev().find(|v| v.0 <= t + 1e-3).map(|v| v.1).or_else(|| clip.visibility.first().map(|v| !v.1)) {
+                held.2.insert(*i, on);
+            }
+            let visible = held.2.get(i).copied().unwrap_or(true);
             if let Ok(mut v) = shown.get_mut(entity) {
                 // (The mop's clip carries it about the puddle's root, where the Sim stands.)
                 let on_sim = parent.is_none_or(|p| p.parent == SIM_ACTOR) || OBJECT_SPACE.contains(&PROPS[*i].0) || to_pet.is_some();
                 // (Put down to talk where they sit, the hands at the talk.)
-                v.set_if_neq(if on_sim && !talking { Visibility::Inherited } else { Visibility::Hidden });
+                v.set_if_neq(if on_sim && !talking && visible { Visibility::Inherited } else { Visibility::Hidden });
+            }
+            // (A prop with a rig of its own, its bones as its clip moves them: a rope. The one the
+            // dog's taken hold of is stretched to the Sim's hand below.)
+            for model in kids.get(entity).into_iter().flatten().filter(|_| PROPS[*i].0 != "ropeIK") {
+                if let Ok(rig) = rigs.get(*model) {
+                    for (bone, tf) in rig.clip_pose(&clip, t, TRANSFORM_BONE) {
+                        if let Ok(mut b) = bones.get_mut(bone) {
+                            *b = tf;
+                        }
+                    }
+                }
             }
             if let Some(p) = parent.filter(|p| p.parent == SIM_ACTOR)
                 && let Some(bone) = skel.rig.bones.iter().position(|b| s3pkg::fnv32(&b.name) == p.slot)
@@ -298,9 +325,31 @@ fn hold_props(
                     tf.rotation = r;
                 }
             }
+            // (The rope the dog's taken hold of, from its mouth to the Sim's hand, as the game's
+            // IK draws it out; at its own length where the hand's no further.)
+            let on_pet = held.0.iter().find(|(h, ..)| h == i).is_some_and(|h| h.2 == ON_PET_SLOT || h.2 == ON_PET);
+            if PROPS[*i].0 == "ropeIK"
+                && on_pet
+                && let Some(hand) = skel.rig.bones.iter().position(|b| b.name.eq_ignore_ascii_case(ROPE_HAND)).and_then(|b| globals.get(skel.joints[b]).ok())
+                && let Some(up) = parents.get(entity).ok().and_then(|p| globals.get(p.parent()).ok())
+                && let Ok(mut tf) = props.get_mut(entity)
+            {
+                let to = hand.translation() - up.transform_point(tf.translation);
+                if to.length() > 0.05 {
+                    let (_, up_rot, _) = up.to_scale_rotation_translation();
+                    tf.rotation = up_rot.inverse() * Quat::from_rotation_arc(Vec3::Y, to.normalize());
+                    tf.scale = Vec3::new(1.0, (to.length() / ROPE_LENGTH).clamp(1.0, ROPE_STRETCH), 1.0);
+                }
+            }
         }
     }
 }
+
+/// The hand the Sim holds the tug-of-war rope in, and the rope's length from the dog's mouth.
+const ROPE_HAND: &str = "b__L_Hand_slot";
+const ROPE_LENGTH: f32 = 0.5;
+/// How far it draws out at most (its end behind the dog's mouth drawn out with it).
+const ROPE_STRETCH: f32 = 1.6;
 
 /// Props whose clips move them about the object's root rather than in a Sim's hand: held at
 /// the Sim's root, the object's origin, where they stand to use it.

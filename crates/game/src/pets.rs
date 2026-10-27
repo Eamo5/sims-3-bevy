@@ -129,7 +129,7 @@ const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 
 /// A friendly social's liking, as a Sim's friendly talk until they're friends (the OK context's
 /// step), a hug or a smoochie more; a scolding costs some.
-pub static PET_SOCIALS: [PetSocial; 14] = [
+pub static PET_SOCIALS: [PetSocial; 15] = [
     PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
     PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
     PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
@@ -146,6 +146,8 @@ pub static PET_SOCIALS: [PetSocial; 14] = [
     // (Fetch, as the pack's `PlayFetchJig`: the dog a metre off, facing the Sim; the stick readied,
     // thrown, run after and brought back, or a throw faked, `kLTRIncrease` the closer.)
     PetSocial { name: "Play Fetch", clip: "playFetch", kinds: &["ad", "al"], minutes: 20.0, fun: 100.0, social: 50.0, min_liking: Some(-20.0), liking: 3.0, loops: FETCH, hygiene: 0.0, apart: 0.2, ordered: true },
+    // (Tug of war with a dog, the pack's rope between them: fun for both, and tiring for the dog.)
+    PetSocial { name: "Tug of War", clip: "soc_tugOfWar", kinds: &["ad", "al", "cd"], minutes: 15.0, fun: 160.0, social: 40.0, min_liking: Some(-10.0), liking: 2.5, loops: &["loop1", "loop2", "loop3"], hygiene: 0.0, apart: 0.35, ordered: false },
     PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
 ];
 
@@ -206,9 +208,20 @@ impl PetSocial {
 
     /// A part of a social played in parts (`start`, a loop, `stop`), for a side.
     pub fn part(&self, data: &Baked, child: bool, kind: &str, part: &str, side: char) -> Option<&'static str> {
-        let want = |who: char| format!("{who}2{kind}_{}_{part}_{side}", self.clip);
+        // (Some sets name their start and end otherwise: tug of war's `soc_neutral_tugOfWar_start`,
+        // `soc_tugOfWar_stop_friendly_neutral`.)
+        let names = |who: char| {
+            let mut n = vec![format!("{who}2{kind}_{}_{part}_{side}", self.clip)];
+            if let Some(rest) = self.clip.strip_prefix("soc_").filter(|_| part == "start") {
+                n.push(format!("{who}2{kind}_soc_neutral_{rest}_{part}_{side}"));
+            }
+            if part == "stop" {
+                n.push(format!("{who}2{kind}_{}_{part}_friendly_neutral_{side}", self.clip));
+            }
+            n
+        };
         let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
-        let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
+        let name = [if child { Some('c') } else { None }, Some('a')].into_iter().flatten().flat_map(names).find(|n| has(n))?;
         Some(intern(name))
     }
 
@@ -757,7 +770,7 @@ fn pet_do(
 }
 
 /// `PET_CAM=<n or name>` (tests): the camera on the nth pet (or the one by that name),
-/// `PET_DIST` away.
+/// `PET_DIST` away (from `PET_YAW` and `PET_PITCH`, radians, where they're given).
 fn pet_cam(pets: Query<(&GlobalTransform, &Pet)>, mut cams: Query<&mut crate::camera::SimsCamera>) {
     let Ok(v) = std::env::var("PET_CAM") else { return };
     let p = match v.parse::<usize>() {
@@ -766,7 +779,14 @@ fn pet_cam(pets: Query<(&GlobalTransform, &Pet)>, mut cams: Query<&mut crate::ca
     };
     let (Some((p, _)), Ok(mut c)) = (p, cams.single_mut()) else { return };
     c.look_at(p.translation());
-    c.distance = std::env::var("PET_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(4.0);
+    let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+    c.distance = num("PET_DIST").unwrap_or(4.0);
+    if let Some(y) = num("PET_YAW") {
+        c.yaw = y;
+    }
+    if let Some(p) = num("PET_PITCH") {
+        c.pitch = p;
+    }
 }
 
 /// A stray (or any pet that hasn't any yet) gets its traits drawn, as the game's townies are.
@@ -1208,6 +1228,13 @@ mod tests {
         let fetch = PET_SOCIALS.iter().find(|s| s.name == "Play Fetch").unwrap();
         assert!(fetch.suits("ad") && fetch.suits("al") && !fetch.suits("ac") && !fetch.suits("ah"));
         assert!(fetch.ordered && fetch.loops.contains(&"throwShort") && fetch.loops.contains(&"fakeOut"));
+    }
+
+    #[test]
+    fn tug_of_war_is_for_dogs_with_the_packs_rope() {
+        let tug = PET_SOCIALS.iter().find(|s| s.name == "Tug of War").unwrap();
+        assert!(tug.suits("ad") && tug.suits("al") && tug.suits("cd") && !tug.suits("ac") && !tug.suits("ah"));
+        assert!(crate::props::prop_actor("ropeFK") && crate::props::prop_actor("ropeIK"));
     }
 
     #[test]

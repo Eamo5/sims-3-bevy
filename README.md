@@ -996,7 +996,13 @@ installation is unreachable.
   the pet's hygiene seen to as it's brushed; and Play Fetch (dogs, as the pack's `PlayFetchJig`):
   the pack's stick readied, thrown and run after, brought back in the dog's mouth and handed
   over, or a throw faked, round and round, the stick passed between the Sim's hand and the dog's
-  mouth as the clips' parent events have it.
+  mouth as the clips' parent events have it; and Tug of War (dogs and puppies, as the pack's
+  `TugOfWar`): the pack's toy rope dangled from the Sim's hand on its own rig, swinging as its
+  clip moves it, until the dog lunges and takes hold, then the rope between the dog's mouth and
+  the Sim's hand, drawn out to reach it as the game's IK does, as the two pull back and forth; the
+  clips' visibility events swap the dangling rope for the held one and back. Fun for both, and
+  tiring for the dog (`kTugOfWarEnergyCommodityUpdate`). `PET_YAW`, `PET_PITCH` with `PET_CAM`
+  (tests).
   Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
   teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
   Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the

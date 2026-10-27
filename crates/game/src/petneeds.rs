@@ -319,6 +319,9 @@ fn fall(time: Res<Time>, clock: Res<GameClock>, mut q: Query<(&Pet, &mut PetMoti
     }
 }
 
+/// What a game of tug of war takes out of a dog an hour (50 over its quarter hour).
+const TUG_ENERGY: f32 = -200.0;
+
 /// A Sim's time with a pet (petting, praise, a hug, a treat): company and fun for the pet too.
 fn attention(time: Res<Time>, clock: Res<GameClock>, sims: Query<&crate::interact::ActionQueue>, mut pets: Query<(&mut PetMotives, Option<&PetTraits>)>) {
     let hours = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed] / 60.0;
@@ -331,6 +334,10 @@ fn attention(time: Res<Time>, clock: Res<GameClock>, sims: Query<&crate::interac
         m.add(FUN, s.fun * crate::pettraits::gain_multiplier(traits, FUN) * hours);
         // (Brushed: cleaner.)
         m.add(HYGIENE, s.hygiene * hours);
+        // (Tug of war: tiring, the pack's `kTugOfWarEnergyCommodityUpdate` over the game.)
+        if s.name == "Tug of War" {
+            m.add(ENERGY, TUG_ENERGY * hours);
+        }
     }
 }
 

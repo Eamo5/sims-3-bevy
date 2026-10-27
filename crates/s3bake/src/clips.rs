@@ -213,6 +213,15 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c2ad_playFetch_",
     "c2al_playFetch_",
     "a2al_soc_dogTricks_",
+    // (Tug of war: the Sim's, the dog's, the rope's.)
+    "a2ad_soc_tugOfWar_",
+    "a2al_soc_tugOfWar_",
+    "a2cd_soc_tugOfWar_",
+    "a2cd_soc_neutral_tugOfWar_",
+    "c2ad_soc_tugOfWar_",
+    "c2al_soc_tugOfWar_",
+    "c2cd_soc_tugOfWar_",
+    "c2cd_soc_neutral_tugOfWar_",
     // (Brushing a pet, the brush in hand.)
     "a2ac_brush_",
     "a2ad_brush_",
@@ -752,6 +761,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
 pub const PROP_ACTORS: &[&str] = &[
+    "ropeFK",
+    "ropeIK",
     "pitchfork",
     "artScanner",
     "soda",

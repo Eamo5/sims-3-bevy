@@ -413,6 +413,10 @@ pub struct Clip {
     /// Its parent events, in time order: what the clip's actor (a prop) hangs from, when.
     #[serde(default)]
     pub parents: Vec<ClipParent>,
+    /// Its visibility events, in time order: the clip's actor (a prop) shown or hidden from then
+    /// (a tug-of-war rope swapped for its other rig as the dog takes hold).
+    #[serde(default)]
+    pub visibility: Vec<(f32, bool)>,
 }
 
 /// A clip's parent event: from `time`, actor `child` (FNV-32 of its name: `vrGoggles`) hangs
@@ -475,6 +479,42 @@ pub fn clip_parents(res: &[u8]) -> Vec<ClipParent> {
         o = payload;
     }
     out.sort_by(|a, b| a.time.total_cmp(&b.time));
+    out
+}
+
+/// The visibility events of a CLIP resource's event table (kind 6: the actor shown from then if
+/// its value's over a half), in time order.
+pub fn clip_visibility(res: &[u8]) -> Vec<(f32, bool)> {
+    let mut out = Vec::new();
+    let Ok(rel) = u32_at(res, 0x18) else { return out };
+    let start = 0x18 + rel as usize;
+    if res.get(start..start + 4) != Some(b"=CE=") {
+        return out;
+    }
+    let count = u32_at(res, start + 8).unwrap_or(0) as usize;
+    let end = (start + 20 + u32_at(res, start + 12).unwrap_or(0) as usize + 64).min(res.len());
+    let mut o = start + 20;
+    let mut found = 0;
+    while o + 28 <= end && found < count {
+        let kind = u16_at(res, o).unwrap_or(0);
+        let a = u32_at(res, o + 12).unwrap_or(0);
+        let b = u32_at(res, o + 16).unwrap_or(0);
+        if !(1..=40).contains(&kind) || a != 0xBF80_0000 || b != 0xBF80_0000 {
+            o += 4;
+            continue;
+        }
+        found += 1;
+        let time = f32_at(res, o + 8).unwrap_or(0.0);
+        let len = u32_at(res, o + 24).unwrap_or(0) as usize;
+        let payload = o + 28 + ((len + 1 + 3) & !3);
+        if kind == 6
+            && let Ok(v) = f32_at(res, payload)
+        {
+            out.push((time, v > 0.5));
+        }
+        o = payload;
+    }
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out
 }
 
@@ -723,7 +763,7 @@ impl Clip {
                 }
             }
         }
-        Ok(Self { name, duration: ticks as f32 * dt, tracks, sounds: clip_sounds(res), parents: clip_parents(res) })
+        Ok(Self { name, duration: ticks as f32 * dt, tracks, sounds: clip_sounds(res), parents: clip_parents(res), visibility: clip_visibility(res) })
     }
 }
 

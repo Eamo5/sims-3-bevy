@@ -96,6 +96,39 @@ impl RigData {
     }
 }
 
+impl ObjectRig {
+    /// Its bones as a clip has them at time `t` (those its tracks move), but for the bone named
+    /// `held` and those above it (a prop's `transformBone`, placed in the hand by its holder).
+    pub(crate) fn clip_pose(&self, clip: &s3formats::sim::Clip, t: f32, held: u32) -> Vec<(Entity, Transform)> {
+        let mut out = Vec::new();
+        for inst in &self.rigs {
+            let mut above = vec![false; inst.rig.hashes.len()];
+            if let Some(mut i) = inst.rig.hashes.iter().position(|h| *h == held) {
+                above[i] = true;
+                while let Some(p) = inst.rig.parent(i) {
+                    if above[p] {
+                        break;
+                    }
+                    above[p] = true;
+                    i = p;
+                }
+            }
+            for (i, h) in inst.rig.hashes.iter().enumerate() {
+                let Some(track) = clip.tracks.get(h).filter(|_| !above[i]) else { continue };
+                let mut tf = inst.rig.bind[i];
+                if let Some(p) = sample_track_vec(&track.translation, t) {
+                    tf.translation = p;
+                }
+                if let Some(r) = sample_track_quat(&track.rotation, t) {
+                    tf.rotation = r;
+                }
+                out.push((inst.bones[i], tf));
+            }
+        }
+        out
+    }
+}
+
 /// The rigs loaded so far, by model.
 #[derive(Resource, Default)]
 struct Rigs(HashMap<Key, Option<RigData>>);
