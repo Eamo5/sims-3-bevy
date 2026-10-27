@@ -1001,6 +1001,8 @@ pub struct SimOutfit {
     pub age: u32,
     pub gender: u32,
     pub parts: Vec<OutfitPart>,
+    /// Its face (and a pet's body) blends: each blend's key and amount.
+    pub faces: Vec<(ResourceKey, f32)>,
 }
 
 impl SimOutfit {
@@ -1038,7 +1040,7 @@ impl SimOutfit {
         // index and an amount). The header before the list differs by version, so the list is
         // found by where it fits: one part per preset, each naming a CAS part, ending just so.
         // Base-game outfits index with bytes, later ones with shorts.
-        let parse_at = |at: usize, wide: bool| -> Option<Vec<OutfitPart>> {
+        let parse_at = |at: usize, wide: bool| -> Option<(Vec<OutfitPart>, Vec<(ResourceKey, f32)>)> {
             let ix = |o: usize| -> Option<usize> { if wide { mid.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize) } else { mid.get(o).map(|b| *b as usize) } };
             let w = if wide { 2 } else { 1 };
             if *mid.get(at)? as usize != presets.len() || presets.is_empty() {
@@ -1057,9 +1059,20 @@ impl SimOutfit {
                 parts.push(OutfitPart { casp, body_type, preset: p.clone() });
             }
             let faces = *mid.get(o + 1)? as usize;
-            (mid[o] == 0 && o + 2 + faces * (w + 4) == mid.len()).then_some(parts)
+            if mid[o] != 0 || o + 2 + faces * (w + 4) != mid.len() {
+                return None;
+            }
+            let blends = (0..faces)
+                .filter_map(|k| {
+                    let at = o + 2 + k * (w + 4);
+                    let key = *keys.get(ix(at)?)?;
+                    let amount = f32::from_le_bytes(mid.get(at + w..at + w + 4)?.try_into().ok()?);
+                    Some((key, amount))
+                })
+                .collect();
+            Some((parts, blends))
         };
-        let parts = (32..mid.len()).rev().find_map(|at| parse_at(at, false).or_else(|| parse_at(at, true))).unwrap_or_default();
-        Ok(Self { age, gender, parts })
+        let (parts, faces) = (32..mid.len()).rev().find_map(|at| parse_at(at, false).or_else(|| parse_at(at, true))).unwrap_or_default();
+        Ok(Self { age, gender, parts, faces })
     }
 }

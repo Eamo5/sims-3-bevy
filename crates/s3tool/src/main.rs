@@ -686,6 +686,35 @@ fn main() {
         }
         return;
     }
+    if args[1] == "outfitblends" {
+        // outfitblends <root> <outfit name>...: an outfit's face (and body) blends: key, amount, name.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        for name in &args[3..] {
+            let Some(d) = set.read_ti(s3formats::sim::T_OUTFIT, s3pkg::fnv64(name)) else { println!("{name}: missing"); continue };
+            let o = s3formats::sim::SimOutfit::parse(&d).expect("outfit");
+            println!("{name}: age {:x} gender {:x}, {} parts, {} blends", o.age, o.gender, o.parts.len(), o.faces.len());
+            for (k, amount) in &o.faces {
+                let b = set.read(k).or_else(|| set.read_ti(k.t, k.i)).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok());
+                let n = b.as_ref().map(|b| format!("{} entries {} bones {:?} geoms {:?} bgeo {:?}", b.name, b.entries.len(), b.entries.iter().flat_map(|e| e.bones.iter().map(|x| format!("{:x}", x.0))).collect::<Vec<_>>(), b.entries.iter().map(|e| e.geoms.len()).sum::<usize>(), b.bgeo.map(|k| k.to_string()))).unwrap_or_default();
+                println!("  {k} {amount:.3} {n}");
+            }
+        }
+        return;
+    }
+    if args[1] == "cblns" {
+        // cblns <root> [group hex]: the compound blends (CBLN) with their names, regions, age/species
+        // flags and blends' count.
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let want = args.get(3).and_then(|g| u32::from_str_radix(g.trim_start_matches("0x"), 16).ok());
+        let mut keys: Vec<s3pkg::ResourceKey> = set.keys_of_type(0x051D_F2DD).filter(|k| want.is_none_or(|g| k.g == g)).copied().collect();
+        keys.sort();
+        for k in keys {
+            if let Some((name, region, ag, entries)) = set.read(&k).and_then(|d| s3bake::gamedata::parse_cbln(&d)) {
+                println!("{k} {name} region {region} flags {ag:08X} blends {}", entries.len());
+            }
+        }
+        return;
+    }
     if args[1] == "uiwindow" {
         // uiwindow <layout>: inspect a baked layout's control ids, bounds and scrolling grids.
         let ui = s3bake::load_ui(&s3bake::default_root()).expect("ui.bin");

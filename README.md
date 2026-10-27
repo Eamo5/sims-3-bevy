@@ -1581,10 +1581,18 @@ installation is unreachable.
   Accessories (`CAPAccessories`: a cat's or dog's collars, a horse's bridles, saddles and the rest,
   a row of each kind under its name with the game's pictures of them and none, what it wears
   lit; a click puts it on in place of the other of its kind, on the pet in the room in the part's
-  own colours); Randomize draws another pet of its species. The pets come home with the household,
-  wearing what they were given (kept in saves). Adopted pets are of the listed breeds too.
-  `CAP_TEST=<kind>[:basics|breed|character|picker|accessories]` with `CAP_SHOT=<png>`,
-  `CAP_WEAR=<part>,...` (tests).
+  own colours); and Shape (`CAPFBDBasic` and `CAPFaceBody`: the species' tabs for the full body,
+  body, head, eyes, snout and ears, those it has shapes for, and the chosen one's shapes, the
+  pack's compound blends, two by two with the game's own pictures of each for the pet's species,
+  age and sex; a click shapes the pet so, the shape's blends laid over its breed's, one shape a
+  region, the latest over the rest). Every breed is built as the game builds it: its outfit's
+  face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
+  long legs), their bone adjustments for its kind added to its skeleton under its animations.
+  Randomize draws another pet of its species. The pets come home with the household, wearing
+  what they were given and shaped as they were (kept in saves). Adopted pets are of the listed
+  breeds too. `CAP_TEST=<kind>[:basics|breed|character|picker|accessories|shape]` with
+  `CAP_SHOT=<png>`, `CAP_WEAR=<part>,...`, `CAP_BREED=<outfit>`, `CAP_SHAPE=<shape>,...`,
+  `CAP_REGION=<region>` (tests).
 - **The game's own Play Flow**: a new household chooses its home as in the game: the speech
   bubble's instructions ("Choose a place to live!", then "Let's play!" with Play, Cancel back to
   Create a Sim or to choosing again), the play flow puck (turn the town, options), the bin of the
@@ -1780,7 +1788,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's coat painting and face shapes; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools, diagonal foundations); Create a Pet's coat painting and its shapes' Advanced sliders; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

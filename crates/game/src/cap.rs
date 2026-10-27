@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
                 *cap = Cap::default();
@@ -67,6 +67,7 @@ enum Panel {
     Breed,
     Character,
     Accessories,
+    Shape,
 }
 
 /// Create a Pet's state: the pet being made, the panel open, the game's windows for them, the
@@ -99,6 +100,14 @@ pub struct Cap {
     cells: Option<Entity>,
     bar: Option<Entity>,
     picker: Option<crate::traitpicker::Picker>,
+    /// Shape's panels, the region shown, its cells, bar and first row, and what they show.
+    fbd: Option<Spawned>,
+    face_body: Option<Spawned>,
+    shape_region: u32,
+    shape_cells: Option<Entity>,
+    shape_bar: Option<Entity>,
+    shape_scroll: usize,
+    shape_shown: Option<(usize, String, u32, Vec<u64>, usize, bool)>,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -152,6 +161,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         saddled: false,
         tricks: None,
         accessories: Vec::new(),
+        shapes: Vec::new(),
     })
 }
 
@@ -230,7 +240,8 @@ fn pet_stage(
             *v = want;
         }
     }
-    let want = pet.map(|p| p.outfit);
+    // (Made again for another breed, or another shape.)
+    let want = pet.map(|p| p.shapes.iter().fold(p.outfit, |h, s| h.rotate_left(7) ^ s));
     if cap.model.map(|m| m.1) != want {
         if let Some((e, _)) = cap.model.take() {
             commands.entity(e).try_despawn();
@@ -238,11 +249,11 @@ fn pet_stage(
         let (Some(p), Some(d), Some(b)) = (pet, data.0.as_deref(), baked) else { return };
         let Some(breed) = d.breeds.iter().position(|x| x.outfit == p.outfit) else { return };
         let mut ctx = crate::objects::AssetCtx { baked: &b.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-        if let Some(e) = crate::pets::spawn_pet(&mut commands, d, breed, (p.name.clone(), p.female), Vec3::ZERO, 0.0, &mut ctx, &mut assets, &mut bindposes) {
+        if let Some(e) = crate::pets::spawn_pet(&mut commands, d, breed, (p.name.clone(), p.female), Vec3::ZERO, 0.0, &p.shapes, &mut ctx, &mut assets, &mut bindposes) {
             let mut anim = crate::pets::PetAnim::default();
             anim.play(format!("{}_idle_stand_breathe_x", d.breeds[breed].kind));
             commands.entity(e).insert((anim, DespawnOnExit(AppState::CreateHousehold)));
-            cap.model = Some((e, p.outfit));
+            cap.model = want.map(|w| (e, w));
             cap.worn.clear();
         }
     }
@@ -352,6 +363,9 @@ fn pet_sheet(
         open = if open == Some(Panel::Character) { None } else { Some(Panel::Character) };
     }
     let dressable = data.0.as_deref().is_some_and(|d| d.kinds.iter().any(|k| k.code == pet.kind && !k.accessories.is_empty()));
+    if pressed(within(SHEET_FACE)) {
+        open = if open == Some(Panel::Shape) { None } else { Some(Panel::Shape) };
+    }
     if dressable && pressed(within(SHEET_ACCESSORIES)) {
         open = if open == Some(Panel::Accessories) { None } else { Some(Panel::Accessories) };
     }
@@ -398,10 +412,9 @@ fn pet_sheet(
     set(s.id(SHEET_BASICS_FEMALE), cap.panel == Some(Panel::Basics), false);
     set(within(SHEET_BREED), cap.panel == Some(Panel::Breed), false);
     set(s.id(SHEET_CHARACTER), cap.panel == Some(Panel::Character), false);
-    // (A coat of its own and its face's shapes aren't made here yet.)
-    for id in [SHEET_COAT, SHEET_FACE] {
-        set(within(id), false, true);
-    }
+    set(within(SHEET_FACE), cap.panel == Some(Panel::Shape), false);
+    // (A coat of its own isn't painted here yet.)
+    set(within(SHEET_COAT), false, true);
     let dressable = data.0.as_deref().is_some_and(|d| d.kinds.iter().any(|k| k.code == pet.kind && !k.accessories.is_empty()));
     set(within(SHEET_ACCESSORIES), cap.panel == Some(Panel::Accessories), !dressable);
 }
@@ -706,6 +719,202 @@ fn breeds_panel(
             commands.entity(root).insert(crate::layout::Selected);
         }
         if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), cap.thumb(&mut images, b)) {
+            crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+        }
+    }
+}
+
+// `CAPFBDBasic`'s windows: Done, the species' tabs and each tab's button (`ControlIDs`), the
+// long and short backgrounds; and `CAPFaceBody`'s title, presets' grid and Advanced buttons.
+const FBD_DONE: u32 = 0x40f2_2201;
+const FBD_TABS: [(&str, u32); 3] = [("d", 0x40f2_2202), ("c", 0x40f2_2203), ("h", 0x40f2_2204)];
+const FBD_LONG: u32 = 0x40f2_2220;
+const FBD_SHORT: u32 = 0x40f2_2221;
+const SHAPE_TITLE: u32 = 0x2184_91f1;
+const SHAPE_GRID: u32 = 0x2184_91f2;
+const SHAPE_ADVANCED: [u32; 3] = [0x2184_91f3, 0x2184_91f4, 0x2184_91f5];
+/// The tabs: their buttons, the region each shows (`SetFaceBodyCategory`), and its title (the
+/// game's key, and the words where it has none).
+const SHAPE_TABS: [(u32, u32, &str, &str); 6] = [
+    (0x40f2_2210, s3bake::pets::PET_FULL_BODY, "Ui/Caption/CAS/CAP/FaceBody:Title", "Full Body"),
+    (0x40f2_2215, s3bake::pets::PET_BODY, "Ui/Caption/CAS/CAP/Body:Title", "Body"),
+    (0x40f2_2211, s3bake::pets::PET_HEAD, "Ui/Caption/CAS/CAP/Face:Title", "Head"),
+    (0x40f2_2212, s3bake::pets::PET_EYES, "Ui/Caption/CAS/CAP/Eyes:Title", "Eyes"),
+    (0x40f2_2213, s3bake::pets::PET_SNOUT, "Ui/Caption/CAS/CAP/Snout:Title", "Snout"),
+    (0x40f2_2214, s3bake::pets::PET_EARS, "Ui/Caption/CAS/CAP/Ears:Title", "Ears"),
+];
+
+/// A shape's cell in the grid (its compound blend's instance).
+#[derive(Component)]
+struct ShapeCell(u64);
+
+/// A pet's age, species and sex bits, as Create a Pet's pictures of its shapes are filed.
+fn shape_thumb_flags(kind: &str, female: bool) -> [u32; 4] {
+    let (age, species) = s3bake::gamedata::pet_flags(kind);
+    let sex = if female { 0x2000 } else { 0x1000 };
+    let other = 0x3000 ^ sex;
+    // (Its own; the other sex's; a grown one's, of either.)
+    [species | age | sex, species | age | other, species | 0x20 | sex, species | 0x20 | other]
+}
+
+/// Shape (`CAPFBDBasic` and `CAPFaceBody`): the tabs for the full body, body, head, eyes, snout
+/// and ears (those the species has shapes for), and the chosen one's shapes in the grid, two by
+/// two, each the game's picture of it; a click shapes the pet so (`PetsBaked::shape`: the shape's
+/// blends over its breed's), the one it has lit. The wheel or the bar turns the grid's rows.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn shape_panel(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts, mut game_ui): (ResMut<Assets<Image>>, ResMut<Assets<Font>>, Option<ResMut<crate::icons::GameUi>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    (clicks, cells, over): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &ShapeCell), Changed<Interaction>>, Query<&bevy::ui::RelativeCursorPosition>),
+    (mut vis, mut buttons, mut bars, mut texts): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiScrollBar>, Query<&mut Text>),
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+) {
+    let Some(mut ui) = ui else { return };
+    let on = cap.panel == Some(Panel::Shape);
+    if on && cap.fbd.is_none() && ui.layout("CAPFBDBasic").is_some() && ui.layout("CAPFaceBody").is_some() {
+        cap.fbd = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFBDBasic", 6);
+        cap.face_body = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFaceBody", 7);
+        if let Some(s) = &cap.fbd {
+            // (The short background, as `SetLongPanel(use: false)` has it.)
+            for (id, show) in [(FBD_LONG, false), (FBD_SHORT, true)] {
+                if let Some(e) = s.id(id) {
+                    commands.entity(e).insert(if show { Visibility::Inherited } else { Visibility::Hidden });
+                }
+            }
+            if let Some(e) = s.id(FBD_DONE) {
+                commands.entity(e).insert(crate::icons::Tooltip(ui.localize("Ui/Caption/Global:Done").unwrap_or_else(|| "Done".into())));
+            }
+            for (button, _, key, or) in SHAPE_TABS {
+                let tip = ui.localize(key).filter(|t| !t.is_empty()).unwrap_or_else(|| or.to_string());
+                for e in s.all_with(button) {
+                    commands.entity(e).insert(crate::icons::Tooltip(tip.clone()));
+                }
+            }
+        }
+        if let Some(s) = &cap.face_body {
+            // (Its sliders, the Advanced mode, aren't here.)
+            for id in SHAPE_ADVANCED {
+                if let Some(e) = s.id(id) {
+                    commands.entity(e).insert(Visibility::Hidden);
+                }
+            }
+            if let (Some(grid), Some(g), Some(mut b)) = (s.id(SHAPE_GRID), ui.find("CAPFaceBody", SHAPE_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
+                let (w, h) = (g.area[2] - g.area[0], g.area[3] - g.area[1]);
+                b.flags |= s3bake::ui::WIN_VISIBLE;
+                b.place = s3bake::ui::UiPlace::Fixed;
+                b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+                cap.shape_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+                commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+            }
+        }
+        return;
+    }
+    let (Some(fbd), Some(s)) = (cap.fbd.clone(), cap.face_body.clone()) else { return };
+    crate::livehud::set_visible(&mut vis, fbd.root, on);
+    crate::livehud::set_visible(&mut vis, s.root, on);
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.shape_shown = None;
+        return;
+    };
+    if crate::livehud::pressed(&clicks, fbd.id(FBD_DONE)) {
+        cap.panel = None;
+        return;
+    }
+    let pet = pending.pets[i].clone();
+    let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
+    let tabs = FBD_TABS.iter().find(|t| t.0 == species).and_then(|t| fbd.id(t.1));
+    let offered: Vec<(u32, u32, &str, &str)> = SHAPE_TABS.iter().copied().filter(|t| !d.presets_for(&pet.kind, t.1).is_empty()).collect();
+    if !offered.iter().any(|t| t.1 == cap.shape_region) {
+        cap.shape_region = offered.first().map_or(s3bake::pets::PET_FULL_BODY, |t| t.1);
+        cap.shape_scroll = 0;
+    }
+    for (button, region, ..) in &offered {
+        if crate::livehud::pressed(&clicks, tabs.and_then(|p| fbd.within(p, *button))) && cap.shape_region != *region {
+            cap.shape_region = *region;
+            cap.shape_scroll = 0;
+        }
+    }
+    let list = d.presets_for(&pet.kind, cap.shape_region);
+    for (x, c) in &cells {
+        if *x == Interaction::Pressed {
+            // (One shape a region: the latest laid over the rest.)
+            let region = cap.shape_region;
+            let shapes = &mut pending.pets[i].shapes;
+            shapes.retain(|s| d.presets.iter().find(|p| p.instance == *s).is_none_or(|p| p.region != region));
+            shapes.push(c.0);
+            info!("create a pet: shaped {}", d.presets.iter().find(|p| p.instance == c.0).map_or("", |p| p.name.as_str()));
+        }
+    }
+    let Some(g) = ui.find("CAPFaceBody", SHAPE_GRID).and_then(|w| w.grid) else { return };
+    let cols = g.columns.max(1) as usize;
+    let rows = list.len().div_ceil(cols);
+    let most = rows.saturating_sub(g.rows.max(1) as usize);
+    let over_grid = s.id(SHAPE_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_grid && wheel.delta.y != 0.0 {
+        cap.shape_scroll = (cap.shape_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+        if let Some(mut b) = cap.shape_bar.and_then(|e| bars.get_mut(e).ok()) {
+            b.value = cap.shape_scroll;
+        }
+    } else if let Some(b) = cap.shape_bar.and_then(|e| bars.get(e).ok())
+        && b.value != cap.shape_scroll
+    {
+        cap.shape_scroll = b.value.min(most);
+    }
+    if let Some(mut b) = cap.shape_bar.and_then(|e| bars.get_mut(e).ok())
+        && (b.total, b.visible) != (rows, g.rows.max(1) as usize)
+    {
+        (b.total, b.visible) = (rows, g.rows.max(1) as usize);
+    }
+    let shapes = pending.pets[i].shapes.clone();
+    let want = (i, pet.kind.clone(), cap.shape_region, shapes.clone(), cap.shape_scroll, game_ui.is_some());
+    if cap.shape_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.shape_shown = Some(want);
+    // The species' tabs, those with shapes, the region's lit.
+    for (sp, panel) in FBD_TABS {
+        crate::livehud::set_visible(&mut vis, fbd.id(panel), sp == species);
+    }
+    for (button, region, ..) in SHAPE_TABS {
+        let e = tabs.and_then(|p| fbd.within(p, button));
+        crate::livehud::set_visible(&mut vis, e, offered.iter().any(|t| t.1 == region));
+        if let Some(mut b) = e.and_then(|e| buttons.get_mut(e).ok())
+            && b.selected != (region == cap.shape_region)
+        {
+            b.selected = region == cap.shape_region;
+        }
+    }
+    if let Some((_, _, key, or)) = SHAPE_TABS.iter().find(|t| t.1 == cap.shape_region) {
+        let title = ui.localize(key).filter(|t| !t.is_empty()).unwrap_or_else(|| or.to_string());
+        crate::livehud::set_text(&mut texts, s.text(SHAPE_TITLE), &title);
+    }
+    if let Some(old) = cap.shape_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    let (Some(grid), Some(template)) = (s.id(SHAPE_GRID), ui.layout("GenericCasItemGrow_landscape").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(grid).insert_children(0, &[holder]);
+    cap.shape_cells = Some(holder);
+    let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+    let flags = shape_thumb_flags(&pet.kind, pet.female);
+    for (n, p) in list.iter().enumerate().skip(cap.shape_scroll * cols).take(cols * g.rows.max(1) as usize) {
+        let k = n - cap.shape_scroll * cols;
+        let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
+        let mut cell = template.clone();
+        cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+        cell.cls = "Button".into();
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+        let Some(root) = c.root else { continue };
+        commands.entity(root).insert(ShapeCell(p.instance));
+        if shapes.contains(&p.instance) {
+            commands.entity(root).insert(crate::layout::Selected);
+        }
+        let thumb = game_ui.as_deref_mut().and_then(|gu| flags.iter().find_map(|f| gu.icon(&mut images, &s3bake::gamedata::face_thumb_name(p.instance, *f))));
+        if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), thumb) {
             crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
         }
     }
@@ -1048,9 +1257,32 @@ fn cap_test(
                 "breed" => Some(Panel::Breed),
                 "character" | "picker" => Some(Panel::Character),
                 "accessories" => Some(Panel::Accessories),
+                "shape" => Some(Panel::Shape),
                 _ => None,
             };
             cap.test_picker = panel == "picker";
+            // (CAP_SHAPE=<shape name>,...: shaped so; CAP_REGION=<region>: Shape turned to it.)
+            if let (Ok(v), Some(pending), Some(d)) = (std::env::var("CAP_SHAPE"), pending.as_deref_mut(), data.0.as_deref())
+                && let Some(p) = pending.pets.last_mut()
+            {
+                for name in v.split(',') {
+                    if let Some(s) = d.presets.iter().find(|s| s.name.eq_ignore_ascii_case(name.trim())) {
+                        p.shapes.retain(|x| d.presets.iter().find(|q| q.instance == *x).is_none_or(|q| q.region != s.region));
+                        p.shapes.push(s.instance);
+                        info!("create a pet test: shaped {}", s.name);
+                    }
+                }
+            }
+            if let Some(r) = std::env::var("CAP_REGION").ok().and_then(|r| r.parse::<u32>().ok()) {
+                cap.shape_region = r;
+            }
+            // (CAP_BREED=<outfit name>: of that breed.)
+            if let (Ok(b), Some(pending)) = (std::env::var("CAP_BREED"), pending.as_deref_mut())
+                && let Some(p) = pending.pets.last_mut()
+            {
+                p.outfit = s3pkg::fnv64(&b);
+                info!("create a pet test: a {b}");
+            }
             info!("create a pet test: a {kind}, {panel}");
             // (CAP_WEAR=<part name>,...: wearing those accessories.)
             if let (Ok(w), Some(i), Some(d), Some(pending)) = (std::env::var("CAP_WEAR"), cap.pet, data.0.as_deref(), pending.as_deref_mut())
@@ -1094,7 +1326,7 @@ mod tests {
     #[test]
     fn a_new_pet_is_the_mixed_breed_of_its_kind() {
         let breed = |kind: &str, outfit: u64, listed: Option<u32>| s3bake::pets::PetBreed { outfit, kind: kind.into(), listed, ..Default::default() };
-        let data = s3bake::PetsBaked { version: 0, kinds: Vec::new(), breeds: vec![breed("ac", 1, Some(3)), breed("ac", 2, Some(0)), breed("ad", 3, None), breed("ac", 4, None)] };
+        let data = s3bake::PetsBaked { version: 0, kinds: Vec::new(), breeds: vec![breed("ac", 1, Some(3)), breed("ac", 2, Some(0)), breed("ad", 3, None), breed("ac", 4, None)], ..Default::default() };
         let mut rng = rand::rng();
         let cat = new_pet(&data, "ac", &mut rng).unwrap();
         assert_eq!(cat.outfit, 2, "the list's first: the mixed breed");

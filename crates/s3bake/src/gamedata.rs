@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 167;
+pub const GAMEDATA_VERSION: u32 = 168;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2131,6 +2131,70 @@ pub const FACE_MOUTH: u32 = 4;
 pub const FACE_HEAD: u32 = 640;
 pub const FACE_REGIONS: [u32; 4] = [FACE_HEAD, FACE_EYES, FACE_NOSE, FACE_MOUTH];
 
+/// A face (or a pet's body) blend's bone adjustments for the first of its entries whose ages,
+/// sexes and species `want` takes, at that entry's weight (its BOND, or the VPXY that names it).
+pub fn blend_bones(pkgs: &PackageSet, face: &s3formats::sim::BlendInfo, want: impl Fn(u32) -> bool) -> Vec<FaceBone> {
+    let read = |k: &s3pkg::ResourceKey| pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i));
+    for e in &face.entries {
+        for (flags, weight, ki) in &e.bones {
+            if !want(*flags) {
+                continue;
+            }
+            let bond = face.keys.get(*ki as usize).and_then(|bk| {
+                let d = read(bk)?;
+                if bk.t == s3formats::sim::T_BOND {
+                    return s3formats::sim::parse_bond(&d).ok();
+                }
+                let inner = s3formats::model::vpxy_keys(&d).into_iter().find(|k| k.t == s3formats::sim::T_BOND)?;
+                s3formats::sim::parse_bond(&read(&inner)?).ok()
+            });
+            if let Some(bond) = bond {
+                return bond.iter().map(|a| FaceBone { bone: a.bone, offset: a.offset.map(|v| v * weight), scale: a.scale.map(|v| v * weight), rotation: a.rotation.map(|v| v * weight) }).collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// A pet kind's age and species bits (`ad`: an adult dog), as blends' entries name them.
+pub fn pet_flags(kind: &str) -> (u32, u32) {
+    let age = if kind.starts_with('c') { 0x04 } else { 0x20 };
+    let species = match kind.as_bytes().get(1) {
+        Some(b'c') => 0x300,
+        Some(b'd') => 0x400,
+        Some(b'l') => 0x500,
+        _ => 0x200,
+    };
+    (age, species)
+}
+
+/// Whether a blend entry's flags are for a pet kind (its species, at its age).
+pub fn for_pet(kind: &str, flags: u32) -> bool {
+    let (age, species) = pet_flags(kind);
+    flags & 0xF00 == species && flags & age != 0
+}
+
+/// Bones' adjustments summed (a breed's blends, each at its amount).
+pub fn add_bones(into: &mut Vec<FaceBone>, bones: &[FaceBone], amount: f32) {
+    for b in bones {
+        let at = match into.iter().position(|x| x.bone == b.bone) {
+            Some(i) => i,
+            None => {
+                into.push(FaceBone { bone: b.bone, ..FaceBone::default() });
+                into.len() - 1
+            }
+        };
+        let x = &mut into[at];
+        for k in 0..3 {
+            x.offset[k] += b.offset[k] * amount;
+            x.scale[k] += b.scale[k] * amount;
+        }
+        for k in 0..4 {
+            x.rotation[k] += b.rotation[k] * amount;
+        }
+    }
+}
+
 /// Whether an age-and-sex prefix ("af", "cu") is among the game's age/gender flags.
 pub fn prefix_in(prefix: &str, flags: u32) -> bool {
     let age = match prefix.as_bytes().first() {
@@ -2588,7 +2652,7 @@ const T_FACE: u32 = 0x0358_B08A;
 
 /// A CBLN: `u32 version, u32 name length (chars), UTF-16 name, u32 region, u32 age/gender,
 /// u32 count, count x {f32 amount, u64 instance, u32 group, u32 type}`.
-fn parse_cbln(d: &[u8]) -> Option<(String, u32, u32, Vec<(f32, u64)>)> {
+pub fn parse_cbln(d: &[u8]) -> Option<(String, u32, u32, Vec<(f32, u64)>)> {
     let u32_at = |p: usize| d.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
     let len = u32_at(4)? as usize;
     if len > 256 || d.len() < 8 + len * 2 {
@@ -4889,7 +4953,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
     // Create a Sim's preset faces: a picture of each as it looks on each age and sex (filed by
     // the preset's instance and `0x10000 | age | sex`).
-    let faces: HashSet<u64> = pkgs.keys_of_type(T_CBLN).filter(|k| k.g == 0).map(|k| k.i).collect();
+    // (And Create a Pet's shapes, the pets' own, filed by sex, species and age.)
+    let faces: HashSet<u64> = pkgs.keys_of_type(T_CBLN).map(|k| k.i).collect();
     let mut seen: HashSet<(u64, u32)> = HashSet::new();
     for dir in &dirs {
         let Ok(tp) = Package::open(dir.join("CasThumbnails.package")) else { continue };

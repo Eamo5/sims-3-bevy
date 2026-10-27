@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 6;
+pub const PETS_VERSION: u32 = 7;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -20,6 +20,70 @@ pub struct PetsBaked {
     pub kinds: Vec<PetKind>,
     /// The game's breeds (its pet outfits), each with its coat painted.
     pub breeds: Vec<PetBreed>,
+    /// The pets' face and body blends (FACE, group 0x48000000), each one's bones by kind.
+    #[serde(default)]
+    pub blends: Vec<PetBlend>,
+    /// Create a Pet's shapes (its compound blends, CBLN: `CAPFaceBody`'s presets).
+    #[serde(default)]
+    pub presets: Vec<PetPreset>,
+}
+
+/// One of the pets' face or body blends ("muzzleShort"), and its bones' adjustments for each kind
+/// of pet it's for (at full strength).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PetBlend {
+    pub instance: u64,
+    pub name: String,
+    pub bones: Vec<(String, Vec<crate::gamedata::FaceBone>)>,
+}
+
+/// One of Create a Pet's shapes: its name, region (`FacialBlend.PresetFacialRegions`: the face,
+/// ears, body, face and body, snout or eyes), the species it's for (its age/species flags), and
+/// its blends at their amounts.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PetPreset {
+    pub instance: u64,
+    pub name: String,
+    pub region: u32,
+    pub flags: u32,
+    pub blends: Vec<(u64, f32)>,
+}
+
+/// Create a Pet's shapes' regions, as their compound blends have them.
+pub const PET_HEAD: u32 = 0xC0;
+pub const PET_EARS: u32 = 0x10;
+pub const PET_BODY: u32 = 0xE400;
+pub const PET_FULL_BODY: u32 = 0x1F_E7D7;
+pub const PET_SNOUT: u32 = 0x1F_0206;
+pub const PET_EYES: u32 = 0x101;
+
+impl PetsBaked {
+    /// A pet's bones' adjustments: its breed's blends, each region's shape chosen laid over them
+    /// (a shape's blends at its amounts, in the breed's place), for its kind.
+    pub fn shape(&self, kind: &str, breed: &PetBreed, presets: &[u64]) -> Vec<crate::gamedata::FaceBone> {
+        let mut amounts: Vec<(u64, f32)> = breed.blends.clone();
+        for p in presets.iter().filter_map(|i| self.presets.iter().find(|p| p.instance == *i)) {
+            for (b, a) in &p.blends {
+                match amounts.iter_mut().find(|x| x.0 == *b) {
+                    Some(x) => x.1 = *a,
+                    None => amounts.push((*b, *a)),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for (b, a) in amounts {
+            if let Some(bones) = self.blends.iter().find(|x| x.instance == b).and_then(|x| x.bones.iter().find(|(k, _)| k == kind)) {
+                crate::gamedata::add_bones(&mut out, &bones.1, a);
+            }
+        }
+        out
+    }
+
+    /// The shapes Create a Pet offers a kind of pet for a region (its species'), in the game's order.
+    pub fn presets_for(&self, kind: &str, region: u32) -> Vec<&PetPreset> {
+        let (_, species) = crate::gamedata::pet_flags(kind);
+        self.presets.iter().filter(|p| p.region == region && p.flags & 0xF00 == species && !p.blends.is_empty()).collect()
+    }
 }
 
 /// A breed: one of the game's pet outfits (`SIMO`, group 0x48000000), with its coat composited
@@ -48,6 +112,9 @@ pub struct PetBreed {
     /// The game's picture of it (its Create a Pet thumbnail, PNG, made smaller).
     #[serde(default)]
     pub thumb: Vec<u8>,
+    /// Its build: its outfit's face and body blends (FACE instances) at their amounts.
+    #[serde(default)]
+    pub blends: Vec<(u64, f32)>,
 }
 
 /// The texture-store key of a breed's coat.
@@ -370,7 +437,9 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 }
             }
         }
-        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), name: String::new(), listed: None, thumb: Vec::new() })
+        // Its build: the outfit's face and body blends, at their amounts.
+        let blends = o.faces.iter().map(|(k, a)| (k.i, *a)).collect();
+        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), name: String::new(), listed: None, thumb: Vec::new(), blends })
     })
     .into_iter()
     .flatten()
@@ -411,13 +480,69 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
     textures.dedup();
     let n = crate::bake::bake_textures(root, pkgs, &textures, 1024, "Converting pets", progress);
     progress(&format!("Converting: {} pet breeds", breeds.len()));
-    write_value(&root.global_dir().join("pets.bin"), &PetsBaked { version: PETS_VERSION, kinds, breeds }).map_err(|e| e.to_string())?;
+    // Create a Pet's shapes (the pets' compound blends), and every blend the breeds and shapes
+    // use, with its bones for each kind it's for.
+    progress("Converting: pet shapes…");
+    let mut presets: Vec<PetPreset> = Vec::new();
+    let mut cblns: Vec<s3pkg::ResourceKey> = pkgs.keys_of_type(0x051D_F2DD).filter(|k| k.g != 0).copied().collect();
+    cblns.sort();
+    cblns.dedup_by_key(|k| k.i);
+    for k in cblns {
+        let Some((name, region, flags, entries)) = read(&k).and_then(|d| crate::gamedata::parse_cbln(&d)) else { continue };
+        if !matches!(flags & 0xF00, 0x200..=0x500) {
+            continue;
+        }
+        presets.push(PetPreset { instance: k.i, name, region, flags, blends: entries.into_iter().map(|(a, i)| (i, a)).collect() });
+    }
+    // (In their natural order: "Preset2" before "Preset10".)
+    presets.sort_by_key(|p| {
+        let digits: String = p.name.chars().filter(|c| c.is_ascii_digit()).collect();
+        (p.region, p.name.to_ascii_lowercase().trim_end_matches(|c: char| c.is_ascii_digit()).to_string(), digits.parse::<u32>().unwrap_or(0))
+    });
+    let mut wanted: Vec<u64> = breeds.iter().flat_map(|b| b.blends.iter().map(|x| x.0)).chain(presets.iter().flat_map(|p| p.blends.iter().map(|x| x.0))).collect();
+    wanted.sort();
+    wanted.dedup();
+    const SHAPED: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
+    let blends: Vec<PetBlend> = crate::bake::par_map(&wanted, |i| {
+        let face = pkgs.read_ti(0x0358_B08A, *i).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok())?;
+        let bones: Vec<(String, Vec<crate::gamedata::FaceBone>)> = SHAPED
+            .iter()
+            .map(|k| (k.to_string(), crate::gamedata::blend_bones(pkgs, &face, |f| crate::gamedata::for_pet(k, f))))
+            .filter(|(_, b)| !b.is_empty())
+            .collect();
+        (!bones.is_empty()).then(|| PetBlend { instance: *i, name: face.name.clone(), bones })
+    })
+    .into_iter()
+    .flatten()
+    .collect();
+    write_value(&root.global_dir().join("pets.bin"), &PetsBaked { version: PETS_VERSION, kinds, breeds, blends, presets }).map_err(|e| e.to_string())?;
     Ok(n)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shape_lays_its_blends_over_the_breeds() {
+        let bone = |b: u32, y: f32| crate::gamedata::FaceBone { bone: b, offset: [0.0, y, 0.0], ..Default::default() };
+        let blend = |i: u64, bones: Vec<crate::gamedata::FaceBone>| PetBlend { instance: i, name: String::new(), bones: vec![("ad".into(), bones)] };
+        let data = PetsBaked {
+            blends: vec![blend(1, vec![bone(7, 1.0)]), blend(2, vec![bone(8, 1.0)])],
+            presets: vec![PetPreset { instance: 9, name: "petSnoutDogShort".into(), region: PET_SNOUT, flags: 0x1420, blends: vec![(1, 0.25), (2, 1.0)] }],
+            ..Default::default()
+        };
+        let breed = PetBreed { kind: "ad".into(), blends: vec![(1, 0.5)], ..Default::default() };
+        let y = |bones: &[crate::gamedata::FaceBone], b: u32| bones.iter().find(|x| x.bone == b).map_or(0.0, |x| x.offset[1]);
+        let plain = data.shape("ad", &breed, &[]);
+        assert_eq!((y(&plain, 7), y(&plain, 8)), (0.5, 0.0));
+        // (The shape's amounts in place of the breed's; its own blends besides.)
+        let shaped = data.shape("ad", &breed, &[9]);
+        assert_eq!((y(&shaped, 7), y(&shaped, 8)), (0.25, 1.0));
+        assert!(data.shape("ac", &breed, &[9]).is_empty(), "a dog's blends aren't a cat's");
+        assert_eq!(data.presets_for("ad", PET_SNOUT).len(), 1);
+        assert!(data.presets_for("ac", PET_SNOUT).is_empty());
+    }
 
     #[test]
     fn the_games_breeds_list() {
