@@ -160,6 +160,9 @@ pub struct ActiveBuilding {
     /// The covering the foundation's sides are in (a Foundations panel style's; none: the
     /// house's own).
     pub foundation_cover: Option<Key>,
+    /// The curved pieces of the household's pools (the Curved Pool tool's), each shaping the
+    /// pool tiles under it.
+    pub pool_curves: Vec<PoolCurve>,
     /// The stair style the household's staircases are built in (the house's own, or one of the
     /// town's): its pieces and railings.
     pub stair_style: Option<StairBaked>,
@@ -570,6 +573,34 @@ mod foundation_tests {
         assert_eq!(rect.len(), 1);
         let (a0, c0, a1, c1) = rect[0].1;
         assert!(((a1 - a0) - 2.0 * 2f32.sqrt()).abs() < 1e-4 && ((c1 - c0) - 2.0 * 2f32.sqrt()).abs() < 1e-4, "{:?}", rect[0].1);
+    }
+    #[test]
+    fn a_curved_pool_piece_rounds_a_corner_off_or_fills_one_in() {
+        let convex = PoolCurve { x: 2, z: 2, w: 2, h: 2, corner: 0, concave: false };
+        assert_eq!((convex.k(), convex.o()), (Vec2::new(2.0, 2.0), Vec2::new(4.0, 4.0)));
+        // (The pool's toward the far corner, the near one rounded off.)
+        assert!(convex.inside(Vec2::new(3.0, 3.0)) && convex.inside(Vec2::new(3.9, 3.9)) && !convex.inside(Vec2::new(2.1, 2.1)));
+        assert!(convex.side_is_pool(Vec2::new(4.0, 2.0), Vec2::new(4.0, 3.0)) && !convex.side_is_pool(Vec2::new(2.0, 2.0), Vec2::new(3.0, 2.0)));
+        // (Its curve from one side through the far corner to the other.)
+        let arc = convex.arc();
+        assert!(arc[0].distance(Vec2::new(2.0, 4.0)) < 1e-4 && arc[arc.len() - 1].distance(Vec2::new(4.0, 2.0)) < 1e-4);
+        assert!(convex.tiles().iter().all(|t| t.2));
+        // (Concave: the corner itself kept dry, filled in where the pool was.)
+        let concave = PoolCurve { concave: true, ..convex };
+        assert!(!concave.inside(Vec2::new(2.1, 2.1)) && concave.inside(Vec2::new(3.9, 3.9)));
+        let mut b = deck_lot();
+        for x in 2..6 {
+            for z in 2..6 {
+                apply_paint(&mut b, &PaintOp::AddPool { x, z });
+            }
+        }
+        apply_paint(&mut b, &PaintOp::AddPoolCurve { curve: concave });
+        assert!(!b.pool.iter().any(|f| (f.x, f.z) == (2, 2)));
+        assert_eq!(b.pool.len(), 15);
+        // (A turned one: the corner at the rectangle's most x.)
+        let turned = PoolCurve { x: 2, z: 2, w: 3, h: 2, corner: 1, concave: false };
+        assert_eq!((turned.k(), turned.o()), (Vec2::new(5.0, 2.0), Vec2::new(2.0, 4.0)));
+        assert!(turned.inside(Vec2::new(2.2, 3.8)) && !turned.inside(Vec2::new(4.9, 2.1)));
     }
     #[test]
     fn half_a_tile_of_basement_is_walled_along_the_diagonal() {
@@ -1007,6 +1038,9 @@ pub enum PaintOp {
     /// A pool tile dug (on the ground floor, out of doors), or filled in again.
     AddPool { x: u16, z: u16 },
     RemovePool { x: u16, z: u16 },
+    /// A curved piece of pool laid (the Curved Pool tool's): its tiles dug where it reaches
+    /// into them, filled in where it doesn't, and shaped by it (see [`PoolCurve`]).
+    AddPoolCurve { curve: PoolCurve },
     /// A tile of foundation laid (the ground floor raised on it, the game's 0.75 m up, over the
     /// highest ground under it, as it was when laid), or taken away again: the whole tile, or
     /// its triangles in `mask` (half a tile, along a diagonal foundation's edge).
@@ -1132,6 +1166,7 @@ pub struct BuildingSnapshot {
     roofs_on: bool,
     pond: BTreeMap<(u16, u16), f32>,
     foundation_cover: Option<Key>,
+    pool_curves: Vec<PoolCurve>,
     levels: Vec<f32>,
     top_level: u8,
     center: Vec3,
@@ -1142,7 +1177,7 @@ impl BuildingSnapshot {
     pub fn capture(b: &ActiveBuilding, paint: Option<&LotPaint>) -> Self {
         Self {
             data: b.data.clone(), built: b.built.clone(), stairs: b.built_stairs.clone(),
-            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, pond: b.pond.clone(), foundation_cover: b.foundation_cover, levels: b.levels.clone(), top_level: b.top_level,
+            roof: b.roof_texture, roof_style: b.roof_style, roof_pitch: b.roof_pitch, roofs_on: b.roofs_on, pond: b.pond.clone(), foundation_cover: b.foundation_cover, pool_curves: b.pool_curves.clone(), levels: b.levels.clone(), top_level: b.top_level,
             center: b.center, paint: paint.cloned().unwrap_or_default(),
         }
     }
@@ -1166,6 +1201,7 @@ pub fn restore_history(
     b.roof_pitch = snapshot.roof_pitch;
     b.roofs_on = snapshot.roofs_on;
     b.foundation_cover = snapshot.foundation_cover;
+    b.pool_curves = snapshot.pool_curves;
     if b.pond != snapshot.pond {
         b.pond = snapshot.pond;
         b.pond_gen = b.pond_gen.wrapping_add(1);
@@ -1289,7 +1325,18 @@ pub fn repaint(
                 b.pond_gen = b.pond_gen.wrapping_add(1);
             }
             PaintOp::AddFence { .. } | PaintOp::RemoveFence { .. } => fences_changed = true,
-            PaintOp::AddPool { .. } | PaintOp::RemovePool { .. } | PaintOp::AddFountain { .. } | PaintOp::RemoveFountain { .. } => pool_changed = true,
+            PaintOp::AddPool { x, z } | PaintOp::RemovePool { x, z } => {
+                // (A tile of a curved piece dug or filled in square: the piece gone, its other
+                // tiles left as they are.)
+                b.pool_curves.retain(|c| !c.covers(x, z));
+                pool_changed = true;
+            }
+            PaintOp::AddPoolCurve { curve } => {
+                b.pool_curves.retain(|c| !c.overlaps(&curve));
+                b.pool_curves.push(curve);
+                pool_changed = true;
+            }
+            PaintOp::AddFountain { .. } | PaintOp::RemoveFountain { .. } => pool_changed = true,
             PaintOp::AddFoundation { .. } | PaintOp::RemoveFoundation { .. } => {
                 foundation_changed = true;
                 floors_changed = true;
@@ -1838,6 +1885,19 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
             }
         }
         PaintOp::RemovePool { x, z } => b.pool.retain(|f| !(f.x == x && f.z == z)),
+        PaintOp::AddPoolCurve { curve } => {
+            for (x, z, wet) in curve.tiles() {
+                let have = b.pool.iter().any(|f| f.x == x && f.z == z);
+                if wet && !have && (x as u32) < b.width && (z as u32) < b.depth {
+                    b.pool.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_OUTSIDE, region: 0, cover: [NO_COVER; 4], y: None });
+                } else if !wet && have {
+                    b.pool.retain(|f| !(f.x == x && f.z == z));
+                }
+            }
+            if b.pool_depth == 0.0 {
+                b.pool_depth = POOL_DEPTH;
+            }
+        }
         PaintOp::AddFountain { x, z } => {
             let g = b.levels[0];
             let built = |f: &s3bake::types::FountainBaked| (f.floor - (g - BUILT_FOUNTAIN_DEPTH)).abs() < 0.001 && (f.rim - (g + BUILT_FOUNTAIN_RIM)).abs() < 0.001;
@@ -2168,6 +2228,104 @@ fn remove_basement(b: &mut LotBuildingBaked, x: u16, z: u16, mask: u8) {
     }
 }
 
+/// A curved piece of pool (the Curved Pool tool's adjustable piece): a rectangle of `w` by `h`
+/// tiles from tile (`x`, `z`), its curve a quarter ellipse as wide and deep, about the corner
+/// diagonal from `corner` (0: the rectangle's least x and z, then round: 1 most x, 2 most x and
+/// z, 3 most z): the pool inside it (convex, a pool's corner rounded off), or (concave) the pool
+/// outside one about `corner` itself (an inner corner filled in to the curve). Either way the
+/// pool reaches the rectangle's sides through the far corner, not those through `corner`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoolCurve {
+    pub x: u16,
+    pub z: u16,
+    pub w: u8,
+    pub h: u8,
+    pub corner: u8,
+    pub concave: bool,
+}
+
+impl PoolCurve {
+    /// The rectangle's corners, in order round from its least x and z.
+    fn corners(&self) -> [Vec2; 4] {
+        let (x0, z0) = (self.x as f32, self.z as f32);
+        let (x1, z1) = (x0 + self.w as f32, z0 + self.h as f32);
+        [Vec2::new(x0, z0), Vec2::new(x1, z0), Vec2::new(x1, z1), Vec2::new(x0, z1)]
+    }
+
+    /// The corner the pool keeps away from, and the one diagonal from it.
+    pub fn k(&self) -> Vec2 {
+        self.corners()[self.corner as usize % 4]
+    }
+
+    pub fn o(&self) -> Vec2 {
+        self.corners()[(self.corner as usize + 2) % 4]
+    }
+
+    /// The curve's middle: `o` for a convex piece, `k` for a concave one.
+    fn centre(&self) -> Vec2 {
+        if self.concave { self.k() } else { self.o() }
+    }
+
+    /// Whether a lot-local point is in the pool's part of it.
+    pub fn inside(&self, p: Vec2) -> bool {
+        let lo = self.corners()[0];
+        let hi = self.corners()[2];
+        if p.x < lo.x - 1e-4 || p.y < lo.y - 1e-4 || p.x > hi.x + 1e-4 || p.y > hi.y + 1e-4 {
+            return false;
+        }
+        let d = (p - self.centre()) / Vec2::new(self.w as f32, self.h as f32);
+        (d.length_squared() <= 1.0) != self.concave
+    }
+
+    /// The curve, from where it meets one of the rectangle's sides through `o` to the other (as
+    /// many points as it needs to look round).
+    pub fn arc(&self) -> Vec<Vec2> {
+        let c = self.centre();
+        let (kx, kz) = (self.k().x, self.k().y);
+        let (ox, oz) = (self.o().x, self.o().y);
+        // (From the centre, out along x toward the far side, round to out along z.)
+        let (sx, sz) = if self.concave { ((ox - kx).signum(), (oz - kz).signum()) } else { ((kx - ox).signum(), (kz - oz).signum()) };
+        let n = (4 * self.w.max(self.h) as usize).max(6);
+        (0..=n)
+            .map(|i| {
+                let t = i as f32 / n as f32 * std::f32::consts::FRAC_PI_2;
+                c + Vec2::new(sx * self.w as f32 * t.cos(), sz * self.h as f32 * t.sin())
+            })
+            .collect()
+    }
+
+    /// Its tiles, each with whether the pool reaches into it.
+    pub fn tiles(&self) -> Vec<(u16, u16, bool)> {
+        let mut out = Vec::new();
+        for z in self.z..self.z + self.h as u16 {
+            for x in self.x..self.x + self.w as u16 {
+                // (Somewhere in the tile, a little way in from its edges.)
+                let wet = (0..5).any(|i| (0..5).any(|j| self.inside(Vec2::new(x as f32 + 0.1 + i as f32 * 0.2, z as f32 + 0.1 + j as f32 * 0.2))));
+                out.push((x, z, wet));
+            }
+        }
+        out
+    }
+
+    /// Whether tile (`x`, `z`) is in its rectangle.
+    pub fn covers(&self, x: u16, z: u16) -> bool {
+        x >= self.x && z >= self.z && x < self.x + self.w as u16 && z < self.z + self.h as u16
+    }
+
+    pub fn overlaps(&self, o: &PoolCurve) -> bool {
+        self.x < o.x + o.w as u16 && o.x < self.x + self.w as u16 && self.z < o.z + o.h as u16 && o.z < self.z + self.h as u16
+    }
+
+    /// Whether the side of its rectangle between two corners (a tile's side along it) is the
+    /// pool's: those through `o` are, those through `k` aren't.
+    pub fn side_is_pool(&self, a: Vec2, b: Vec2) -> bool {
+        let o = self.o();
+        let on = |p: Vec2| (p.x - o.x).abs() < 1e-3 || (p.y - o.y).abs() < 1e-3;
+        let along = |p: Vec2, q: Vec2| ((p.x - q.x).abs() < 1e-3 && (p.x - o.x).abs() < 1e-3) || ((p.y - q.y).abs() < 1e-3 && (p.y - o.y).abs() < 1e-3);
+        on(a) && on(b) && along(a, b)
+    }
+}
+
 /// A pool let into the ground: its tiled floor and sides, a stone coping round the edge, and
 /// the water (given its material by the water module).
 fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut AssetCtx, b: &LotBuildingBaked, active: &ActiveBuilding, neighbor: Option<Entity>) -> Vec<Entity> {
@@ -2184,7 +2342,16 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
     let mut bufs: HashMap<Key, MeshBuf> = HashMap::new();
     let mut coping = MeshBuf::default();
     let mut water = MeshBuf::default();
+    let curves = &active.pool_curves;
+    let curve_of = |x: i32, z: i32| curves.iter().find(|c| x >= 0 && z >= 0 && c.covers(x as u16, z as u16));
+    // (Whether the pool goes on past a tile's side, from (`a`) to (`c`), into the tile there: one
+    // of a curved piece's only along its sides through its far corner.)
+    let wet = |tx: i32, tz: i32, a: (f32, f32), c: (f32, f32)| tiles.contains(&(tx, tz)) && curve_of(tx, tz).is_none_or(|cv| cv.side_is_pool(Vec2::new(a.0, a.1), Vec2::new(c.0, c.1)));
     for f in &b.pool {
+        // (A curved piece's tiles are drawn with it.)
+        if curve_of(f.x as i32, f.z as i32).is_some() {
+            continue;
+        }
         let (x, z) = (f.x as f32, f.z as f32);
         let key = f.cover.iter().find_map(|&c| cover_key(c)).unwrap_or(STYLE_FLOOR_TERRACOTTA);
         let buf = bufs.entry(key).or_default();
@@ -2200,7 +2367,7 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
         );
         // Sides where the pool ends: tiled down to the floor, the coping along the top.
         for (dx, dz, a, c) in [(-1, 0, (x, z + 1.0), (x, z)), (1, 0, (x + 1.0, z), (x + 1.0, z + 1.0)), (0, -1, (x, z), (x + 1.0, z)), (0, 1, (x + 1.0, z + 1.0), (x, z + 1.0))] {
-            if tiles.contains(&(f.x as i32 + dx, f.z as i32 + dz)) {
+            if wet(f.x as i32 + dx, f.z as i32 + dz, a, c) {
                 continue;
             }
             let inward = active.dir(-dx as f32, -dz as f32);
@@ -2228,6 +2395,70 @@ fn spawn_pool(commands: &mut Commands, assets: &mut ObjectAssets, ctx: &mut Asse
             let (ox, oz) = (dx as f32 * 0.3, dz as f32 * 0.3);
             let q = [active.world(cx, cz, y), active.world(cx + ox, cz, y), active.world(cx + ox, cz + oz, y), active.world(cx, cz + oz, y)];
             coping.quad(q, [[0.0, 0.0], [0.3, 0.0], [0.3, 0.3], [0.0, 0.3]], Vec3::Y);
+        }
+    }
+    // The curved pieces: floor and water a fan from the far corner over the curve, the curve's
+    // side tiled down to the floor with the coping round it, and the sides through the far
+    // corner where the pool doesn't go on past them.
+    for cv in curves {
+        let key = b.pool.iter().filter(|f| cv.covers(f.x, f.z)).find_map(|f| f.cover.iter().find_map(|&c| cover_key(c))).unwrap_or(STYLE_FLOOR_TERRACOTTA);
+        let buf = bufs.entry(key).or_default();
+        let (arc, o) = (cv.arc(), cv.o());
+        for s in arc.windows(2) {
+            let (p, q) = (s[0], s[1]);
+            let uv = |v: Vec2| [v.x, v.y];
+            buf.tri([active.world(o.x, o.y, floor_y), active.world(p.x, p.y, floor_y), active.world(q.x, q.y, floor_y)], [uv(o), uv(p), uv(q)], Vec3::Y);
+            water.tri([active.world(o.x, o.y, water_y), active.world(p.x, p.y, water_y), active.world(q.x, q.y, water_y)], [uv(o), uv(p), uv(q)], Vec3::Y);
+            // (Into the pool: toward the far corner's side of the curve.)
+            let mid = (p + q) * 0.5;
+            let along = (q - p).normalize_or_zero();
+            let mut inward = along.perp();
+            if inward.dot(o - mid) < 0.0 {
+                inward = -inward;
+            }
+            let (yp, yq) = (ground_y(p.x, p.y), ground_y(q.x, q.y));
+            let len = p.distance(q);
+            buf.quad(
+                [active.world(p.x, p.y, floor_y), active.world(q.x, q.y, floor_y), active.world(q.x, q.y, yq), active.world(p.x, p.y, yp)],
+                [[0.0, 0.0], [len, 0.0], [len, yq - floor_y], [0.0, yp - floor_y]],
+                active.dir(inward.x, inward.y),
+            );
+            let out = -inward * 0.3;
+            coping.quad(
+                [active.world(p.x, p.y, yp + 0.04), active.world(q.x, q.y, yq + 0.04), active.world(q.x + out.x, q.y + out.y, yq + 0.04), active.world(p.x + out.x, p.y + out.y, yp + 0.04)],
+                [[0.0, 0.0], [len, 0.0], [len, 0.3], [0.0, 0.3]],
+                Vec3::Y,
+            );
+        }
+        // (Its sides through the far corner, a tile at a time.)
+        let middle = (cv.k() + o) * 0.5;
+        for end in [arc[0], arc[arc.len() - 1]] {
+            let steps = o.distance(end).round().max(1.0) as i32;
+            let dir = (end - o) / steps as f32;
+            for s in 0..steps {
+                let (p, q) = (o + dir * s as f32, o + dir * (s + 1) as f32);
+                let m = (p + q) * 0.5;
+                let mut out = dir.normalize_or_zero().perp();
+                if out.dot(m - middle) < 0.0 {
+                    out = -out;
+                }
+                let beyond = (m + out * 0.5).floor();
+                if wet(beyond.x as i32, beyond.y as i32, (p.x, p.y), (q.x, q.y)) {
+                    continue;
+                }
+                let (yp, yq) = (ground_y(p.x, p.y), ground_y(q.x, q.y));
+                buf.quad(
+                    [active.world(p.x, p.y, floor_y), active.world(q.x, q.y, floor_y), active.world(q.x, q.y, yq), active.world(p.x, p.y, yp)],
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, yq - floor_y], [0.0, yp - floor_y]],
+                    active.dir(-out.x, -out.y),
+                );
+                let o3 = out * 0.3;
+                coping.quad(
+                    [active.world(p.x, p.y, yp + 0.04), active.world(q.x, q.y, yq + 0.04), active.world(q.x + o3.x, q.y + o3.y, yq + 0.04), active.world(p.x + o3.x, p.y + o3.y, yp + 0.04)],
+                    [[0.0, 0.0], [1.0, 0.0], [1.0, 0.3], [0.0, 0.3]],
+                    Vec3::Y,
+                );
+            }
         }
     }
     for (key, buf) in bufs {
@@ -3084,6 +3315,7 @@ pub fn spawn_building(
         pond: BTreeMap::new(),
         pond_gen: 0,
         foundation_cover: None,
+        pool_curves: Vec::new(),
         stair_style: b.stairs.iter().find(|s| s.flight.is_some()).cloned(),
         away: None,
         wall_entities: HashMap::new(),

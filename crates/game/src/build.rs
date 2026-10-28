@@ -47,6 +47,9 @@ pub enum BuildTool {
     Fence,
     /// Dig a pool out of doors on the ground floor.
     Pool,
+    /// Lay a curved piece of pool, convex or concave, as wide and deep as the panel's sliders
+    /// (the game's adjustable Curved Pool tool).
+    CurvedPool,
     /// Lay a foundation, the ground floor raised on it (before the walls go up).
     Foundation,
     /// A foundation turned 45°: a diamond, its edges along the tiles' diagonals (the game's
@@ -80,6 +83,7 @@ impl BuildTool {
             BuildTool::Sledgehammer => "Sledgehammer\nknock down walls".to_string(),
             BuildTool::Fence => "Fence Tool".to_string(),
             BuildTool::Pool => format!("Pool Tool\n§{POOL_PRICE} a tile"),
+            BuildTool::CurvedPool => format!("Curved Pool Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Foundation => format!("Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::DiagonalFoundation => format!("Diagonal Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::Basement => format!("Basement Tool\n§{BASEMENT_PRICE} a tile"),
@@ -101,6 +105,7 @@ impl BuildTool {
             BuildTool::Sledgehammer => "Drag along a wall to knock it down.",
             BuildTool::Fence => "Drag along the grid to put up the fence; Ctrl+drag takes fencing down.",
             BuildTool::Pool => "Drag out a pool on the ground out of doors; Ctrl+drag fills it in. Buy a pool ladder for Sims to swim.",
+            BuildTool::CurvedPool => "Click to lay a curved piece of pool (convex or concave, sized on the panel); , and . turn it. Ctrl+click fills a piece in.",
             BuildTool::Foundation => "Drag out a foundation to build the house on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::DiagonalFoundation => "Drag out a diamond of foundation to build a house turned 45° on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::Basement => "Drag out a basement to dig under the house; Ctrl+drag fills it in. Page Down to go down and build there; stairs lead up from it.",
@@ -645,8 +650,16 @@ pub fn plan_pool(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cu
             let (x, z) = (x as u16, z as u16);
             let pool = b.data.pool.iter().any(|f| f.x == x && f.z == z);
             if removing {
-                if pool {
-                    ops.push(PaintOp::RemovePool { x, z });
+                // (A curved piece filled in whole.)
+                let piece: Vec<(u16, u16)> = match b.pool_curves.iter().find(|c| c.covers(x, z)) {
+                    Some(c) => c.tiles().into_iter().map(|(x, z, _)| (x, z)).collect(),
+                    None => vec![(x, z)],
+                };
+                for (x, z) in piece {
+                    let op = PaintOp::RemovePool { x, z };
+                    if b.data.pool.iter().any(|f| f.x == x && f.z == z) && !ops.contains(&op) {
+                        ops.push(op);
+                    }
                 }
                 continue;
             }
@@ -660,6 +673,41 @@ pub fn plan_pool(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cu
     }
     let cost = if removing { 0 } else { ops.len() as i64 * POOL_PRICE };
     (ops, cost)
+}
+
+/// The Curved Pool tool's piece with its middle tile at `cur`, turned `turn` quarter turns:
+/// `size` tiles wide and deep (turned with it), its curve away from the corner `turn` names.
+pub fn pool_curve_at(cur: IVec2, turn: u8, size: [u8; 2], concave: bool) -> crate::building::PoolCurve {
+    let (w, h) = (size[0].clamp(1, 5), size[1].clamp(1, 5));
+    let (w, h) = if turn % 2 == 1 { (h, w) } else { (w, h) };
+    let x = (cur.x - (w as i32 - 1) / 2).max(0) as u16;
+    let z = (cur.y - (h as i32 - 1) / 2).max(0) as u16;
+    crate::building::PoolCurve { x, z, w, h, corner: turn % 4, concave }
+}
+
+/// A curved piece of pool laid (on the ground out of doors, not under a floor or a staircase):
+/// its op and what it costs (each tile it digs anew, as a pool's), or why not.
+pub fn plan_pool_curve(b: &ActiveBuilding, level: u8, curve: crate::building::PoolCurve) -> Result<(Vec<PaintOp>, i64), &'static str> {
+    if level != 1 {
+        return Err("Pools go on the ground floor.");
+    }
+    if curve.x as u32 + curve.w as u32 > b.data.width || curve.z as u32 + curve.h as u32 > b.data.depth {
+        return Err("The pool has to be on the lot.");
+    }
+    let mut dug = 0;
+    for (x, z, wet) in curve.tiles() {
+        let pool = b.data.pool.iter().any(|f| f.x == x && f.z == z);
+        if !wet || pool {
+            continue;
+        }
+        let floored = b.data.floors.iter().any(|f| f.x == x && f.z == z);
+        let stairs = b.built_stairs.iter().any(|s| s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+        if floored || stairs {
+            return Err("A pool can't go there.");
+        }
+        dug += 1;
+    }
+    Ok((vec![PaintOp::AddPoolCurve { curve }], dug * POOL_PRICE))
 }
 
 /// A fountain built over the tiles from `start` to `cur` (or taken out), on the ground out of
@@ -1091,7 +1139,7 @@ fn build_tool(
     }
     let local = b.local(ray.origin + *ray.direction * t);
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
-    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::Foundation | BuildTool::Basement | BuildTool::Fountain);
+    let tiles = matches!(tool, BuildTool::Floor | BuildTool::Stairs | BuildTool::Pool | BuildTool::CurvedPool | BuildTool::Foundation | BuildTool::Basement | BuildTool::Fountain);
     let cur = if tiles {
         IVec2::new((local.x.floor() as i32).clamp(0, w - 1), (local.y.floor() as i32).clamp(0, d - 1))
     } else {
@@ -1178,6 +1226,93 @@ fn build_tool(
             g.dirty = true;
         }
         play.write(crate::sound::PlaySound::ui(if removing { "ui_build_walldelete_section" } else { "ui_build_stair_plop" }));
+        return;
+    }
+    if tool == BuildTool::CurvedPool {
+        if keys.just_pressed(KeyCode::Comma) {
+            drag.stair_dir = (drag.stair_dir + 1) % 4;
+        }
+        if keys.just_pressed(KeyCode::Period) {
+            drag.stair_dir = (drag.stair_dir + 3) % 4;
+        }
+        for (e, ..) in &label {
+            commands.entity(e).try_despawn();
+        }
+        drag.start = None;
+        let at = |p: Vec2, h: f32| b.world(p.x, p.y, y + h);
+        // (Ctrl: the piece under the pointer filled in.)
+        if removing {
+            let p = cur.as_vec2();
+            let c = Color::srgb(1.0, 0.35, 0.25);
+            for (a, q) in [(p, p + Vec2::X), (p + Vec2::X, p + Vec2::ONE), (p + Vec2::ONE, p + Vec2::Y), (p + Vec2::Y, p)] {
+                gizmos.line(at(a, 0.03), at(q, 0.03), c);
+            }
+            if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+                return;
+            }
+            let (ops, _) = plan_pool(b, true, level, cur, cur);
+            if ops.is_empty() {
+                return;
+            }
+            let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
+            let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+            crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+            crate::buyhistory::record_construction(&mut commands, before, b, &ops, 0, removed.0.clone(), Vec::new());
+            match log.as_mut() {
+                Some(l) => l.0.extend(ops),
+                None => commands.insert_resource(crate::building::LotPaint(ops)),
+            }
+            if let Some(g) = grid.as_mut() {
+                g.dirty = true;
+            }
+            play.write(crate::sound::PlaySound::ui("ui_build_pool_mup"));
+            return;
+        }
+        let curve = pool_curve_at(cur, drag.stair_dir, [buy.curve_size[0] + 1, buy.curve_size[1] + 1], buy.curve_concave);
+        let plan = plan_pool_curve(b, level, curve);
+        // The piece's outline: its curve and its sides through the far corner, green where it
+        // fits; its rectangle faintly.
+        let color = if plan.is_ok() { Color::srgb(0.35, 1.0, 0.45) } else { Color::srgb(0.9, 0.2, 0.2) };
+        let arc = curve.arc();
+        for s in arc.windows(2) {
+            gizmos.line(at(s[0], 0.04), at(s[1], 0.04), color);
+        }
+        let o = curve.o();
+        gizmos.line(at(o, 0.04), at(arc[0], 0.04), color);
+        gizmos.line(at(o, 0.04), at(arc[arc.len() - 1], 0.04), color);
+        let k = curve.k();
+        gizmos.line(at(k, 0.04), at(arc[0], 0.04), color.with_alpha(0.3));
+        gizmos.line(at(k, 0.04), at(arc[arc.len() - 1], 0.04), color.with_alpha(0.3));
+        if !mouse.just_pressed(MouseButton::Left) || over_ui.0 {
+            return;
+        }
+        let (ops, cost) = match plan {
+            Ok(p) => p,
+            Err(why) => {
+                notes.push(why);
+                return;
+            }
+        };
+        if household.as_ref().is_some_and(|h| h.funds < cost) {
+            notes.push("You can't afford that.");
+            return;
+        }
+        info!("curved pool piece laid: {curve:?}, §{cost}");
+        let before = crate::building::BuildingSnapshot::capture(b, log.as_deref());
+        if let Some(h) = household.as_mut() {
+            h.funds -= cost;
+        }
+        let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+        crate::building::repaint(&mut commands, b, &mut assets, &mut ctx, &ops, &mut faces);
+        crate::buyhistory::record_construction(&mut commands, before, b, &ops, -cost, removed.0.clone(), Vec::new());
+        match log.as_mut() {
+            Some(l) => l.0.extend(ops),
+            None => commands.insert_resource(crate::building::LotPaint(ops)),
+        }
+        if let Some(g) = grid.as_mut() {
+            g.dirty = true;
+        }
+        play.write(crate::sound::PlaySound::ui("ui_build_pool_mup"));
         return;
     }
     if mouse.just_pressed(MouseButton::Left) && !over_ui.0 {

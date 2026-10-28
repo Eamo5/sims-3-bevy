@@ -125,6 +125,10 @@ pub struct BuyMode {
     /// railings shown there (not the staircases).
     pub stair_style: Option<usize>,
     pub rail_style: Option<usize>,
+    /// The Curved Pool tool's piece: concave (or convex), and its width and depth in tiles less
+    /// one (the panel's sliders, 1 to 5).
+    pub curve_concave: bool,
+    pub curve_size: [u8; 2],
     pub no_rails: bool,
     /// A foundation kind chosen on the Foundations panel, to put the household's in.
     pub foundation_style_pick: Option<usize>,

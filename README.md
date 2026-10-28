@@ -1398,7 +1398,16 @@ installation is unreachable.
   (straight or diagonal, posts at the ends, standing on the ground out of doors), Ctrl+drag
   takes them down, and Sims walk round them. The pool tool digs a pool out of doors (§40 a
   tile, never under a floor or a garage): the ground opens over it, a coping goes round it
-  and the terrain round its edge is laid along the lot's grid; Ctrl+drag fills it in. Pool
+  and the terrain round its edge is laid along the lot's grid; Ctrl+drag fills it in. The
+  panel's Create Curved Pool opens the game's adjustable curved pools beside it (the panel
+  widened as the game's `CurvedPoolAdjustable`): Convex or Concave, and sliders for the
+  piece's width and depth (1 to 5 tiles, the numbers beside them); a click lays the piece
+  there (, and . turn it): a convex one a pool's corner rounded off on a quarter ellipse as
+  big, a concave one an inner corner filled in to the curve, the pool dug where it reaches
+  (§40 a tile anew) and filled in where it doesn't; its floor, water, tiled side and coping
+  follow the curve, the ground laid back over its dry part. Ctrl+click fills a piece in.
+  `BUILD_POOL=1` with `--build`, `POOL_RECTS`, `POOL_CURVES=<x,z,w,h,corner,concave>;...`,
+  `CURVE_SIZE=<w>x<h>` (tests). Pool
   ladders from the catalogue snap to a pool's edge, and Sims swim in the pool they stand
   at (a lot's other pools are left alone). The Foundation tool (the game's Foundations panel)
   drags out a foundation to build on (§20 a tile): the ground floor raised the game's 0.75 m
@@ -1827,7 +1836,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools); Create a Pet's Advanced coat painting and fur shapes; complete object placement and routing compatibility; the rest of the expansions'
+Create a Pet's Advanced coat painting and fur shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

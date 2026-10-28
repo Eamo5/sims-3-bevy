@@ -3611,6 +3611,37 @@ fn auto_build(
             apply(&mut commands, &mut assets, b, &mut ctx, ops);
             *stage = 3;
         }
+        0 if time.elapsed_secs() - t0 > 3.0 && std::env::var("BUILD_POOL").is_ok() => {
+            // (BUILD_POOL=1: a pool dug there instead of the room, and POOL_CURVES=<x,z,w,h,corner,
+            // concave 0|1>;... curved pieces laid after it.)
+            let (ops, cost) = crate::build::plan_pool(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1));
+            let c = b.world(x as f32 + w as f32 * 0.5, z as f32 + d as f32 * 0.5, 0.0);
+            info!("build test: pool — {} tiles, §{cost}, at {:.1},{:.1}", ops.len(), c.x, c.z);
+            apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            // (POOL_RECTS=<x,z,w,h>;...: more dug beside it.)
+            for r in std::env::var("POOL_RECTS").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
+                let n: Vec<i32> = r.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                let [rx, rz, rw, rh] = n[..] else { continue };
+                let (ops, _) = crate::build::plan_pool(b, false, 1, IVec2::new(rx, rz), IVec2::new(rx + rw - 1, rz + rh - 1));
+                apply(&mut commands, &mut assets, b, &mut ctx, ops);
+            }
+            for piece in std::env::var("POOL_CURVES").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
+                let n: Vec<u16> = piece.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+                let [cx, cz, cw, ch, corner, concave] = n[..] else { continue };
+                let curve = crate::building::PoolCurve { x: cx, z: cz, w: cw as u8, h: ch as u8, corner: corner as u8, concave: concave != 0 };
+                match crate::build::plan_pool_curve(b, 1, curve) {
+                    Ok((ops, cost)) => {
+                        info!("build test: curved pool piece {curve:?}, §{cost}");
+                        apply(&mut commands, &mut assets, b, &mut ctx, ops);
+                    }
+                    Err(why) => warn!("build test: curved pool piece {curve:?}: {why}"),
+                }
+            }
+            if let Some(g) = grid.as_mut() {
+                g.dirty = true;
+            }
+            *stage = 2;
+        }
         0 if time.elapsed_secs() - t0 > 3.0 => {
             // (BUILD_FOUNDATION=1: on a foundation laid first, as the game's houses go.)
             if std::env::var("BUILD_FOUNDATION").is_ok()

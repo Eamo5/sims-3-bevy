@@ -14,7 +14,7 @@ pub struct BuildHudPlugin;
 impl Plugin for BuildHudPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(PlayMode::Live), (spawn, crate::buildcatalog::spawn).chain().after(crate::buy::reset_buy_mode))
-            .add_systems(Update, (controls, show).chain().after(crate::buyhud::show).before(crate::buyhistory::update)
+            .add_systems(Update, (controls, show, curve_panel).chain().after(crate::buyhud::show).before(crate::buyhistory::update)
                 .run_if(in_state(PlayMode::Live)).run_if(resource_exists::<BuildHud>))
             .add_systems(Update, (crate::buildcatalog::controls, crate::buildcatalog::draw).chain().after(show).before(crate::buyhistory::update)
                 .run_if(in_state(PlayMode::Live)).run_if(resource_exists::<crate::buildcatalog::BuildCatalog>))
@@ -40,6 +40,22 @@ const FOUNDATION_DIAGONAL: u32 = 0x000a_a306;
 const BASEMENTS: u32 = 0x500;
 const BASEMENT_SQUARE: u32 = 0x501;
 const BASEMENT_DIAGONAL: u32 = 0x502;
+/// The pool panel's Create Pool and Create Curved Pool, its middle (narrow and widened), and
+/// the adjustable curved pools' panel: Convex, Concave, the width and depth sliders and their
+/// numbers.
+const POOL_CREATE: u32 = 0x06ee_34a0;
+const POOL_CURVED: u32 = 0x0a67_d7f0;
+const POOL_RIGHT: u32 = 0x06ee_34be;
+const POOL_RIGHT_WIDE: u32 = 0x06ee_34bf;
+const CURVES: u32 = 0x0a67_db20;
+const CURVE_CONVEX: u32 = 0x0a67_daa0;
+const CURVE_CONCAVE: u32 = 0x0a68_1690;
+const CURVE_SLIDERS: [u32; 2] = [0x0a67_dac0, 0x0a67_dad0];
+const CURVE_NUMBERS: [u32; 2] = [0x0a69_0730, 0x0a69_0780];
+/// The pool panel's width, and with the curved pools' panel open (the game's 132 more than its
+/// own).
+const POOL_WIDE: f32 = 132.0 + 267.0;
+const POOL_NARROW: f32 = 168.0;
 const HAND: u32 = 0x2e4;
 const HAMMER: u32 = 0x2e5;
 const DESIGN: u32 = 0x2e6;
@@ -48,7 +64,7 @@ const LIGHT: u32 = 0x2e8;
 const GRID: u32 = 0x2e9;
 
 #[derive(Component, Clone, Copy)]
-enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo, Terrain(bool), Ponds }
+enum Action { Home, Tool(BuildTool), Category(usize), Objects(crate::buildobjects::ObjTab), HalfWalls, Hand, Lighting, Grid, Undo, Redo, Terrain(bool), Ponds, Curve(bool) }
 
 fn home_action(id: u32) -> Option<Action> {
     use crate::buildobjects::ObjTab;
@@ -93,7 +109,7 @@ fn home_action(id: u32) -> Option<Action> {
 pub fn native_panel(buy: &BuyMode) -> bool {
     buy.build_look && buy.active && buy.category == BUILD_TAB
         && !(buy.styling() && buy.placing.is_some())
-        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::DiagonalFoundation | BuildTool::Basement | BuildTool::DiagonalBasement | BuildTool::Sledgehammer))
+        && matches!(buy.tool, None | Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Pool | BuildTool::CurvedPool | BuildTool::Fountain | BuildTool::Foundation | BuildTool::DiagonalFoundation | BuildTool::Basement | BuildTool::DiagonalBasement | BuildTool::Sledgehammer))
 }
 
 fn spawn(
@@ -145,6 +161,7 @@ fn spawn(
         (0x321a, Action::Tool(BuildTool::Wall)), (0x321b, Action::Category(WALLPAPER_TAB)),
         (0x321c, Action::Tool(BuildTool::Wall)), (0x321d, Action::Category(WALLPAPER_TAB)),
         (0x06ee_34a0, Action::Tool(BuildTool::Pool)), (0x06ee_34af, Action::Tool(BuildTool::Pool)),
+        (POOL_CURVED, Action::Tool(BuildTool::CurvedPool)), (CURVE_CONVEX, Action::Curve(false)), (CURVE_CONCAVE, Action::Curve(true)),
         (FOUNDATION_SQUARE, Action::Tool(BuildTool::Foundation)),
         (FOUNDATION_DIAGONAL, Action::Tool(BuildTool::DiagonalFoundation)),
         (BASEMENT_SQUARE, Action::Tool(BuildTool::Basement)),
@@ -164,11 +181,11 @@ fn spawn(
     for (id, tooltip) in [(0x2e2, "Undo (Ctrl+Z)"), (0x2e3, "Redo (Ctrl+Y)"), (0x2f1, "Blueprint Mode")] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(crate::icons::Tooltip(tooltip.into())); }
     }
-    for id in [0x2ea, 0x2ef, 0x0a67_d7f0] {
+    for id in [0x2ea, 0x2ef] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(Unavailable); }
     }
     // Hide fountain/curved-pool alternatives inside the rectangular-pool panel.
-    for id in [0x0a67_db20, 0x06ee_34df, 0x06ee_34d2, 0x06ee_34d0, 0x06ee_34d6, 0x06ee_34bf, 0x06ee_34a7] {
+    for id in [CURVES, 0x06ee_34df, 0x06ee_34d2, 0x06ee_34d0, 0x06ee_34d6, POOL_RIGHT_WIDE, 0x06ee_34a7] {
         if let Some(e) = s.id(id) { commands.entity(e).insert(Visibility::Hidden); }
     }
     buy.build_look = true;
@@ -179,6 +196,48 @@ fn spawn(
 
 #[derive(Component)]
 pub(crate) struct Unavailable;
+
+/// The curved pools' panel: Convex or Concave lit, the sliders' sizes taken (1 to 5) and shown
+/// beside them, and the pool panel as wide as the game makes it with it open.
+fn curve_panel(
+    mut commands: Commands, hud: Res<BuildHud>, mut buy: ResMut<BuyMode>,
+    mut buttons: Query<&mut UiButton>, mut sliders: Query<&mut crate::layout::UiSlider>,
+    mut shown: Local<Option<(bool, bool, [u8; 2])>>,
+) {
+    let s = &hud.puck;
+    let curved = buy.active && buy.tool == Some(BuildTool::CurvedPool);
+    for (n, id) in CURVE_SLIDERS.into_iter().enumerate() {
+        let Some(mut sl) = s.id(id).and_then(|e| sliders.get_mut(e).ok()) else { continue };
+        let v = (sl.value.round().clamp(1.0, 5.0) as u8).saturating_sub(1);
+        // (CURVE_SIZE=<w>x<h> (tests): the sliders there.)
+        if let Some(t) = std::env::var("CURVE_SIZE").ok().and_then(|t| t.split('x').nth(n).and_then(|v| v.parse::<f32>().ok())).filter(|t| (sl.value - t).abs() > 0.5) {
+            sl.value = t;
+            continue;
+        }
+        if buy.curve_size[n] != v {
+            buy.curve_size[n] = v;
+        }
+    }
+    let want = (curved, buy.curve_concave, buy.curve_size);
+    if *shown == Some(want) {
+        return;
+    }
+    *shown = Some(want);
+    for (id, lit) in [(CURVE_CONVEX, !buy.curve_concave), (CURVE_CONCAVE, buy.curve_concave)] {
+        if let Some(mut b) = s.id(id).and_then(|e| buttons.get_mut(e).ok()) {
+            b.selected = lit;
+        }
+    }
+    for (n, id) in CURVE_NUMBERS.into_iter().enumerate() {
+        if let Some(t) = s.text(id) {
+            commands.entity(t).insert(Text::new((buy.curve_size[n] + 1).to_string()));
+        }
+    }
+    if let Some(e) = s.id(POOL) {
+        let w = if curved { POOL_WIDE } else { POOL_NARROW };
+        commands.entity(e).entry::<Node>().and_modify(move |mut n| n.width = Val::Px(w));
+    }
+}
 
 fn controls(
     mut commands: Commands, mut buy: ResMut<BuyMode>, clock: Res<crate::clock::GameClock>,
@@ -224,6 +283,10 @@ fn controls(
             Action::Grid => buy.hide_grid = !buy.hide_grid,
             Action::Undo => history.request = Some(crate::buyhistory::Request::Undo),
             Action::Redo => history.request = Some(crate::buyhistory::Request::Redo),
+            Action::Curve(concave) => {
+                buy.curve_concave = concave;
+                buy.tool = Some(BuildTool::CurvedPool);
+            }
         }
     }
 }
@@ -242,7 +305,8 @@ pub(crate) fn show(
     }
     if !on { return; }
     let wall = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Wall | BuildTool::Room | BuildTool::DiagonalRoom | BuildTool::Sledgehammer));
-    let pool = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool);
+    let curved = buy.category == BUILD_TAB && buy.tool == Some(BuildTool::CurvedPool);
+    let pool = curved || (buy.category == BUILD_TAB && buy.tool == Some(BuildTool::Pool));
     let foundation = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Foundation | BuildTool::DiagonalFoundation));
     let basement = buy.category == BUILD_TAB && matches!(buy.tool, Some(BuildTool::Basement | BuildTool::DiagonalBasement));
     let covers = crate::buildcatalog::showing(&buy) || crate::buildobjects::showing(&buy) || crate::buildterrain::showing(&buy) || crate::buildcats::showing(&buy);
@@ -259,9 +323,13 @@ pub(crate) fn show(
     set_visible(&mut visibility, s.id(0x340), covers && buy.category == FLOORS_TAB);
     set_visible(&mut visibility, s.id(WALLS), wall);
     set_visible(&mut visibility, s.id(POOL), pool);
-    for id in [0x06ee_34af, 0x06ee_34a2, 0x06ee_34a0, 0x0a67_d7f0, 0x06ee_34a9, 0x06ee_34be] {
+    for id in [0x06ee_34af, 0x06ee_34a2, POOL_CREATE, POOL_CURVED, 0x06ee_34a9] {
         set_visible(&mut visibility, s.id(id), pool);
     }
+    // (The curved pools' panel, the pool panel widened for it: `CurvedPoolAdjustable`.)
+    set_visible(&mut visibility, s.id(POOL_RIGHT), pool && !curved);
+    set_visible(&mut visibility, s.id(POOL_RIGHT_WIDE), curved);
+    set_visible(&mut visibility, s.id(CURVES), curved);
     for (mut button, unavailable) in &mut buttons {
         if unavailable && !button.disabled { button.disabled = true; }
     }
@@ -279,7 +347,7 @@ pub(crate) fn show(
         if let Some(e) = s.id(id) && let Ok((mut button, _)) = buttons.get_mut(e) { button.selected = selected; }
     }
     // (The foundations' and basements' square and diagonal tools, the one in hand lit.)
-    for (id, tool) in [(FOUNDATION_SQUARE, BuildTool::Foundation), (FOUNDATION_DIAGONAL, BuildTool::DiagonalFoundation), (BASEMENT_SQUARE, BuildTool::Basement), (BASEMENT_DIAGONAL, BuildTool::DiagonalBasement)] {
+    for (id, tool) in [(FOUNDATION_SQUARE, BuildTool::Foundation), (FOUNDATION_DIAGONAL, BuildTool::DiagonalFoundation), (BASEMENT_SQUARE, BuildTool::Basement), (BASEMENT_DIAGONAL, BuildTool::DiagonalBasement), (POOL_CREATE, BuildTool::Pool), (POOL_CURVED, BuildTool::CurvedPool)] {
         if let Some(e) = s.id(id)
             && let Ok((mut button, _)) = buttons.get_mut(e)
             && button.selected != (buy.tool == Some(tool))

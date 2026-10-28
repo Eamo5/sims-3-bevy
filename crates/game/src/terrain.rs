@@ -177,7 +177,7 @@ pub struct PoolCollar(pub usize);
 /// How far round a pool its collar reaches (tiles).
 const COLLAR: i32 = 2;
 
-pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildingBaked) -> Option<Mesh> {
+pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildingBaked, curves: &[crate::building::PoolCurve]) -> Option<Mesh> {
     // (Round a pool, and a basement open under the ground floor over it.)
     let tiles: std::collections::HashSet<(i32, i32)> =
         b.pool.iter().map(|f| (f.x as i32, f.z as i32)).chain(b.basement_open().into_iter().map(|(x, z)| (x as i32, z as i32))).collect();
@@ -240,6 +240,24 @@ pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildin
             for [lx, lz] in corners {
                 let (wx, wz) = to_world(lx, lz);
                 pos.push([wx, b.ground_at(lx, lz).unwrap_or(b.levels[0]) + 0.015, wz]);
+                nrm.push(hm.normal(wx.round() as i64, wz.round() as i64));
+                uv.push([wx / wsize, wz / wsize]);
+            }
+            idx.extend_from_slice(&[base, base + 1, base + 2]);
+        }
+    }
+    // (A curved pool piece's tiles where the pool isn't: the ground from its near corner to the
+    // curve.)
+    for cv in curves {
+        let (k, arc) = (cv.k(), cv.arc());
+        for s in arc.windows(2) {
+            let tri = [k, s[0], s[1]];
+            let cross = (tri[1] - tri[0]).perp_dot(tri[2] - tri[0]);
+            let corners = if cross < 0.0 { tri } else { [tri[0], tri[2], tri[1]] };
+            let base = pos.len() as u32;
+            for p in corners {
+                let (wx, wz) = to_world(p.x, p.y);
+                pos.push([wx, b.ground_at(p.x, p.y).unwrap_or(b.levels[0]) + 0.015, wz]);
                 nrm.push(hm.normal(wx.round() as i64, wz.round() as i64));
                 uv.push([wx / wsize, wz / wsize]);
             }
@@ -397,7 +415,7 @@ pub fn build_terrain(world: &WorldBaked) -> TerrainBuild {
             .buildings
             .iter()
             .filter(|b| !b.pool.is_empty() || b.basement.is_some())
-            .filter_map(|b| Some((b.lot as usize, collar_mesh(hm, &world.lots.get(b.lot as usize)?.info, b)?)))
+            .filter_map(|b| Some((b.lot as usize, collar_mesh(hm, &world.lots.get(b.lot as usize)?.info, b, &[])?)))
             .collect(),
     }
 }
@@ -556,7 +574,7 @@ fn dig_pools(
             commands.entity(e).try_despawn();
         }
     }
-    if let (Some(m), Some(mat)) = (collar_mesh(&data.heightmap, &lot, &b.data), material) {
+    if let (Some(m), Some(mat)) = (collar_mesh(&data.heightmap, &lot, &b.data, &b.pool_curves), material) {
         commands.spawn((PoolCollar(b.lot), Mesh3d(meshes.add(m)), MeshMaterial3d(mat.0.clone()), Transform::default(), DespawnOnExit(AppState::InGame)));
     }
     rebuild_chunks(&touched, &data.heightmap, &chunks, &mut meshes, &holes.0);
