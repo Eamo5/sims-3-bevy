@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 168;
+pub const GAMEDATA_VERSION: u32 = 169;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -4954,7 +4954,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     // Create a Sim's preset faces: a picture of each as it looks on each age and sex (filed by
     // the preset's instance and `0x10000 | age | sex`).
     // (And Create a Pet's shapes, the pets' own, filed by sex, species and age.)
-    let faces: HashSet<u64> = pkgs.keys_of_type(T_CBLN).map(|k| k.i).collect();
+    // (And Create a Pet's fur shapes, filed the same way.)
+    let faces: HashSet<u64> = pkgs.keys_of_type(T_CBLN).chain(pkgs.keys_of_type(crate::pets::T_FUR_BLEND)).map(|k| k.i).collect();
     let mut seen: HashSet<(u64, u32)> = HashSet::new();
     for dir in &dirs {
         let Ok(tp) = Package::open(dir.join("CasThumbnails.package")) else { continue };

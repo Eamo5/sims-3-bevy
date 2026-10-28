@@ -3027,6 +3027,44 @@ fn main() {
         }
         return;
     }
+    if args[1] == "furblends" {
+        // furblends <root> [filter]: Create a Pet's fur shapes (0x93D84841): name, entries (region,
+        // age/species, amount, key), and each key's VPXY's GEOMs (vertices, ids, delta sizes).
+        let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        let filter = args.get(3).map(|s| s.to_ascii_lowercase());
+        for k in set.keys_of_type(0x93D8_4841).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let b = s3formats::sim::BlendInfo::parse(&d);
+            let name = b.as_ref().map(|b| b.name.clone()).unwrap_or_else(|e| format!("unparsed {e:?}"));
+            if filter.as_ref().is_some_and(|f| !name.to_ascii_lowercase().contains(f)) {
+                continue;
+            }
+            println!("{k} {name}");
+            let Ok(b) = b else { continue };
+            for e in &b.entries {
+                println!("  region {:#x} geoms {:?}", e.region, e.geoms.iter().map(|g| format!("{:#x} x{} k{}", g.0, g.1, g.2)).collect::<Vec<_>>());
+            }
+            if std::env::var("DETAIL").is_err() {
+                continue;
+            }
+            for (i, key) in b.keys.iter().enumerate() {
+                let Some(v) = set.read(key).or_else(|| set.read_ti(key.t, key.i)) else { println!("  key {i} {key}: missing"); continue };
+                for gk in s3formats::model::vpxy_keys(&v) {
+                    let Some(gd) = set.read(&gk).or_else(|| set.read_ti(gk.t, gk.i)) else { continue };
+                    match s3formats::sim::Geom::parse(&gd) {
+                        Ok(g) => {
+                            let max = g.positions.iter().map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt()).fold(0.0f32, f32::max);
+                            let lens: Vec<f32> = g.normals.iter().map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt()).collect();
+                            println!("    normals {} min {:.3} max {:.3} avg {:.3}", lens.len(), lens.iter().copied().fold(9.0f32, f32::min), lens.iter().copied().fold(0.0f32, f32::max), lens.iter().sum::<f32>() / lens.len().max(1) as f32);
+                            println!("  key {i} geom {gk}: {} verts, {} ids ({:?}..{:?}), {} tris, biggest {max:.3}", g.positions.len(), g.ids.len(), g.ids.iter().min(), g.ids.iter().max(), g.indices.len() / 3);
+                        }
+                        Err(e) => println!("  key {i} geom {gk}: unparsed {e:?}"),
+                    }
+                }
+            }
+        }
+        return;
+    }
     if args[1] == "faces" {
         // faces <root> [filter]: the face sliders (FACE 0x0358B08A): name, version, regions, BGEO.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);

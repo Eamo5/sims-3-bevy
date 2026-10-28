@@ -907,6 +907,10 @@ impl BlendInfo {
             let _n = r.u32()?;
             let (t, g, i) = (r.u32()?, r.u32()?, r.u64()?);
             bgeo = Some(ResourceKey::new(t, g, i));
+        } else {
+            // (Version 7, Create a Pet's fur shapes: a word before the entries, their geometry in
+            // the VPXYs their keys name.)
+            let _kind = r.u32()?;
         }
         let n = r.u32()? as usize;
         if n > 256 {

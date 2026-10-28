@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 10;
+pub const PETS_VERSION: u32 = 12;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -88,6 +88,80 @@ pub struct PetBlend {
     pub instance: u64,
     pub name: String,
     pub bones: Vec<(String, Vec<crate::gamedata::FaceBone>)>,
+    /// Its vertex deltas for each kind it's for (by the meshes' vertex ids): a face blend's
+    /// geometry (its BGEO), a fur shape's (the GEOMs its VPXYs name).
+    #[serde(default)]
+    pub deltas: Vec<(String, Vec<(u32, [f32; 3], [f32; 3])>)>,
+    /// A fur shape (Create a Pet's Fur Shape: `GetFurBlends`), not a face or body blend.
+    #[serde(default)]
+    pub fur: bool,
+}
+
+/// The fur shapes' resource type (`FacialBlend`s of their own: `GetFurBlends`).
+pub const T_FUR_BLEND: u32 = 0x93D8_4841;
+/// How far a fur shape picked in Create a Pet goes (`CAPCCMAdvanced.kMaxHairLength`).
+pub const FUR_AMOUNT: f32 = 1.5;
+/// The fur shape the game keeps out of Create a Pet (`FurBlendFitsSpecies`), and the one it
+/// doesn't list (`deltaOld`).
+const FUR_HIDDEN: u64 = 0xF00C_03E0_A539_0E48;
+
+/// A mesh's vertex ids for each of a CAS part's LOD-0 meshes (as `cas_part_meshes` makes them).
+fn part_ids(pkgs: &PackageSet, c: &CasPart) -> Vec<Vec<u32>> {
+    c.lod0_geoms(pkgs).iter().filter_map(|g| s3formats::sim::Geom::parse(&pkgs.read(g).or_else(|| pkgs.read_ti(g.t, g.i))?).ok()).map(|g| g.ids).collect()
+}
+
+/// A blend's vertex deltas for each kind of pet: a face blend's from its BGEO (its blends for the
+/// kind's species and age, summed), a fur shape's from its entries' VPXYs' GEOMs (their
+/// positions the deltas, by their vertex ids; the body's own region, 0x80, where it has it).
+fn blend_deltas(pkgs: &PackageSet, info: &s3formats::sim::BlendInfo, kinds: &[&str]) -> Vec<(String, Vec<(u32, [f32; 3], [f32; 3])>)> {
+    let read = |k: &s3pkg::ResourceKey| pkgs.read(k).or_else(|| pkgs.read_ti(k.t, k.i));
+    let mut out = Vec::new();
+    let bgeo = info.bgeo.and_then(|k| read(&k)).and_then(|d| s3formats::sim::parse_bgeo(&d).ok());
+    for k in kinds {
+        let mut sum: std::collections::BTreeMap<u32, ([f32; 3], [f32; 3])> = std::collections::BTreeMap::new();
+        let mut add = |id: u32, d: [f32; 3], n: [f32; 3]| {
+            let s = sum.entry(id).or_insert(([0.0; 3], [0.0; 3]));
+            for i in 0..3 {
+                s.0[i] += d[i];
+                s.1[i] += n[i];
+            }
+        };
+        match &bgeo {
+            Some(blends) => {
+                for b in blends.iter().filter(|b| crate::gamedata::for_pet(k, b.age_gender)) {
+                    for (id, (p, n)) in &b.deltas {
+                        add(*id, *p, *n);
+                    }
+                }
+            }
+            None => {
+                let mine: Vec<&s3formats::sim::BlendEntry> = info.entries.iter().filter(|e| e.geoms.iter().any(|g| crate::gamedata::for_pet(k, g.0))).collect();
+                let body = mine.iter().any(|e| e.region == 0x80);
+                for e in mine.into_iter().filter(|e| !body || e.region == 0x80) {
+                    for g in e.geoms.iter().filter(|g| crate::gamedata::for_pet(k, g.0)) {
+                        let Some(vk) = info.keys.get(g.2 as usize) else { continue };
+                        let Some(v) = read(vk) else { continue };
+                        let mut geoms = s3formats::sim::vpxy_lod_geoms(&v, 0);
+                        if geoms.is_empty() {
+                            geoms = s3formats::model::vpxy_keys(&v).into_iter().filter(|r| r.t == 0x015A_1849).collect();
+                        }
+                        for gk in geoms {
+                            let Some(geom) = read(&gk).and_then(|d| s3formats::sim::Geom::parse(&d).ok()) else { continue };
+                            for (v, (id, p)) in geom.ids.iter().zip(&geom.positions).enumerate() {
+                                let n = geom.normals.get(v).copied().unwrap_or([0.0; 3]);
+                                add(*id, [p[0] * g.1, p[1] * g.1, p[2] * g.1], [n[0] * g.1, n[1] * g.1, n[2] * g.1]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        sum.retain(|_, d| d.0.iter().chain(&d.1).any(|v| v.abs() > 1e-5));
+        if !sum.is_empty() {
+            out.push((k.to_string(), sum.into_iter().map(|(id, (p, n))| (id, p, n)).collect()));
+        }
+    }
+    out
 }
 
 /// One of Create a Pet's shapes: its name, region (`FacialBlend.PresetFacialRegions`: the face,
@@ -143,6 +217,40 @@ impl PetsBaked {
             }
         }
         amounts
+    }
+
+    /// The fur shapes Create a Pet offers a kind of pet (but `deltaOld`), in the game's order.
+    pub fn furs_for(&self, kind: &str) -> Vec<&PetBlend> {
+        self.blends.iter().filter(|b| b.fur && b.name != "deltaOld" && b.deltas.iter().any(|d| d.0 == kind)).collect()
+    }
+
+    /// The vertex deltas of a pet's blends at their amounts, summed, by vertex id: its breed's,
+    /// its shapes', its sliders' and its fur shape's (one picked: that, at `FUR_AMOUNT`, in place
+    /// of the breed's).
+    pub fn vertex_deltas(&self, kind: &str, breed: &PetBreed, presets: &[u64], set: &[(u64, f32)], fur: Option<u64>) -> std::collections::HashMap<u32, ([f32; 3], [f32; 3])> {
+        let mut amounts = self.amounts(breed, presets);
+        for (b, a) in set {
+            match amounts.iter_mut().find(|x| x.0 == *b) {
+                Some(x) => x.1 = *a,
+                None => amounts.push((*b, *a)),
+            }
+        }
+        if let Some(f) = fur {
+            amounts.retain(|(b, _)| !self.blends.iter().any(|x| x.instance == *b && x.fur));
+            amounts.push((f, FUR_AMOUNT));
+        }
+        let mut out: std::collections::HashMap<u32, ([f32; 3], [f32; 3])> = std::collections::HashMap::new();
+        for (b, a) in amounts {
+            let Some(d) = self.blends.iter().find(|x| x.instance == b).and_then(|x| x.deltas.iter().find(|d| d.0 == kind)) else { continue };
+            for (id, v, n) in &d.1 {
+                let s = out.entry(*id).or_insert(([0.0; 3], [0.0; 3]));
+                for i in 0..3 {
+                    s.0[i] += v[i] * a;
+                    s.1[i] += n[i] * a;
+                }
+            }
+        }
+        out
     }
 
     /// The Advanced sliders for a kind of pet under a region of the minimap: its species' own,
@@ -220,6 +328,9 @@ pub struct PetKind {
     pub shading: Option<Key>,
     /// The coat's base colour as the game gives it (linear RGB), and a second for horses.
     pub base: Vec<[f32; 3]>,
+    /// Each body mesh's vertex ids (for its blends' vertex deltas).
+    #[serde(default)]
+    pub body_ids: Vec<Vec<u32>>,
     pub tails: Vec<PetPart>,
     pub ears: Vec<PetPart>,
     pub manes: Vec<PetPart>,
@@ -256,6 +367,9 @@ pub struct PetPart {
     /// Its CAS part's instance (its picture's, among the CAS thumbnails).
     #[serde(default)]
     pub instance: u64,
+    /// Each mesh's vertex ids.
+    #[serde(default)]
+    pub ids: Vec<Vec<u32>>,
 }
 
 /// A coat region or marking: where (its mask, in the coat's layout) and the colours its preset
@@ -400,7 +514,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         let coat = |c: &&&CasPart| c.name.starts_with(code) || c.name.starts_with(&grown);
         let base = pets.iter().filter(coat).find(|c| c.clothing_type == PT_BASE).and_then(|c| c.presets.first()).map(|p| preset_colors(p)).unwrap_or_default();
         let parts = |t: u32| -> Vec<PetPart> {
-            pets.iter().filter(named).filter(|c| c.clothing_type == t).map(|c| PetPart { name: c.name.clone(), meshes: meshes(c), instance: instance_of.get(&c.name).copied().unwrap_or(0) }).filter(|p| !p.meshes.is_empty()).collect()
+            pets.iter().filter(named).filter(|c| c.clothing_type == t).map(|c| PetPart { name: c.name.clone(), meshes: meshes(c), instance: instance_of.get(&c.name).copied().unwrap_or(0), ids: part_ids(pkgs, c) }).filter(|p| !p.meshes.is_empty()).collect()
         };
         let regions: Vec<PetRegion> = pets
             .iter()
@@ -437,7 +551,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 for m in &mut meshes {
                     m.texture = root.tex_path(key).exists().then_some(key).or(m.texture);
                 }
-                (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes, instance: 0 })
+                (!meshes.is_empty()).then(|| PetPart { name: c.name.clone(), meshes, instance: 0, ids: Vec::new() })
             })
             .collect();
         // (Its accessories likewise, with their parts' instances for their pictures.)
@@ -460,7 +574,8 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 (!meshes.is_empty()).then(|| PetAccessory { name: c.name.clone(), instance: instance_of.get(&c.name).copied().unwrap_or(0), part_type: c.clothing_type, meshes })
             })
             .collect();
-        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, shading, base, tails, ears, manes, hooves, regions, tack, accessories });
+        let body_ids = part_ids(pkgs, body);
+        kinds.push(PetKind { code: code.to_string(), rig, body: body_meshes, body_ids, shading, base, tails, ears, manes, hooves, regions, tack, accessories });
     }
     // The breeds: each outfit's coat painted.
     progress("Converting: pet breeds…");
@@ -603,23 +718,29 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         .collect();
     sliders.sort_by_key(|s| (s.category, s.region, s.sort, s.name.clone()));
     sliders.dedup_by(|a, b| (a.category, a.region, &a.name, a.blends) == (b.category, b.region, &b.name, b.blends));
+    // (And every fur shape, for Create a Pet's Fur Shape.)
+    let furs: std::collections::HashSet<u64> = pkgs.keys_of_type(T_FUR_BLEND).map(|k| k.i).filter(|i| *i != FUR_HIDDEN).collect();
     let mut wanted: Vec<u64> = breeds
         .iter()
         .flat_map(|b| b.blends.iter().map(|x| x.0))
         .chain(presets.iter().flat_map(|p| p.blends.iter().map(|x| x.0)))
         .chain(sliders.iter().flat_map(|s| s.blends).filter(|b| *b != 0))
+        .chain(furs.iter().copied())
         .collect();
     wanted.sort();
     wanted.dedup();
     const SHAPED: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
     let blends: Vec<PetBlend> = crate::bake::par_map(&wanted, |i| {
-        let face = pkgs.read_ti(0x0358_B08A, *i).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok())?;
+        let fur = pkgs.read_ti(T_FUR_BLEND, *i).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok());
+        let is_fur = fur.is_some();
+        let face = fur.or_else(|| pkgs.read_ti(0x0358_B08A, *i).and_then(|d| s3formats::sim::BlendInfo::parse(&d).ok()))?;
         let bones: Vec<(String, Vec<crate::gamedata::FaceBone>)> = SHAPED
             .iter()
             .map(|k| (k.to_string(), crate::gamedata::blend_bones(pkgs, &face, |f| crate::gamedata::for_pet(k, f))))
             .filter(|(_, b)| !b.is_empty())
             .collect();
-        (!bones.is_empty()).then(|| PetBlend { instance: *i, name: face.name.clone(), bones })
+        let deltas = blend_deltas(pkgs, &face, &SHAPED);
+        (!bones.is_empty() || !deltas.is_empty()).then(|| PetBlend { instance: *i, name: face.name.clone(), bones, deltas, fur: is_fur })
     })
     .into_iter()
     .flatten()
@@ -635,7 +756,7 @@ mod tests {
     #[test]
     fn a_shape_lays_its_blends_over_the_breeds() {
         let bone = |b: u32, y: f32| crate::gamedata::FaceBone { bone: b, offset: [0.0, y, 0.0], ..Default::default() };
-        let blend = |i: u64, bones: Vec<crate::gamedata::FaceBone>| PetBlend { instance: i, name: String::new(), bones: vec![("ad".into(), bones)] };
+        let blend = |i: u64, bones: Vec<crate::gamedata::FaceBone>| PetBlend { instance: i, name: String::new(), bones: vec![("ad".into(), bones)], ..Default::default() };
         let data = PetsBaked {
             blends: vec![blend(1, vec![bone(7, 1.0)]), blend(2, vec![bone(8, 1.0)])],
             presets: vec![PetPreset { instance: 9, name: "petSnoutDogShort".into(), region: PET_SNOUT, flags: 0x1420, blends: vec![(1, 0.25), (2, 1.0)] }],
@@ -660,6 +781,23 @@ mod tests {
         let names = |k: &str| data.sliders_for(k, 8).iter().map(|s| s.name.clone()).collect::<Vec<_>>();
         assert_eq!(names("ad"), ["Muzzle Height", "Muzzle Depth"]);
         assert_eq!(names("ah"), ["Muzzle Length"]);
+    }
+
+    #[test]
+    fn a_fur_shape_picked_takes_the_breeds_place_at_full_length() {
+        let fur = |i: u64, name: &str, d: f32| PetBlend { instance: i, name: name.into(), deltas: vec![("ad".into(), vec![(7, [0.0, d, 0.0], [0.0; 3])])], fur: true, ..Default::default() };
+        let face = PetBlend { instance: 3, name: "headLarge".into(), deltas: vec![("ad".into(), vec![(7, [1.0, 0.0, 0.0], [0.0; 3])])], ..Default::default() };
+        let data = PetsBaked { blends: vec![fur(1, "ChowChow", 0.1), fur(2, "Poodle", 0.2), fur(9, "deltaOld", 0.5), face], ..Default::default() };
+        // (The breed's own fur at three quarters, its face blend at a half.)
+        let breed = PetBreed { kind: "ad".into(), blends: vec![(1, 0.75), (3, 0.5)], ..Default::default() };
+        let own = data.vertex_deltas("ad", &breed, &[], &[], None)[&7].0;
+        assert!((own[0] - 0.5).abs() < 1e-5 && (own[1] - 0.075).abs() < 1e-5);
+        // (Another picked: it alone, at kMaxHairLength; the face blend kept.)
+        let picked = data.vertex_deltas("ad", &breed, &[], &[], Some(2))[&7].0;
+        assert!((picked[0] - 0.5).abs() < 1e-5 && (picked[1] - 0.3).abs() < 1e-5);
+        // (deltaOld isn't offered, nor any for a cat.)
+        assert_eq!(data.furs_for("ad").iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["ChowChow", "Poodle"]);
+        assert!(data.furs_for("ac").is_empty());
     }
 
     #[test]
