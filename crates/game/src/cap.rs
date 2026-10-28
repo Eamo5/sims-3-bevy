@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel, pelt_blends, marking_map).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel, pelt_blends, pelt_coats, marking_map).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(PreUpdate, minimap_hits.after(bevy::ui::UiSystems::Focus).run_if(in_state(AppState::CreateHousehold)))
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
@@ -180,6 +180,17 @@ pub struct Cap {
     /// The marking map's drag, and whether its test's done.
     pelt_drag: Option<MarkingDrag>,
     pelt_place_tested: bool,
+    /// Its Coats: up, the player's saved coats (and their pictures), the coat picked, its cells, bar,
+    /// first row and what they show, and whether its test's done.
+    pelt_coats: bool,
+    saved_coats: Option<Vec<SavedCoat>>,
+    saved_coat_pics: HashMap<u64, Handle<Image>>,
+    pelt_coat_pick: Option<CoatChoice>,
+    pelt_coats_cells: Option<Entity>,
+    pelt_coats_bar: Option<Entity>,
+    pelt_coats_scroll: usize,
+    pelt_coats_shown: Option<(usize, String, usize, usize, Option<CoatChoice>)>,
+    pelt_coats_tested: bool,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -1723,11 +1734,11 @@ const PELT_BIN_CLOSE: u32 = 0x0bdf_a020;
 const PELT_REGION_TEXT: u32 = 0x0bdf_a217;
 const PELT_LAYERS_TAB: u32 = 0x0bdf_a014;
 const PELT_CATEGORIES: [u32; 3] = [0x0bdf_a019, 0x0bdf_a01a, 0x0bdf_a01b];
-const PELT_OTHER_TABS: [u32; 1] = [0x0bdf_a012];
+const PELT_OTHER_TABS: [u32; 0] = [];
 /// The region maps: a dog's (and a little dog's), a horse's, a cat's.
 const PELT_MAPS: [(&str, u32); 3] = [("d", 0x0bdf_a202), ("h", 0x0bdf_a203), ("c", 0x0bdf_a204)];
-const PELT_NOT_HERE: [u32; 12] = [
-    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
+const PELT_NOT_HERE: [u32; 10] = [
+    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a109, 0x0bdf_a111, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
     0x0bdf_a214, 0x0bdf_a215, 0x0bdf_a216,
 ];
 /// A pelt layer's cell (`CAPPeltLayerItem`): its thumbnail's button and picture, its colours'
@@ -2274,9 +2285,9 @@ fn pelt_blends(
         cap.pelt_blends = true;
     }
     let blends = cap.pelt_blends;
-    crate::livehud::set_visible(&mut vis, s.id(PELT_LAYERS_SUB), !blends);
+    crate::livehud::set_visible(&mut vis, s.id(PELT_LAYERS_SUB), !blends && !cap.pelt_coats);
     crate::livehud::set_visible(&mut vis, s.id(PELT_BLENDS_SUB), blends);
-    for (id, lit) in [(PELT_LAYERS_TAB, !blends), (PELT_BLENDS_TAB, blends)] {
+    for (id, lit) in [(PELT_LAYERS_TAB, !blends && !cap.pelt_coats), (PELT_BLENDS_TAB, blends)] {
         for e in s.all_with(id) {
             if let Ok(mut b) = buttons.get_mut(e)
                 && b.selected != lit
@@ -2590,6 +2601,284 @@ fn marking_map(
         let r = Rot2::degrees(place.rotation);
         if t.rotation != r {
             t.rotation = r;
+        }
+    }
+}
+
+// Coat's Advanced's Coats: its tab, sub-panel, grid, Save (there and under the layers) and
+// Delete; Share and the filter aren't here.
+const PELT_COATS_TAB: u32 = 0x0bdf_a012;
+const PELT_COATS_SUB: u32 = 0x0bdf_a116;
+const PELT_COATS_GRID: u32 = 0x0bdf_a117;
+const PELT_COATS_SAVE: [u32; 2] = [0x0bdf_a001, 0x0bdf_a007];
+const PELT_COATS_DELETE: u32 = 0x0bdf_a003;
+const PELT_COATS_NOT_HERE: [u32; 2] = [0x0bdf_a002, 0x0bdf_a004];
+
+/// A coat the player's saved (Coat's Advanced's Save: the game's user uniforms), for a species:
+/// its name and its layers.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
+pub struct SavedCoat {
+    pub name: String,
+    pub species: String,
+    pub layers: Vec<s3bake::pets::CoatLayer>,
+}
+
+/// Where the saved coats are kept (`SIMS3_COATS`, or beside the saves).
+fn coats_path() -> std::path::PathBuf {
+    std::env::var_os("SIMS3_COATS").map(std::path::PathBuf::from).unwrap_or_else(|| crate::save::saves_dir().join("coats.json"))
+}
+
+fn load_coats() -> Vec<SavedCoat> {
+    std::fs::read_to_string(coats_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+}
+
+fn store_coats(coats: &[SavedCoat]) {
+    let path = coats_path();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(s) = serde_json::to_string_pretty(coats) {
+        let _ = std::fs::write(path, s);
+    }
+}
+
+/// A pet's species as the coats are filed (a little dog's are a dog's).
+fn coat_species(kind: &str) -> &'static str {
+    match kind.get(1..) {
+        Some("c") => "c",
+        Some("h") => "h",
+        _ => "d",
+    }
+}
+
+/// A coat in the Coats grid: a breed's (its outfit), or one the player saved.
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+enum CoatChoice {
+    Breed(u64),
+    Saved(usize),
+}
+
+/// Coat's Advanced's Coats (`InitCoatsPanel`): the species' breeds' coats and those the player has
+/// saved, one to a row with their pictures (a saved one's painted from its layers); a click gives
+/// the pet that coat's layers (`colorationOnly`). Save keeps the pet's layers as a coat of its
+/// own (kept between games, as the game's user uniforms), Delete takes a saved one away.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn pelt_coats(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
+    mut pending: ResMut<PendingHousehold>,
+    (data, baked): (Res<crate::pets::PetData>, Option<Res<crate::baked::Baked>>),
+    (clicks, cells): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &CoatChoice), Changed<Interaction>>),
+    (mut vis, mut buttons, over, mut bars): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&bevy::ui::RelativeCursorPosition>, Query<&mut UiScrollBar>),
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+) {
+    let Some(mut ui) = ui else { return };
+    let Some(s) = cap.pelt.clone() else { return };
+    let on = cap.panel == Some(Panel::Coat) && cap.pelt_open;
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.pelt_coats_shown = None;
+        return;
+    };
+    // (Once the pet's layers are there: the panel's first frame has them.)
+    if pending.pets[i].layers.is_none() {
+        return;
+    }
+    let kind = pending.pets[i].kind.clone();
+    let species = coat_species(&kind);
+    // (The tabs: Coats, or back to the layers or the blends.)
+    for e in s.all_with(PELT_COATS_TAB) {
+        if crate::livehud::pressed(&clicks, Some(e)) {
+            (cap.pelt_coats, cap.pelt_blends, cap.pelt_bin) = (true, false, false);
+        }
+    }
+    for id in [PELT_LAYERS_TAB, PELT_BLENDS_TAB] {
+        for e in s.all_with(id) {
+            if crate::livehud::pressed(&clicks, Some(e)) {
+                cap.pelt_coats = false;
+            }
+        }
+    }
+    // (CAP_PELT_COATS=1 (tests): the Coats up; =save, a coat saved.)
+    let test = (!cap.pelt_coats_tested).then(|| std::env::var("CAP_PELT_COATS").ok()).flatten();
+    if test.is_some() {
+        cap.pelt_coats_tested = true;
+        (cap.pelt_coats, cap.pelt_blends) = (true, false);
+    }
+    let coats = cap.pelt_coats;
+    crate::livehud::set_visible(&mut vis, s.id(PELT_COATS_SUB), coats);
+    if coats {
+        crate::livehud::set_visible(&mut vis, s.id(PELT_LAYERS_SUB), false);
+        crate::livehud::set_visible(&mut vis, s.id(PELT_BLENDS_SUB), false);
+    }
+    for e in s.all_with(PELT_COATS_TAB) {
+        if let Ok(mut b) = buttons.get_mut(e)
+            && b.selected != coats
+        {
+            b.selected = coats;
+        }
+    }
+    if coats {
+        for id in [PELT_LAYERS_TAB, PELT_BLENDS_TAB] {
+            for e in s.all_with(id) {
+                if let Ok(mut b) = buttons.get_mut(e)
+                    && b.selected
+                {
+                    b.selected = false;
+                }
+            }
+        }
+    }
+    let saved = cap.saved_coats.get_or_insert_with(load_coats).clone();
+    // Save: the pet's layers as a coat of its own.
+    let save = PELT_COATS_SAVE.iter().any(|id| crate::livehud::pressed(&clicks, s.id(*id))) || test.as_deref() == Some("save");
+    if save && let Some(layers) = pending.pets[i].layers.clone() {
+        let n = saved.iter().filter(|c| c.species == species).count() + 1;
+        let mut all = saved.clone();
+        all.push(SavedCoat { name: format!("My Coat {n}"), species: species.to_string(), layers });
+        store_coats(&all);
+        info!("create a pet: coat saved ({} now)", all.len());
+        cap.saved_coats = Some(all);
+        cap.pelt_coat_pick = Some(CoatChoice::Saved(cap.saved_coats.as_ref().map_or(0, |a| a.len() - 1)));
+        cap.pelt_coats = true;
+        cap.pelt_coats_shown = None;
+    }
+    let saved = cap.saved_coats.clone().unwrap_or_default();
+    // A coat clicked: its layers on the pet.
+    for (x, c) in &cells {
+        if *x != Interaction::Pressed {
+            continue;
+        }
+        let layers = match *c {
+            CoatChoice::Breed(o) => d.breeds.iter().find(|b| b.outfit == o).map(|b| b.layers.clone()),
+            CoatChoice::Saved(n) => saved.get(n).map(|c| c.layers.clone()),
+        };
+        if let Some(l) = layers {
+            pending.pets[i].layers = Some(l);
+            pending.pets[i].tint = None;
+            cap.pelt_layer = 0;
+            cap.pelt_coat_pick = Some(*c);
+            cap.pelt_coats_shown = None;
+        }
+    }
+    // Delete: the saved one picked.
+    if crate::livehud::pressed(&clicks, s.id(PELT_COATS_DELETE))
+        && let Some(CoatChoice::Saved(n)) = cap.pelt_coat_pick
+        && n < saved.len()
+    {
+        let mut all = saved.clone();
+        all.remove(n);
+        store_coats(&all);
+        cap.saved_coats = Some(all);
+        cap.pelt_coat_pick = None;
+        cap.pelt_coats_shown = None;
+    }
+    if let Some(mut b) = s.id(PELT_COATS_DELETE).and_then(|e| buttons.get_mut(e).ok()) {
+        let off = !matches!(cap.pelt_coat_pick, Some(CoatChoice::Saved(_)));
+        if b.disabled != off {
+            b.disabled = off;
+        }
+    }
+    if !coats {
+        cap.pelt_coats_shown = None;
+        return;
+    }
+    let saved = cap.saved_coats.clone().unwrap_or_default();
+    let mut list: Vec<CoatChoice> = (0..saved.len()).filter(|n| saved[*n].species == species).map(CoatChoice::Saved).collect();
+    // (A dog's: the dogs' and the little dogs' both, as `PopulateCoatsGrid`.)
+    let breeds: Vec<&s3bake::pets::PetBreed> = if species == "d" { ["d", "l"].iter().flat_map(|sp| listed(&d, &format!("{}{sp}", &kind[..1]))).collect() } else { listed(&d, &kind) };
+    list.extend(breeds.iter().map(|b| CoatChoice::Breed(b.outfit)));
+    let Some(g) = ui.find("CAPCCMAdvanced", PELT_COATS_GRID).and_then(|w| w.grid) else { return };
+    if cap.pelt_coats_bar.is_none()
+        && let (Some(grid), Some(gw), Some(mut b)) = (s.id(PELT_COATS_GRID), ui.find("CAPCCMAdvanced", PELT_COATS_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned())
+    {
+        for id in PELT_COATS_NOT_HERE {
+            if let Some(e) = s.id(id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+        for (id, tip) in [(PELT_COATS_SAVE[0], "Save Coat"), (PELT_COATS_SAVE[1], "Save Coat"), (PELT_COATS_DELETE, "Delete Coat")] {
+            if let Some(e) = s.id(id) {
+                commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+            }
+        }
+        let (w, h) = (gw.area[2] - gw.area[0], gw.area[3] - gw.area[1]);
+        b.flags |= s3bake::ui::WIN_VISIBLE;
+        b.place = s3bake::ui::UiPlace::Fixed;
+        b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+        cap.pelt_coats_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+        commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+    }
+    let cols = g.columns.max(1) as usize;
+    let rows = list.len().div_ceil(cols);
+    let most = rows.saturating_sub(g.rows.max(1) as usize);
+    let over_grid = s.id(PELT_COATS_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_grid && wheel.delta.y != 0.0 {
+        cap.pelt_coats_scroll = (cap.pelt_coats_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+        if let Some(mut b) = cap.pelt_coats_bar.and_then(|e| bars.get_mut(e).ok()) {
+            b.value = cap.pelt_coats_scroll;
+        }
+    } else if let Some(b) = cap.pelt_coats_bar.and_then(|e| bars.get(e).ok())
+        && b.value != cap.pelt_coats_scroll
+    {
+        cap.pelt_coats_scroll = b.value.min(most);
+    }
+    if let Some(mut b) = cap.pelt_coats_bar.and_then(|e| bars.get_mut(e).ok())
+        && (b.total, b.visible) != (rows, g.rows.max(1) as usize)
+    {
+        (b.total, b.visible) = (rows, g.rows.max(1) as usize);
+    }
+    let want = (i, kind.clone(), list.len(), cap.pelt_coats_scroll, cap.pelt_coat_pick);
+    if cap.pelt_coats_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.pelt_coats_shown = Some(want);
+    if let Some(old) = cap.pelt_coats_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    let (Some(grid), Some(template)) = (s.id(PELT_COATS_GRID), ui.layout("GenericCasItemGrow_landscape").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(grid).insert_children(0, &[holder]);
+    cap.pelt_coats_cells = Some(holder);
+    let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+    let shading = d.kinds.iter().find(|k| k.code == kind).and_then(|k| k.shading);
+    for (n, choice) in list.iter().enumerate().skip(cap.pelt_coats_scroll * cols).take(cols * g.rows.max(1) as usize) {
+        let k = n - cap.pelt_coats_scroll * cols;
+        let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
+        let mut cell = template.clone();
+        cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+        cell.cls = "Button".into();
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+        let Some(root) = c.root else { continue };
+        if cap.pelt_coat_pick == Some(*choice) {
+            commands.entity(root).insert(crate::layout::Selected);
+        }
+        let (tip, pic) = match *choice {
+            CoatChoice::Breed(o) => {
+                let b = d.breeds.iter().find(|b| b.outfit == o);
+                (b.map_or_else(String::new, |b| b.name.clone()), b.and_then(|b| cap.thumb(&mut images, b)))
+            }
+            CoatChoice::Saved(m) => {
+                let coat = &saved[m];
+                let key = crate::pets::layers_key(&coat.layers).2;
+                let pic = match cap.saved_coat_pics.get(&key) {
+                    Some(h) => Some(h.clone()),
+                    None => {
+                        let img = baked.as_deref().zip(shading).and_then(|(b, sh)| crate::pets::layered_coat(&b.0, sh, &coat.layers));
+                        img.map(|img| {
+                            let h = images.add(img);
+                            cap.saved_coat_pics.insert(key, h.clone());
+                            h
+                        })
+                    }
+                };
+                (coat.name.clone(), pic)
+            }
+        };
+        commands.entity(root).insert((*choice, crate::icons::Tooltip(tip)));
+        if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), pic) {
+            crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
         }
     }
 }
@@ -3338,6 +3627,20 @@ mod tests {
         assert!(matches!(d, MarkingDrag::Turn { .. }));
         let q = marking_dragged(&p, d, Vec2::new(0.5, 0.9));
         assert!((q.rotation - 90.0).abs() < 1e-3, "{}", q.rotation);
+    }
+
+    #[test]
+    fn saved_coats_are_kept_between_games_by_species() {
+        let dir = std::env::temp_dir().join(format!("sims3_coats_{}", std::process::id()));
+        let path = dir.join("coats.json");
+        unsafe { std::env::set_var("SIMS3_COATS", &path) };
+        let coat = SavedCoat { name: "My Coat 1".into(), species: coat_species("al").into(), layers: vec![s3bake::pets::CoatLayer { part: "adBase".into(), opacity: 1.0, ..Default::default() }] };
+        store_coats(std::slice::from_ref(&coat));
+        assert_eq!(load_coats(), vec![coat]);
+        // (A little dog's are a dog's; a kitten's a cat's.)
+        assert_eq!((coat_species("cl"), coat_species("cc"), coat_species("ah")), ("d", "c", "h"));
+        unsafe { std::env::remove_var("SIMS3_COATS") };
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

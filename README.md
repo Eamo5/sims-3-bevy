@@ -1654,7 +1654,12 @@ installation is unreachable.
   with the square where the marking lies on the pelt, dragged inside to move it, at its edge to
   resize it and outside to turn it; the marking painted as the `PeltMarking` complate lays it
   (its mask drawn into the square, turned, within the kind's border killer). `CAP_PELT=<part>[:<r,g,b>]`,
-  `CAP_PELT_BIN=markings|<region>`, `CAP_PELT_PLACE=<turn>,<sx>,<sy>,<tx>,<ty>` (tests). Every breed is built as the
+  `CAP_PELT_BIN=markings|<region>`, `CAP_PELT_PLACE=<turn>,<sx>,<sy>,<tx>,<ty>` (tests). Its Coats tab
+  (`InitCoatsPanel`) lists the species' breeds' coats (a dog's and a little dog's both) and those
+  the player has saved, a click giving the pet that coat's layers (`colorationOnly`); Save keeps
+  the pet's layers as a coat of its own (kept between games beside the saves, `coats.json`, as the
+  game's user uniforms; pictured painted from its layers), Delete takes one away.
+  `CAP_PELT_COATS=1|save`, `SIMS3_COATS=<file>` (tests). Every breed is built as the
   game builds it: its outfit's
   face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
   long legs), their bone adjustments for its kind added to its skeleton under its animations,
@@ -1862,7 +1867,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-Create a Pet's saved coats; complete object placement and routing compatibility; the rest of the expansions'
+complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

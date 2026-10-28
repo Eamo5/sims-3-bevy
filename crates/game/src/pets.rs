@@ -584,7 +584,7 @@ pub fn layers_key(layers: &[s3bake::pets::CoatLayer]) -> s3bake::Key {
 }
 
 /// A coat painted from its layers over the kind's fur shading (as the bake paints the breeds').
-fn layered_coat(baked: &crate::baked::BakedData, shading: s3bake::Key, layers: &[s3bake::pets::CoatLayer]) -> Option<Image> {
+pub(crate) fn layered_coat(baked: &crate::baked::BakedData, shading: s3bake::Key, layers: &[s3bake::pets::CoatLayer]) -> Option<Image> {
     use bevy::asset::RenderAssetUsages;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let dec = |k: s3bake::Key| baked.texture_bytes(&k).and_then(|d| s3formats::dds::decode(&d, 1024));
