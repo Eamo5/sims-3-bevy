@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel, pelt_blends).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel, pelt_blends, marking_map).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(PreUpdate, minimap_hits.after(bevy::ui::UiSystems::Focus).run_if(in_state(AppState::CreateHousehold)))
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
@@ -177,6 +177,9 @@ pub struct Cap {
     pelt_total_seen: Option<f32>,
     pelt_length_range: Option<(f32, f32)>,
     pelt_blends_tested: bool,
+    /// The marking map's drag, and whether its test's done.
+    pelt_drag: Option<MarkingDrag>,
+    pelt_place_tested: bool,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -1723,8 +1726,8 @@ const PELT_CATEGORIES: [u32; 3] = [0x0bdf_a019, 0x0bdf_a01a, 0x0bdf_a01b];
 const PELT_OTHER_TABS: [u32; 1] = [0x0bdf_a012];
 /// The region maps: a dog's (and a little dog's), a horse's, a cat's.
 const PELT_MAPS: [(&str, u32); 3] = [("d", 0x0bdf_a202), ("h", 0x0bdf_a203), ("c", 0x0bdf_a204)];
-const PELT_NOT_HERE: [u32; 14] = [
-    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a220, 0x0bdf_a015, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
+const PELT_NOT_HERE: [u32; 12] = [
+    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
     0x0bdf_a214, 0x0bdf_a215, 0x0bdf_a216,
 ];
 /// A pelt layer's cell (`CAPPeltLayerItem`): its thumbnail's button and picture, its colours'
@@ -2421,6 +2424,172 @@ fn pelt_blends(
         let pic = gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::face_thumb_name(*instance, flags)));
         if let (Some(win), Some(h)) = (c.id(BLEND_THUMB), pic) {
             crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+        }
+    }
+}
+
+// Coat's Advanced's marking map: the region map, the marking map, its pelt's limits and the
+// square showing where the marking lies, the species' rugs, and the maps' buttons between them.
+const PELT_REGION_MAP: u32 = 0x0bdf_a201;
+const PELT_MARKING_MAP: u32 = 0x0bdf_a220;
+const PELT_LIMITS: u32 = 0x0bdf_a221;
+const PELT_SQUARE: u32 = 0x0bdf_a222;
+const PELT_RUGS: [(&str, u32); 3] = [("d", 0x0bdf_a22b), ("c", 0x0bdf_a22c), ("h", 0x0bdf_a22d)];
+const PELT_TO_MARKINGS: u32 = 0x0bdf_a015;
+const PELT_TO_REGIONS: [u32; 3] = [0x0bdf_a018, 0x0bdf_a016, 0x0bdf_a017];
+/// The pelt's limits' size on the map (pixels).
+const PELT_LIMITS_SIZE: f32 = 165.0;
+/// A marking's smallest scale, and how near the square's edge a drag resizes it.
+const MARKING_MIN: f32 = 0.05;
+const MARKING_EDGE: f32 = 0.18;
+
+/// How a drag on the marking map moves the marking: along, bigger or smaller, or round.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum MarkingDrag {
+    Move { from: Vec2, start: [f32; 2] },
+    Scale { start: [f32; 2], from: Vec2 },
+    Turn { from: f32, start: f32 },
+}
+
+/// What a drag from where it began does: inside the square, moves it; at its edge, resizes it;
+/// outside, turns it (the game's corner and edge windows, its rotation handles).
+pub fn marking_drag(p: &s3bake::pets::MarkingPlace, at: Vec2) -> MarkingDrag {
+    let c = Vec2::new(0.5 + p.translation[0], 0.5 + p.translation[1]);
+    let d = Vec2::from_angle(-p.rotation.to_radians()).rotate(at - c);
+    let half = Vec2::new(p.scale[0], p.scale[1]) * 0.5;
+    let inside = d.x.abs() <= half.x && d.y.abs() <= half.y;
+    let edge = (half.x - d.x.abs()).min(half.y - d.y.abs()) < MARKING_EDGE * half.min_element().max(0.05);
+    match (inside, edge) {
+        (true, false) => MarkingDrag::Move { from: at, start: p.translation },
+        (true, true) => MarkingDrag::Scale { start: p.scale, from: d },
+        _ => MarkingDrag::Turn { from: (at - c).to_angle(), start: p.rotation },
+    }
+}
+
+/// A marking's place with a drag carried on to `at` (pelt coordinates, 0 to 1).
+pub fn marking_dragged(p: &s3bake::pets::MarkingPlace, drag: MarkingDrag, at: Vec2) -> s3bake::pets::MarkingPlace {
+    let mut q = *p;
+    let c = Vec2::new(0.5 + p.translation[0], 0.5 + p.translation[1]);
+    match drag {
+        MarkingDrag::Move { from, start } => {
+            let t = Vec2::from(start) + (at - from);
+            q.translation = [t.x.clamp(-1.0, 1.0), t.y.clamp(-1.0, 1.0)];
+        }
+        MarkingDrag::Scale { start, from } => {
+            let d = Vec2::from_angle(-p.rotation.to_radians()).rotate(at - c);
+            let k = |now: f32, was: f32| if was.abs() > 1e-3 { (now.abs() / was.abs()).max(0.0) } else { 1.0 };
+            q.scale = [(start[0] * k(d.x, from.x)).clamp(MARKING_MIN, 1.0), (start[1] * k(d.y, from.y)).clamp(MARKING_MIN, 1.0)];
+        }
+        MarkingDrag::Turn { from, start } => {
+            let a = (at - c).to_angle();
+            let mut r = start + (a - from).to_degrees();
+            while r > 180.0 {
+                r -= 360.0;
+            }
+            while r < -180.0 {
+                r += 360.0;
+            }
+            q.rotation = r;
+        }
+    }
+    q
+}
+
+/// The marking map while a marking's the layer worked on (the region map otherwise): the
+/// species' rug, the square where the marking lies (its place, size and turn), dragged to move,
+/// resize or turn it; the pet's coat painted again as it goes.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn marking_map(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    mut pending: ResMut<PendingHousehold>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    mut vis: Query<&mut Visibility>,
+    over: Query<&bevy::ui::RelativeCursorPosition>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut nodes: Query<(&mut Node, &mut UiTransform)>,
+) {
+    let Some(s) = cap.pelt.clone() else { return };
+    let on = cap.panel == Some(Panel::Coat) && cap.pelt_open && !cap.pelt_blends;
+    let Some(i) = cap.pet.filter(|_| on) else {
+        cap.pelt_drag = None;
+        return;
+    };
+    let Some(layers) = pending.pets[i].layers.clone() else { return };
+    let sel = cap.pelt_layer.min(layers.len().saturating_sub(1));
+    let place = layers.get(sel).and_then(|l| l.place);
+    let species = pending.pets[i].kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s }).to_string();
+    crate::livehud::set_visible(&mut vis, s.id(PELT_REGION_MAP), place.is_none());
+    crate::livehud::set_visible(&mut vis, s.id(PELT_MARKING_MAP), place.is_some());
+    for (sp, id) in PELT_RUGS {
+        crate::livehud::set_visible(&mut vis, s.id(id), place.is_some() && sp == species);
+    }
+    // (The square, hidden in the layout till there's a marking to show.)
+    crate::livehud::set_visible(&mut vis, s.id(PELT_SQUARE), place.is_some());
+    // (The maps' own buttons to the bin's markings and regions aren't here: the bin's tabs are.)
+    for id in PELT_TO_REGIONS.into_iter().chain([PELT_TO_MARKINGS]) {
+        for e in s.all_with(id) {
+            crate::livehud::set_visible(&mut vis, Some(e), false);
+        }
+    }
+    let _ = &clicks;
+    let Some(mut place) = place else {
+        cap.pelt_drag = None;
+        return;
+    };
+    // (CAP_PELT_PLACE=<rotation>,<sx>,<sy>,<tx>,<ty> (tests): the marking laid there, once.)
+    if !cap.pelt_place_tested
+        && let Some(v) = std::env::var("CAP_PELT_PLACE").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 5)
+    {
+        cap.pelt_place_tested = true;
+        place = s3bake::pets::MarkingPlace { rotation: v[0], scale: [v[1], v[2]], translation: [v[3], v[4]] };
+        if let Some(l) = pending.pets[i].layers.as_mut().and_then(|l| l.get_mut(sel)) {
+            l.place = Some(place);
+        }
+        info!("create a pet test: the marking placed {place:?}");
+    }
+    // A drag on the map.
+    let limits = s.id(PELT_LIMITS);
+    if let Some(e) = limits
+        && over.get(e).is_err()
+    {
+        commands.entity(e).insert((bevy::ui::RelativeCursorPosition::default(), Interaction::default(), bevy::ui::FocusPolicy::Block));
+        // (The square over the rug, as the game draws it.)
+        if let Some(sq) = s.id(PELT_SQUARE) {
+            commands.entity(sq).insert(ZIndex(2));
+        }
+    }
+    let at = limits.and_then(|e| over.get(e).ok()).and_then(|r| r.normalized.map(|n| (n + Vec2::splat(0.5), r.cursor_over())));
+    if mouse.just_pressed(MouseButton::Left)
+        && let Some((p, true)) = at
+    {
+        cap.pelt_drag = Some(marking_drag(&place, p));
+    }
+    if !mouse.pressed(MouseButton::Left) {
+        cap.pelt_drag = None;
+    }
+    if let (Some(drag), Some((p, _))) = (cap.pelt_drag, at) {
+        let moved = marking_dragged(&place, drag, p);
+        if moved != place {
+            place = moved;
+            if let Some(l) = pending.pets[i].layers.as_mut().and_then(|l| l.get_mut(sel)) {
+                l.place = Some(place);
+            }
+        }
+    }
+    // The square where it lies.
+    if let Some(e) = s.id(PELT_SQUARE)
+        && let Ok((mut n, mut t)) = nodes.get_mut(e)
+    {
+        let size = Vec2::new(place.scale[0], place.scale[1]) * PELT_LIMITS_SIZE;
+        let c = (Vec2::splat(0.5) + Vec2::from(place.translation)) * PELT_LIMITS_SIZE;
+        let (l, top) = (c.x - size.x * 0.5, c.y - size.y * 0.5);
+        if n.left != Val::Px(l) || n.top != Val::Px(top) || n.width != Val::Px(size.x) || n.height != Val::Px(size.y) {
+            (n.left, n.top, n.width, n.height) = (Val::Px(l), Val::Px(top), Val::Px(size.x), Val::Px(size.y));
+        }
+        let r = Rot2::degrees(place.rotation);
+        if t.rotation != r {
+            t.rotation = r;
         }
     }
 }
@@ -3149,6 +3318,26 @@ mod tests {
         // (Less: the default gets it back.)
         fur_reshare(&mut s, 2, 0.25, Some(9));
         assert!((get(&s, 9) - 0.5).abs() < 1e-5 && (s.iter().map(|x| x.1).sum::<f32>() - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_marking_is_moved_resized_and_turned_by_dragging() {
+        let p = s3bake::pets::MarkingPlace { rotation: 0.0, scale: [0.4, 0.4], translation: [0.0, 0.0] };
+        // (Inside: moved along with the pointer.)
+        let d = marking_drag(&p, Vec2::new(0.5, 0.5));
+        assert!(matches!(d, MarkingDrag::Move { .. }));
+        let q = marking_dragged(&p, d, Vec2::new(0.6, 0.45));
+        assert!((q.translation[0] - 0.1).abs() < 1e-5 && (q.translation[1] + 0.05).abs() < 1e-5);
+        // (At its edge: half again as far out, half again as big.)
+        let d = marking_drag(&p, Vec2::new(0.69, 0.5));
+        assert!(matches!(d, MarkingDrag::Scale { .. }), "{d:?}");
+        let q = marking_dragged(&p, d, Vec2::new(0.5 + 0.19 * 1.5, 0.5));
+        assert!((q.scale[0] - 0.6).abs() < 1e-3, "{:?}", q.scale);
+        // (Outside: turned as the pointer goes round its middle.)
+        let d = marking_drag(&p, Vec2::new(0.9, 0.5));
+        assert!(matches!(d, MarkingDrag::Turn { .. }));
+        let q = marking_dragged(&p, d, Vec2::new(0.5, 0.9));
+        assert!((q.rotation - 90.0).abs() < 1e-3, "{}", q.rotation);
     }
 
     #[test]

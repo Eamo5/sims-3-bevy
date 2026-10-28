@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 13;
+pub const PETS_VERSION: u32 = 14;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -334,6 +334,39 @@ pub struct CoatLayer {
     pub mask: Key,
     pub colors: Vec<(u8, [f32; 3])>,
     pub opacity: f32,
+    /// A marking's placement on the pelt (the `PeltMarking` complate's): its rotation (degrees),
+    /// its scale across and down, and how far its middle is moved from the pelt's.
+    #[serde(default)]
+    pub place: Option<MarkingPlace>,
+    /// A marking's border killer: where on the pelt it may show (its red).
+    #[serde(default)]
+    pub border: Option<Key>,
+}
+
+/// Where a marking lies on the pelt (`destRect`: its middle at `0.5 + translation`, `scale` of
+/// the pelt across and down, turned `rotation` degrees).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct MarkingPlace {
+    pub rotation: f32,
+    pub scale: [f32; 2],
+    pub translation: [f32; 2],
+}
+
+impl Default for MarkingPlace {
+    fn default() -> Self {
+        Self { rotation: 0.0, scale: [1.0, 1.0], translation: [0.0, 0.0] }
+    }
+}
+
+impl MarkingPlace {
+    /// Where on the marking's mask a point of the pelt falls (none: off it).
+    pub fn mask_uv(&self, u: f32, v: f32) -> Option<(f32, f32)> {
+        let (dx, dy) = (u - 0.5 - self.translation[0], v - 0.5 - self.translation[1]);
+        let (s, c) = (-self.rotation.to_radians()).sin_cos();
+        let (rx, ry) = (dx * c - dy * s, dx * s + dy * c);
+        let (mu, mv) = (rx / self.scale[0].max(1e-4) + 0.5, ry / self.scale[1].max(1e-4) + 0.5);
+        ((0.0..=1.0).contains(&mu) && (0.0..=1.0).contains(&mv)).then_some((mu, mv))
+    }
 }
 
 impl CoatLayer {
@@ -350,21 +383,41 @@ impl CoatLayer {
                 (v.len() >= 3).then(|| (i - 1, [v[0], v[1], v[2]]))
             })
             .collect();
-        Some(Self { part: part.to_string(), mask, colors, opacity })
+        // (A marking's placement and its border killer.)
+        let num = |k: &str| preset_value(preset, k).and_then(|v| v.trim().parse::<f32>().ok());
+        let place = num("ScaleX").map(|sx| {
+            let t: Vec<f32> = preset_value(preset, "Translation").map(|t| t.split(',').filter_map(|x| x.trim().parse().ok()).collect()).unwrap_or_default();
+            MarkingPlace { rotation: num("Rotation").unwrap_or(0.0), scale: [sx, num("ScaleY").unwrap_or(sx)], translation: [t.first().copied().unwrap_or(0.0), t.get(1).copied().unwrap_or(0.0)] }
+        });
+        let border = preset_value(preset, "BorderKiller").and_then(|b| b.strip_prefix("key:")).and_then(|b| {
+            let q: Vec<&str> = b.split(':').collect();
+            Some((u32::from_str_radix(q.first()?, 16).ok()?, u32::from_str_radix(q.get(1)?, 16).ok()?, u64::from_str_radix(q.get(2)?, 16).ok()?))
+        });
+        Some(Self { part: part.to_string(), mask, colors, opacity, place, border })
     }
 }
 
 /// A coat painted from its layers over the fur's shading (the game's pelt layers): from a brown,
 /// each layer's colours laid on through its mask's channels in turn, at its opacity; then the
 /// shading (about mid-grey) over it.
-pub fn paint_coat(shading: &s3formats::dds::Rgba, layers: &[(&s3formats::dds::Rgba, &CoatLayer)]) -> s3formats::dds::Rgba {
+pub fn paint_coat(shading: &s3formats::dds::Rgba, layers: &[(&s3formats::dds::Rgba, Option<&s3formats::dds::Rgba>, &CoatLayer)]) -> s3formats::dds::Rgba {
     let mut img = s3formats::dds::Rgba { width: COAT_SIZE, height: COAT_SIZE, data: vec![255; COAT_SIZE * COAT_SIZE * 4] };
     for y in 0..COAT_SIZE {
         for x in 0..COAT_SIZE {
             let (u, v) = ((x as f32 + 0.5) / COAT_SIZE as f32, (y as f32 + 0.5) / COAT_SIZE as f32);
             let mut c = [0.5f32, 0.4, 0.3];
-            for (mask, layer) in layers {
-                let m = mask.sample(u, v);
+            for (mask, border, layer) in layers {
+                // (A marking: its mask where it's been placed, within its border.)
+                let m = match layer.place {
+                    Some(p) => match p.mask_uv(u, v) {
+                        Some((mu, mv)) => {
+                            let b = border.map_or(1.0, |b| b.sample(u, v)[0]);
+                            mask.sample(mu, mv).map(|x| x * b)
+                        }
+                        None => continue,
+                    },
+                    None => mask.sample(u, v),
+                };
                 for (ch, col) in &layer.colors {
                     let a = (m[*ch as usize] * layer.opacity).clamp(0.0, 1.0);
                     for k in 0..3 {
@@ -674,8 +727,8 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         let part = |t: u32| named.iter().find(|(_, pt, _)| *pt == t).map(|(n, ..)| n.clone());
         // The coat: the base's colours, then each region's in turn, through its mask's channels.
         let layers: Vec<CoatLayer> = named.iter().filter(|(_, t, _)| matches!(*t, PT_BASE | PT_REGION)).filter_map(|(n, _, p)| CoatLayer::from_preset(n, &p.preset)).collect();
-        let masks: Vec<(s3formats::dds::Rgba, &CoatLayer)> = layers.iter().filter_map(|l| Some((decode(l.mask)?, l))).collect();
-        let img = paint_coat(shading, &masks.iter().map(|(m, l)| (m, *l)).collect::<Vec<_>>());
+        let masks: Vec<(s3formats::dds::Rgba, Option<s3formats::dds::Rgba>, &CoatLayer)> = layers.iter().filter_map(|l| Some((decode(l.mask)?, l.border.and_then(decode), l))).collect();
+        let img = paint_coat(shading, &masks.iter().map(|(m, b, l)| (m, b.as_ref(), *l)).collect::<Vec<_>>());
         let coat = coat_key(k.i);
         let _ = std::fs::write(root.tex_path(coat), crate::ddsw::encode_dds(&img));
         // (PET_PNG=<dir>: each coat as a picture too, to look at.)
@@ -729,7 +782,8 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
     }
     progress(&format!("Converting: {} breeds named, {} pictured", breeds.iter().filter(|b| b.listed.is_some()).count(), breeds.iter().filter(|b| !b.thumb.is_empty()).count()));
     // (The breeds' layers' masks too, for Create a Pet's Advanced coat.)
-    textures.extend(breeds.iter().flat_map(|b| b.layers.iter().map(|l| (l.mask, false))));
+    textures.extend(breeds.iter().flat_map(|b| b.layers.iter().flat_map(|l| std::iter::once(l.mask).chain(l.border)).map(|k| (k, false))));
+    textures.extend(kinds.iter().flat_map(|k| k.regions.iter().filter_map(|r| r.layer.border)).map(|k| (k, false)));
     textures.sort();
     textures.dedup();
     let n = crate::bake::bake_textures(root, pkgs, &textures, 1024, "Converting pets", progress);
@@ -847,6 +901,18 @@ mod tests {
     }
 
     #[test]
+    fn a_marking_lies_where_its_placed() {
+        // (Half size, moved a quarter right: the pelt's middle is off it; a quarter right on its middle.)
+        let p = MarkingPlace { rotation: 0.0, scale: [0.5, 0.5], translation: [0.25, 0.0] };
+        assert_eq!(p.mask_uv(0.45, 0.5), None);
+        assert_eq!(p.mask_uv(0.75, 0.5), Some((0.5, 0.5)));
+        // (Turned a quarter: what's below its middle on the pelt is to its side on the mask.)
+        let q = MarkingPlace { rotation: 90.0, ..Default::default() };
+        let (mu, mv) = q.mask_uv(0.5, 0.75).unwrap();
+        assert!((mu - 0.75).abs() < 1e-4 && (mv - 0.5).abs() < 1e-4, "{mu} {mv}");
+    }
+
+    #[test]
     fn a_coat_is_painted_from_its_layers_in_turn() {
         let flat = |c: [u8; 4]| s3formats::dds::Rgba { width: 2, height: 2, data: c.repeat(4) };
         // (Mid-grey shading: the colours as they are.)
@@ -854,7 +920,7 @@ mod tests {
         let red = CoatLayer { part: "base".into(), colors: vec![(0, [1.0, 0.0, 0.0])], opacity: 1.0, ..Default::default() };
         let blue = CoatLayer { part: "spots".into(), colors: vec![(1, [0.0, 0.0, 1.0])], opacity: 0.5, ..Default::default() };
         let (all, green) = (flat([255, 0, 0, 255]), flat([0, 255, 0, 255]));
-        let img = paint_coat(&shading, &[(&all, &red), (&green, &blue)]);
+        let img = paint_coat(&shading, &[(&all, None, &red), (&green, None, &blue)]);
         let px = &img.data[..3];
         // (Red, then half blue over it through the second channel.)
         assert!(px[0] > 120 && px[0] < 135 && px[1] < 5 && px[2] > 120 && px[2] < 135, "{px:?}");

@@ -575,7 +575,8 @@ pub fn spawn_pet(
 pub fn layers_key(layers: &[s3bake::pets::CoatLayer]) -> s3bake::Key {
     let mut h = 0xcbf2_9ce4_8422_2325u64;
     for l in layers {
-        for v in [l.mask.0 as u64, l.mask.1 as u64, l.mask.2, (l.opacity * 1000.0) as u64].into_iter().chain(l.colors.iter().map(|(ch, c)| (*ch as u64) << 48 | c.iter().fold(0u64, |a, v| a << 16 | (v * 65535.0) as u64))) {
+        let place = l.place.map_or(0u64, |p| [p.rotation, p.scale[0], p.scale[1], p.translation[0], p.translation[1]].iter().fold(0u64, |a, v| a.rotate_left(11) ^ ((v * 1000.0) as i64 as u64)));
+        for v in [l.mask.0 as u64, l.mask.1 as u64, l.mask.2, (l.opacity * 1000.0) as u64, place].into_iter().chain(l.colors.iter().map(|(ch, c)| (*ch as u64) << 48 | c.iter().fold(0u64, |a, v| a << 16 | (v * 65535.0) as u64))) {
             h = (h ^ v).wrapping_mul(0x0100_0000_01b3);
         }
     }
@@ -588,8 +589,8 @@ fn layered_coat(baked: &crate::baked::BakedData, shading: s3bake::Key, layers: &
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let dec = |k: s3bake::Key| baked.texture_bytes(&k).and_then(|d| s3formats::dds::decode(&d, 1024));
     let shade = dec(shading)?;
-    let masks: Vec<(s3formats::dds::Rgba, &s3bake::pets::CoatLayer)> = layers.iter().filter_map(|l| Some((dec(l.mask)?, l))).collect();
-    let img = s3bake::pets::paint_coat(&shade, &masks.iter().map(|(m, l)| (m, *l)).collect::<Vec<_>>());
+    let masks: Vec<(s3formats::dds::Rgba, Option<s3formats::dds::Rgba>, &s3bake::pets::CoatLayer)> = layers.iter().filter_map(|l| Some((dec(l.mask)?, l.border.and_then(dec), l))).collect();
+    let img = s3bake::pets::paint_coat(&shade, &masks.iter().map(|(m, b, l)| (m, b.as_ref(), *l)).collect::<Vec<_>>());
     let (mips, levels) = s3formats::dds::build_mips(&img);
     let mut out = Image::new(Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, mips, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
     out.texture_descriptor.mip_level_count = levels;

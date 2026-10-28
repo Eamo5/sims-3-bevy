@@ -780,7 +780,7 @@ impl UiAssets {
                     }),
                     _ => NodeImageMode::Stretch,
                 };
-                let node = if *scale == 1 { centred(isize, size) } else { fill() };
+                let node = if *scale == 1 { centred(isize) } else { fill() };
                 let pic = commands.spawn((node, ImageNode { image: first, color: shade, image_mode: mode, ..default() }, Pickable::IGNORE, ChildOf(parent))).id();
                 commands.entity(parent).insert_if_new(UiPicture(pic));
                 if let Some(b) = button {
@@ -849,12 +849,14 @@ fn fill() -> Node {
     Node { position_type: PositionType::Absolute, left: Val::Px(0.0), right: Val::Px(0.0), top: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }
 }
 
-/// A picture at its own size, centred in the window.
-fn centred(isize: Vec2, size: Vec2) -> Node {
+/// A picture at its own size in the middle of its window (however big the window's laid out:
+/// one stretched to its parent, a map's rug, is as big as that).
+fn centred(isize: Vec2) -> Node {
     Node {
         position_type: PositionType::Absolute,
-        left: Val::Px(((size.x - isize.x) * 0.5).round()),
-        top: Val::Px(((size.y - isize.y) * 0.5).round()),
+        left: Val::Percent(50.0),
+        top: Val::Percent(50.0),
+        margin: UiRect { left: Val::Px(-(isize.x * 0.5).round()), top: Val::Px(-(isize.y * 0.5).round()), ..default() },
         width: Val::Px(isize.x),
         height: Val::Px(isize.y),
         ..default()
