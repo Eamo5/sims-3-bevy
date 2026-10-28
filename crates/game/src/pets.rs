@@ -534,7 +534,8 @@ pub fn spawn_pet(
     let body = kind.body.iter().cloned().zip(kind.body_ids.iter().cloned().chain(std::iter::repeat(Vec::new())));
     let parts = body.chain(named(&kind.tails, &tail)).chain(named(&kind.ears, &b.ears)).chain(named(&kind.manes, &mane)).chain(named(&kind.hooves, &hooves));
     // (Its blends' geometry: the face and body blends' and its fur shape's, by vertex id.)
-    let deltas = data.vertex_deltas(&b.kind, b, &look.shapes, &look.sliders, look.fur);
+    let fur_mix = look.fur_mix.clone().or_else(|| look.fur.map(|f| vec![(f, s3bake::pets::FUR_AMOUNT)]));
+    let deltas = data.vertex_deltas(&b.kind, b, &look.shapes, &look.sliders, fur_mix.as_deref());
     for (mut m, ids) in parts {
         if ids.len() == m.positions.len() {
             let has_normals = m.normals.len() == m.positions.len();
@@ -922,6 +923,9 @@ pub struct SavedPet {
     /// The fur shape picked for it (Create a Pet's Fur Shape), in place of its breed's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fur: Option<u64>,
+    /// Its fur shapes mixed (Coat's Advanced Blends: each at its amount), in place of both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fur_mix: Option<Vec<(u64, f32)>>,
     /// Its coat's layers as Create a Pet's Advanced coat left them (in place of its coat).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layers: Option<Vec<s3bake::pets::CoatLayer>>,
@@ -930,7 +934,7 @@ pub struct SavedPet {
 impl SavedPet {
     /// How it looks, beyond its breed.
     pub fn look(&self) -> PetLook {
-        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone(), hooves: self.hooves.clone(), sliders: self.sliders.clone(), fur: self.fur, layers: self.layers.clone() }
+        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone(), hooves: self.hooves.clone(), sliders: self.sliders.clone(), fur: self.fur, fur_mix: self.fur_mix.clone(), layers: self.layers.clone() }
     }
 }
 
@@ -946,6 +950,7 @@ pub struct PetLook {
     pub hooves: Option<String>,
     pub sliders: Vec<(u64, f32)>,
     pub fur: Option<u64>,
+    pub fur_mix: Option<Vec<(u64, f32)>>,
     pub layers: Option<Vec<s3bake::pets::CoatLayer>>,
 }
 
@@ -1008,7 +1013,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, layers: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -1036,7 +1041,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, layers: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None })
     }
 }
 
@@ -1191,7 +1196,7 @@ pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::
         .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, layers: p.look.layers.clone() })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, fur_mix: p.look.fur_mix.clone(), layers: p.look.layers.clone() })
         })
         .collect()
 }

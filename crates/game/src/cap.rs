@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel, pelt_blends).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(PreUpdate, minimap_hits.after(bevy::ui::UiSystems::Focus).run_if(in_state(AppState::CreateHousehold)))
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
@@ -165,6 +165,18 @@ pub struct Cap {
     pelt_shown: Option<(usize, String, u64, usize, bool, bool, u32, usize, bool)>,
     pelt_opacity_seen: Option<(usize, f32)>,
     pelt_tested: bool,
+    /// Its Blends: up (or Layers), the fur shapes' cells, bar and first row, each slider (its
+    /// entity, its shape, its value last seen), what they show, the Total's last seen and its
+    /// range, and whether its test's done.
+    pelt_blends: bool,
+    pelt_blend_cells: Option<Entity>,
+    pelt_blend_bar: Option<Entity>,
+    pelt_blend_scroll: usize,
+    pelt_blend_sliders: Vec<(Entity, u64, f32)>,
+    pelt_blends_shown: Option<(usize, String, usize, bool)>,
+    pelt_total_seen: Option<f32>,
+    pelt_length_range: Option<(f32, f32)>,
+    pelt_blends_tested: bool,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -226,6 +238,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         hooves: None,
         sliders: Vec::new(),
         fur: None,
+        fur_mix: None,
         layers: None,
     })
 }
@@ -309,7 +322,7 @@ fn pet_stage(
     let want = pet.map(|p| {
         let tint = p.tint.map_or(0, |c| c.iter().fold(1u64, |a, v| a << 8 | (v * 255.0) as u64));
         let parts = [&p.tail, &p.mane, &p.hooves].map(|n| n.as_deref().map_or(0, |n| s3pkg::fnv64(n) | 1));
-        let fur = p.fur.unwrap_or(0);
+        let fur = p.fur.unwrap_or(0) ^ p.fur_mix.as_deref().map_or(0, |m| m.iter().fold(0u64, |h, (b, a)| h.rotate_left(3) ^ b ^ ((a * 1000.0) as u64)));
         // (The sliders too: their blends' geometry goes with the bones.)
         let slid = p.sliders.iter().fold(0u64, |h, (b, a)| h.rotate_left(5) ^ b ^ ((a * 256.0).round() as i64 as u64)) ^ p.layers.as_deref().map_or(0, |l| crate::pets::layers_key(l).2);
         p.shapes.iter().chain(p.coat.iter()).chain([&tint, &fur, &slid]).chain(parts.iter()).fold(p.outfit, |h, s| h.rotate_left(7) ^ s)
@@ -1608,6 +1621,7 @@ fn fur_panel(
     for (x, c) in &cells {
         if *x == Interaction::Pressed {
             pending.pets[i].fur = Some(c.0);
+            pending.pets[i].fur_mix = None;
         }
     }
     // (CAP_PICK=<n> (tests): the nth chosen, once.)
@@ -1615,6 +1629,7 @@ fn fur_panel(
         && let Some((f, name)) = list.get(n)
     {
         pending.pets[i].fur = Some(*f);
+        pending.pets[i].fur_mix = None;
         info!("create a pet test: the fur shape {name}");
     }
     // (The one it has lit, as the game's `PopulateBlendsGrid`: picked, or its breed's own only if
@@ -1705,11 +1720,11 @@ const PELT_BIN_CLOSE: u32 = 0x0bdf_a020;
 const PELT_REGION_TEXT: u32 = 0x0bdf_a217;
 const PELT_LAYERS_TAB: u32 = 0x0bdf_a014;
 const PELT_CATEGORIES: [u32; 3] = [0x0bdf_a019, 0x0bdf_a01a, 0x0bdf_a01b];
-const PELT_OTHER_TABS: [u32; 2] = [0x0bdf_a012, 0x0bdf_a013];
+const PELT_OTHER_TABS: [u32; 1] = [0x0bdf_a012];
 /// The region maps: a dog's (and a little dog's), a horse's, a cat's.
 const PELT_MAPS: [(&str, u32); 3] = [("d", 0x0bdf_a202), ("h", 0x0bdf_a203), ("c", 0x0bdf_a204)];
-const PELT_NOT_HERE: [u32; 15] = [
-    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a113, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a220, 0x0bdf_a015, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
+const PELT_NOT_HERE: [u32; 14] = [
+    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a220, 0x0bdf_a015, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
     0x0bdf_a214, 0x0bdf_a215, 0x0bdf_a216,
 ];
 /// A pelt layer's cell (`CAPPeltLayerItem`): its thumbnail's button and picture, its colours'
@@ -2028,11 +2043,7 @@ fn pelt_panel(
     for (n, id) in PELT_CATEGORIES.into_iter().enumerate() {
         crate::livehud::set_visible(&mut vis, s.id(id), n == match species { "c" => 0, "h" => 1, _ => 2 });
     }
-    for e in s.all_with(PELT_LAYERS_TAB) {
-        if let Ok(mut b) = buttons.get_mut(e) {
-            b.selected = true;
-        }
-    }
+
     for (sp, id) in PELT_MAPS {
         crate::livehud::set_visible(&mut vis, s.id(id), sp == species);
     }
@@ -2161,6 +2172,255 @@ fn pelt_panel(
             if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), pic) {
                 crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
             }
+        }
+    }
+}
+
+// Coat's Advanced's Blends: its tab, sub-panels, the fur shapes' grid and the total length; the
+// curls and the fur's density (not here: the fur's drawn without its shells).
+const PELT_BLENDS_TAB: u32 = 0x0bdf_a013;
+const PELT_LAYERS_SUB: u32 = 0x0bdf_a112;
+const PELT_BLENDS_SUB: u32 = 0x0bdf_a113;
+const PELT_TOTAL: u32 = 0x0bdf_a114;
+const PELT_BLEND_GRID: u32 = 0x0bdf_a115;
+const PELT_BLENDS_NOT_HERE: [u32; 3] = [0x0bdf_a10d, 0x0bdf_a10e, 0x0bdf_a118];
+/// A fur shape's cell (`CAPFurBlendItem`): its slider and its picture.
+const BLEND_SLIDER: u32 = 0x201;
+const BLEND_THUMB: u32 = 0x200;
+
+/// The fur shapes' shares (summing to one) with one changed, as the game's
+/// `RequestSetFurBlendValues`: `b` to `share`, the difference taken from (or given to) the
+/// default shape first, then the rest in proportion.
+pub fn fur_reshare(shares: &mut Vec<(u64, f32)>, b: u64, share: f32, default: Option<u64>) {
+    let share = share.clamp(0.0, 1.0);
+    let old = shares.iter().find(|s| s.0 == b).map_or(0.0, |s| s.1);
+    match shares.iter_mut().find(|s| s.0 == b) {
+        Some(s) => s.1 = share,
+        None => shares.push((b, share)),
+    }
+    let mut delta = share - old;
+    if let Some(d) = default.filter(|d| *d != b) {
+        if !shares.iter().any(|s| s.0 == d) {
+            shares.push((d, 0.0));
+        }
+        let ds = shares.iter_mut().find(|s| s.0 == d).map(|s| &mut s.1);
+        if let Some(ds) = ds {
+            let take = if delta > 0.0 { delta.min(*ds) } else { delta };
+            *ds -= take;
+            delta -= take;
+        }
+    }
+    if delta.abs() > 1e-6 {
+        let others: f32 = shares.iter().filter(|s| s.0 != b && Some(s.0) != default).map(|s| s.1).sum();
+        if others > 1e-6 {
+            let k = ((others - delta) / others).max(0.0);
+            for s in shares.iter_mut().filter(|s| s.0 != b && Some(s.0) != default) {
+                s.1 *= k;
+            }
+        }
+    }
+    shares.retain(|s| s.1 > 1e-4 || Some(s.0) == default);
+}
+
+/// Coat's Advanced Blends (cats and dogs): the fur shapes two by two, each with its picture and a
+/// slider for its share of the fur (the rest making up the difference, the default shape first),
+/// and Total Blend for how long the fur is altogether (`kMinHairLength` to `kMaxHairLength`, or
+/// as long as it is). The pet's fur goes so as they move, and is kept with it.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn pelt_blends(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts, mut gu): (ResMut<Assets<Image>>, ResMut<Assets<Font>>, Option<ResMut<crate::icons::GameUi>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
+    (mut vis, mut buttons, mut sliders, over): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiSlider>, Query<&bevy::ui::RelativeCursorPosition>),
+    mut bars: Query<&mut UiScrollBar>,
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+) {
+    let Some(mut ui) = ui else { return };
+    let Some(s) = cap.pelt.clone() else { return };
+    let on = cap.panel == Some(Panel::Coat) && cap.pelt_open;
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.pelt_blends_shown = None;
+        return;
+    };
+    let pet = pending.pets[i].clone();
+    let horse = pet.kind.ends_with('h');
+    let Some(breed) = d.breeds.iter().find(|b| b.outfit == pet.outfit) else { return };
+    // (The tabs: Layers and Blends.)
+    for e in s.all_with(PELT_LAYERS_TAB) {
+        if crate::livehud::pressed(&clicks, Some(e)) {
+            cap.pelt_blends = false;
+        }
+    }
+    for e in s.all_with(PELT_BLENDS_TAB) {
+        if crate::livehud::pressed(&clicks, Some(e)) && !horse {
+            cap.pelt_blends = true;
+            cap.pelt_bin = false;
+        }
+    }
+    if horse {
+        cap.pelt_blends = false;
+    }
+    // (CAP_PELT_BLENDS=<shape>:<share> (tests): Blends up, that shape's share so, once.)
+    let test = (!cap.pelt_blends_tested).then(|| std::env::var("CAP_PELT_BLENDS").ok()).flatten();
+    if test.is_some() {
+        cap.pelt_blends_tested = true;
+        cap.pelt_blends = true;
+    }
+    let blends = cap.pelt_blends;
+    crate::livehud::set_visible(&mut vis, s.id(PELT_LAYERS_SUB), !blends);
+    crate::livehud::set_visible(&mut vis, s.id(PELT_BLENDS_SUB), blends);
+    for (id, lit) in [(PELT_LAYERS_TAB, !blends), (PELT_BLENDS_TAB, blends)] {
+        for e in s.all_with(id) {
+            if let Ok(mut b) = buttons.get_mut(e)
+                && b.selected != lit
+            {
+                b.selected = lit;
+            }
+        }
+    }
+    if !blends {
+        cap.pelt_blends_shown = None;
+        return;
+    }
+    // Its fur as shares of a length.
+    let given = pet.fur_mix.clone().or_else(|| pet.fur.map(|f| vec![(f, s3bake::pets::FUR_AMOUNT)]));
+    let amounts = d.fur_amounts(breed, given.as_deref());
+    let default_fur = d.default_fur();
+    let total: f32 = amounts.iter().map(|a| a.1).sum();
+    let mut shares: Vec<(u64, f32)> = if total > 1e-4 { amounts.iter().map(|(b, a)| (*b, a / total)).collect() } else { default_fur.map(|d| vec![(d, 1.0)]).unwrap_or_default() };
+    let range = *cap.pelt_length_range.get_or_insert((total.min(0.0), total.max(s3bake::pets::FUR_AMOUNT)));
+    let mut length = total;
+    let mut changed = false;
+    if let Some((name, v)) = test.as_deref().and_then(|t| t.split_once(':')).and_then(|(n, v)| Some((n.to_string(), v.parse::<f32>().ok()?)))
+        && let Some(b) = d.furs_for(&pet.kind).into_iter().find(|b| b.name.eq_ignore_ascii_case(&name))
+    {
+        fur_reshare(&mut shares, b.instance, v, default_fur);
+        if length < 1e-4 {
+            length = s3bake::pets::FUR_AMOUNT;
+        }
+        changed = true;
+        info!("create a pet test: {name}'s share of the fur {v}");
+    }
+    for (e, b, last) in cap.pelt_blend_sliders.clone() {
+        let Ok(sl) = sliders.get(e) else { continue };
+        if (sl.value - last).abs() < 0.5 {
+            continue;
+        }
+        fur_reshare(&mut shares, b, sl.value / 256.0, default_fur);
+        if length < 1e-4 {
+            length = s3bake::pets::FUR_AMOUNT;
+        }
+        changed = true;
+    }
+    if let Some(e) = s.id(PELT_TOTAL)
+        && let Ok(sl) = sliders.get(e)
+        && cap.pelt_total_seen.is_some_and(|v| (v - sl.value).abs() > 0.5)
+    {
+        length = range.0 + (range.1 - range.0) * sl.value / 256.0;
+        changed = true;
+    }
+    if changed {
+        pending.pets[i].fur_mix = Some(shares.iter().map(|(b, s)| (*b, s * length)).filter(|(_, a)| *a > 1e-4).collect());
+        pending.pets[i].fur = None;
+    }
+    // The sliders kept to the fur (but the one in hand).
+    let share_of = |b: u64| shares.iter().find(|s| s.0 == b).map_or(0.0, |s| s.1);
+    for (e, b, last) in cap.pelt_blend_sliders.iter_mut() {
+        if let Ok(mut sl) = sliders.get_mut(*e) {
+            let want = share_of(*b) * 256.0;
+            if !sl.is_grabbed() && (sl.value - want).abs() > 0.5 {
+                sl.value = want;
+            }
+            *last = sl.value;
+        }
+    }
+    if let Some(mut sl) = s.id(PELT_TOTAL).and_then(|e| sliders.get_mut(e).ok()) {
+        let want = ((length - range.0) / (range.1 - range.0).max(1e-4) * 256.0).clamp(0.0, 256.0);
+        if !sl.is_grabbed() && (sl.value - want).abs() > 0.5 {
+            sl.value = want;
+        }
+        cap.pelt_total_seen = Some(sl.value);
+    }
+    // The grid's rows.
+    let list: Vec<(u64, String)> = d.furs_for(&pet.kind).into_iter().map(|b| (b.instance, b.name.clone())).collect();
+    let Some(g) = ui.find("CAPCCMAdvanced", PELT_BLEND_GRID).and_then(|w| w.grid) else { return };
+    if cap.pelt_blend_bar.is_none()
+        && let (Some(grid), Some(gw), Some(mut b)) = (s.id(PELT_BLEND_GRID), ui.find("CAPCCMAdvanced", PELT_BLEND_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned())
+    {
+        for id in PELT_BLENDS_NOT_HERE {
+            if let Some(e) = s.id(id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+        let (w, h) = (gw.area[2] - gw.area[0], gw.area[3] - gw.area[1]);
+        b.flags |= s3bake::ui::WIN_VISIBLE;
+        b.place = s3bake::ui::UiPlace::Fixed;
+        b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+        cap.pelt_blend_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+        commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+        if let Some(t) = s.id(PELT_TOTAL).and_then(|e| ui.find("CAPCCMAdvanced", PELT_TOTAL).map(|_| e)) {
+            commands.entity(t).insert(crate::icons::Tooltip("Total Blend".into()));
+        }
+    }
+    let cols = g.columns.max(1) as usize;
+    let rows = list.len().div_ceil(cols);
+    let most = rows.saturating_sub(g.rows.max(1) as usize);
+    let over_grid = s.id(PELT_BLEND_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+    if over_grid && wheel.delta.y != 0.0 {
+        cap.pelt_blend_scroll = (cap.pelt_blend_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+        if let Some(mut b) = cap.pelt_blend_bar.and_then(|e| bars.get_mut(e).ok()) {
+            b.value = cap.pelt_blend_scroll;
+        }
+    } else if let Some(b) = cap.pelt_blend_bar.and_then(|e| bars.get(e).ok())
+        && b.value != cap.pelt_blend_scroll
+    {
+        cap.pelt_blend_scroll = b.value.min(most);
+    }
+    if let Some(mut b) = cap.pelt_blend_bar.and_then(|e| bars.get_mut(e).ok())
+        && (b.total, b.visible) != (rows, g.rows.max(1) as usize)
+    {
+        (b.total, b.visible) = (rows, g.rows.max(1) as usize);
+    }
+    let want = (i, pet.kind.clone(), cap.pelt_blend_scroll, gu.is_some());
+    if cap.pelt_blends_shown.as_ref() == Some(&want) {
+        return;
+    }
+    cap.pelt_blends_shown = Some(want);
+    if let Some(old) = cap.pelt_blend_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    cap.pelt_blend_sliders.clear();
+    let (Some(grid), Some(template)) = (s.id(PELT_BLEND_GRID), ui.layout("CAPFurBlendItem").cloned()) else { return };
+    let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+    commands.entity(grid).insert_children(0, &[holder]);
+    cap.pelt_blend_cells = Some(holder);
+    let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+    let flags = fur_thumb_flags(&pet.kind);
+    for (n, (instance, name)) in list.iter().enumerate().skip(cap.pelt_blend_scroll * cols).take(cols * g.rows.max(1) as usize) {
+        let k = n - cap.pelt_blend_scroll * cols;
+        let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
+        let mut cell = template.clone();
+        cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+        let v = share_of(*instance) * 256.0;
+        crate::layout::edit_windows(&mut cell, BLEND_SLIDER, &mut |w| {
+            if let Some(r) = w.slider.as_mut() {
+                (r[0], r[1], r[2]) = (0.0, 256.0, v);
+            }
+        });
+        let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+        let Some(root) = c.root else { continue };
+        let tip = ui.localize(&format!("Ui/Tooltip/CAS/CAP/CAPCCMAdvanced/BlendNames:{name}")).filter(|t| !t.is_empty()).unwrap_or_else(|| name.clone());
+        commands.entity(root).insert(crate::icons::Tooltip(tip));
+        if let Some(e) = c.id(BLEND_SLIDER) {
+            cap.pelt_blend_sliders.push((e, *instance, v));
+        }
+        let pic = gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::face_thumb_name(*instance, flags)));
+        if let (Some(win), Some(h)) = (c.id(BLEND_THUMB), pic) {
+            crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
         }
     }
 }
@@ -2874,6 +3134,21 @@ mod tests {
         assert_eq!(pelt_region_of("adRegionsLegFL_socksToe"), Some("LegFL"));
         assert_eq!(pelt_region_of("acRegionsAll_tabby"), Some("All"));
         assert!(pelt_marking("adMarkings_blaze") && !pelt_marking("adRegionsChest_blaze"));
+    }
+
+    #[test]
+    fn a_fur_shapes_share_comes_from_the_default_first() {
+        // (All the default's: a shape to a half takes it from the default.)
+        let mut s = vec![(9, 1.0)];
+        fur_reshare(&mut s, 1, 0.5, Some(9));
+        assert_eq!(s, vec![(9, 0.5), (1, 0.5)]);
+        // (More than the default has: the rest from the others, in proportion.)
+        fur_reshare(&mut s, 2, 0.75, Some(9));
+        let get = |s: &[(u64, f32)], b: u64| s.iter().find(|x| x.0 == b).map_or(0.0, |x| x.1);
+        assert!(get(&s, 9).abs() < 1e-5 && (get(&s, 1) - 0.25).abs() < 1e-5 && (get(&s, 2) - 0.75).abs() < 1e-5);
+        // (Less: the default gets it back.)
+        fur_reshare(&mut s, 2, 0.25, Some(9));
+        assert!((get(&s, 9) - 0.5).abs() < 1e-5 && (s.iter().map(|x| x.1).sum::<f32>() - 1.0).abs() < 1e-5);
     }
 
     #[test]

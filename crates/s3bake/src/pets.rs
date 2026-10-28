@@ -219,15 +219,29 @@ impl PetsBaked {
         amounts
     }
 
+    /// A pet's fur: its fur shapes' amounts (the breed's, or those given it), the default one
+    /// (`deltaOld`) among them.
+    pub fn fur_amounts(&self, breed: &PetBreed, given: Option<&[(u64, f32)]>) -> Vec<(u64, f32)> {
+        match given {
+            Some(g) => g.to_vec(),
+            None => breed.blends.iter().filter(|(b, _)| self.blends.iter().any(|x| x.fur && x.instance == *b)).copied().collect(),
+        }
+    }
+
+    /// The default fur shape (`deltaOld`), what the rest's shares are taken from first.
+    pub fn default_fur(&self) -> Option<u64> {
+        self.blends.iter().find(|b| b.fur && b.name == "deltaOld").map(|b| b.instance)
+    }
+
     /// The fur shapes Create a Pet offers a kind of pet (but `deltaOld`), in the game's order.
     pub fn furs_for(&self, kind: &str) -> Vec<&PetBlend> {
         self.blends.iter().filter(|b| b.fur && b.name != "deltaOld" && b.deltas.iter().any(|d| d.0 == kind)).collect()
     }
 
     /// The vertex deltas of a pet's blends at their amounts, summed, by vertex id: its breed's,
-    /// its shapes', its sliders' and its fur shape's (one picked: that, at `FUR_AMOUNT`, in place
-    /// of the breed's).
-    pub fn vertex_deltas(&self, kind: &str, breed: &PetBreed, presets: &[u64], set: &[(u64, f32)], fur: Option<u64>) -> std::collections::HashMap<u32, ([f32; 3], [f32; 3])> {
+    /// its shapes', its sliders' and its fur's (fur shapes picked, at their amounts, in place of
+    /// the breed's).
+    pub fn vertex_deltas(&self, kind: &str, breed: &PetBreed, presets: &[u64], set: &[(u64, f32)], fur: Option<&[(u64, f32)]>) -> std::collections::HashMap<u32, ([f32; 3], [f32; 3])> {
         let mut amounts = self.amounts(breed, presets);
         for (b, a) in set {
             match amounts.iter_mut().find(|x| x.0 == *b) {
@@ -237,7 +251,7 @@ impl PetsBaked {
         }
         if let Some(f) = fur {
             amounts.retain(|(b, _)| !self.blends.iter().any(|x| x.instance == *b && x.fur));
-            amounts.push((f, FUR_AMOUNT));
+            amounts.extend_from_slice(f);
         }
         let mut out: std::collections::HashMap<u32, ([f32; 3], [f32; 3])> = std::collections::HashMap::new();
         for (b, a) in amounts {
@@ -825,7 +839,7 @@ mod tests {
         let own = data.vertex_deltas("ad", &breed, &[], &[], None)[&7].0;
         assert!((own[0] - 0.5).abs() < 1e-5 && (own[1] - 0.075).abs() < 1e-5);
         // (Another picked: it alone, at kMaxHairLength; the face blend kept.)
-        let picked = data.vertex_deltas("ad", &breed, &[], &[], Some(2))[&7].0;
+        let picked = data.vertex_deltas("ad", &breed, &[], &[], Some(&[(2, FUR_AMOUNT)]))[&7].0;
         assert!((picked[0] - 0.5).abs() < 1e-5 && (picked[1] - 0.3).abs() < 1e-5);
         // (deltaOld isn't offered, nor any for a cat.)
         assert_eq!(data.furs_for("ad").iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["ChowChow", "Poodle"]);

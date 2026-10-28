@@ -1644,7 +1644,12 @@ installation is unreachable.
   how much it shows; New opens the bin of the kind's Regions (those of the region clicked on the
   game's region map, found by its pictures' hit masks) and Markings, a click laying one on top;
   Copy and Remove (never the base), ten at most. The pet's coat is painted from its layers as they
-  change, as the bake paints the breeds' (shared `paint_coat`), and kept with it.
+  change, as the bake paints the breeds' (shared `paint_coat`), and kept with it. Its Blends tab
+  (cats and dogs) mixes the fur shapes: each in the game's `CAPFurBlendItem` cell with its picture
+  and a slider for its share of the fur, the difference taken from the default shape first and
+  then the rest in proportion (`RequestSetFurBlendValues`), and Total Blend for how long the fur is
+  altogether (`kMinHairLength` to `kMaxHairLength`); the pet's fur reshaped as they move.
+  `CAP_PELT_BLENDS=<shape>:<share>` (tests).
   `CAP_PELT=<part>[:<r,g,b>]`, `CAP_PELT_BIN=markings|<region>` (tests). Every breed is built as the
   game builds it: its outfit's
   face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
@@ -1853,7 +1858,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-Create a Pet's Advanced coat's marking placement, fur blend sliders and saved coats; complete object placement and routing compatibility; the rest of the expansions'
+Create a Pet's Advanced coat's marking placement and saved coats; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
