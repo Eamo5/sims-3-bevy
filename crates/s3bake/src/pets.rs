@@ -12,7 +12,7 @@ use crate::pack::{read_value, write_value};
 use crate::types::{Key, SkinMesh};
 
 /// Bumped when the baked pets change.
-pub const PETS_VERSION: u32 = 12;
+pub const PETS_VERSION: u32 = 13;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PetsBaked {
@@ -306,6 +306,66 @@ pub struct PetBreed {
     /// Its build: its outfit's face and body blends (FACE instances) at their amounts.
     #[serde(default)]
     pub blends: Vec<(u64, f32)>,
+    /// Its coat's layers, the base first (Create a Pet's Advanced coat starts from them).
+    #[serde(default)]
+    pub layers: Vec<CoatLayer>,
+}
+
+/// One layer of a pet's coat (`CAPCCMAdvanced`'s pelt layers): its region or marking (the part's
+/// name), its mask, its colours by the mask's channel (sRGB, as the presets write them), and how
+/// opaque it is.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct CoatLayer {
+    pub part: String,
+    pub mask: Key,
+    pub colors: Vec<(u8, [f32; 3])>,
+    pub opacity: f32,
+}
+
+impl CoatLayer {
+    /// A part's layer as its preset gives it.
+    fn from_preset(part: &str, preset: &str) -> Option<Self> {
+        let mask = preset_value(preset, "Mask")?.strip_prefix("key:")?;
+        let q: Vec<&str> = mask.split(':').collect();
+        let mask = (u32::from_str_radix(q.first()?, 16).ok()?, u32::from_str_radix(q.get(1)?, 16).ok()?, u64::from_str_radix(q.get(2)?, 16).ok()?);
+        let opacity = preset_value(preset, "Opacity").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
+        let colors = (1..=4u8)
+            .filter(|i| preset_value(preset, &format!("Color{i} Enabled")).is_some_and(|v| v.eq_ignore_ascii_case("true")))
+            .filter_map(|i| {
+                let v: Vec<f32> = preset_value(preset, &format!("Color{i}"))?.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                (v.len() >= 3).then(|| (i - 1, [v[0], v[1], v[2]]))
+            })
+            .collect();
+        Some(Self { part: part.to_string(), mask, colors, opacity })
+    }
+}
+
+/// A coat painted from its layers over the fur's shading (the game's pelt layers): from a brown,
+/// each layer's colours laid on through its mask's channels in turn, at its opacity; then the
+/// shading (about mid-grey) over it.
+pub fn paint_coat(shading: &s3formats::dds::Rgba, layers: &[(&s3formats::dds::Rgba, &CoatLayer)]) -> s3formats::dds::Rgba {
+    let mut img = s3formats::dds::Rgba { width: COAT_SIZE, height: COAT_SIZE, data: vec![255; COAT_SIZE * COAT_SIZE * 4] };
+    for y in 0..COAT_SIZE {
+        for x in 0..COAT_SIZE {
+            let (u, v) = ((x as f32 + 0.5) / COAT_SIZE as f32, (y as f32 + 0.5) / COAT_SIZE as f32);
+            let mut c = [0.5f32, 0.4, 0.3];
+            for (mask, layer) in layers {
+                let m = mask.sample(u, v);
+                for (ch, col) in &layer.colors {
+                    let a = (m[*ch as usize] * layer.opacity).clamp(0.0, 1.0);
+                    for k in 0..3 {
+                        c[k] += (col[k] - c[k]) * a;
+                    }
+                }
+            }
+            let s = shading.sample(u, v)[0] * 2.0;
+            let i = (y * COAT_SIZE + x) * 4;
+            for k in 0..3 {
+                img.data[i + k] = ((c[k] * s).clamp(0.0, 1.0) * 255.0) as u8;
+            }
+        }
+    }
+    img
 }
 
 /// The texture-store key of a breed's coat.
@@ -379,6 +439,12 @@ pub struct PetRegion {
     pub name: String,
     pub mask: Key,
     pub colors: Vec<[f32; 3]>,
+    /// The layer it makes, as its preset gives it.
+    #[serde(default)]
+    pub layer: CoatLayer,
+    /// Its CAS part's instance (its picture's, among the CAS thumbnails).
+    #[serde(default)]
+    pub instance: u64,
 }
 
 /// The kinds, their part-name prefix and skeleton.
@@ -525,7 +591,8 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
                 let mask = preset_value(preset, "Mask")?.strip_prefix("key:")?;
                 let p: Vec<&str> = mask.split(':').collect();
                 let k = (u32::from_str_radix(p.first()?, 16).ok()?, u32::from_str_radix(p.get(1)?, 16).ok()?, u64::from_str_radix(p.get(2)?, 16).ok()?);
-                Some(PetRegion { name: c.name.clone(), mask: k, colors: preset_colors(preset) })
+                let layer = CoatLayer::from_preset(&c.name, preset)?;
+                Some(PetRegion { name: c.name.clone(), mask: k, colors: preset_colors(preset), layer, instance: instance_of.get(&c.name).copied().unwrap_or(0) })
             })
             .collect();
         textures.extend(regions.iter().map(|r| (r.mask, false)));
@@ -592,46 +659,9 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         let shading = shading_of.get(&kind)?.as_ref()?;
         let part = |t: u32| named.iter().find(|(_, pt, _)| *pt == t).map(|(n, ..)| n.clone());
         // The coat: the base's colours, then each region's in turn, through its mask's channels.
-        let layers: Vec<(s3formats::dds::Rgba, Vec<(usize, [f32; 3])>, f32)> = named
-            .iter()
-            .filter(|(_, t, _)| matches!(*t, PT_BASE | PT_REGION))
-            .filter_map(|(_, _, p)| {
-                let mask = preset_value(&p.preset, "Mask")?.strip_prefix("key:")?;
-                let q: Vec<&str> = mask.split(':').collect();
-                let mk = (u32::from_str_radix(q.first()?, 16).ok()?, u32::from_str_radix(q.get(1)?, 16).ok()?, u64::from_str_radix(q.get(2)?, 16).ok()?);
-                let opacity = preset_value(&p.preset, "Opacity").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
-                let colors: Vec<(usize, [f32; 3])> = (1..=4usize)
-                    .filter(|i| preset_value(&p.preset, &format!("Color{i} Enabled")).is_some_and(|v| v.eq_ignore_ascii_case("true")))
-                    .filter_map(|i| {
-                        let v: Vec<f32> = preset_value(&p.preset, &format!("Color{i}"))?.split(',').filter_map(|x| x.trim().parse().ok()).collect();
-                        (v.len() >= 3).then(|| (i - 1, [v[0], v[1], v[2]]))
-                    })
-                    .collect();
-                Some((decode(mk)?, colors, opacity))
-            })
-            .collect();
-        let mut img = s3formats::dds::Rgba { width: COAT_SIZE, height: COAT_SIZE, data: vec![255; COAT_SIZE * COAT_SIZE * 4] };
-        for y in 0..COAT_SIZE {
-            for x in 0..COAT_SIZE {
-                let (u, v) = ((x as f32 + 0.5) / COAT_SIZE as f32, (y as f32 + 0.5) / COAT_SIZE as f32);
-                let mut c = [0.5f32, 0.4, 0.3];
-                for (mask, colors, opacity) in &layers {
-                    let m = mask.sample(u, v);
-                    for (ch, col) in colors {
-                        let a = (m[*ch] * opacity).clamp(0.0, 1.0);
-                        for k in 0..3 {
-                            c[k] += (col[k] - c[k]) * a;
-                        }
-                    }
-                }
-                // (Over the fur's shading, which sits about mid-grey.)
-                let s = shading.sample(u, v)[0] * 2.0;
-                let i = (y * COAT_SIZE + x) * 4;
-                for k in 0..3 {
-                    img.data[i + k] = ((c[k] * s).clamp(0.0, 1.0) * 255.0) as u8;
-                }
-            }
-        }
+        let layers: Vec<CoatLayer> = named.iter().filter(|(_, t, _)| matches!(*t, PT_BASE | PT_REGION)).filter_map(|(n, _, p)| CoatLayer::from_preset(n, &p.preset)).collect();
+        let masks: Vec<(s3formats::dds::Rgba, &CoatLayer)> = layers.iter().filter_map(|l| Some((decode(l.mask)?, l))).collect();
+        let img = paint_coat(shading, &masks.iter().map(|(m, l)| (m, *l)).collect::<Vec<_>>());
         let coat = coat_key(k.i);
         let _ = std::fs::write(root.tex_path(coat), crate::ddsw::encode_dds(&img));
         // (PET_PNG=<dir>: each coat as a picture too, to look at.)
@@ -647,7 +677,7 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         }
         // Its build: the outfit's face and body blends, at their amounts.
         let blends = o.faces.iter().map(|(k, a)| (k.i, *a)).collect();
-        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), hooves: part(PT_HOOVES), name: String::new(), listed: None, thumb: Vec::new(), blends })
+        Some(PetBreed { outfit: k.i, kind, age: o.age, gender: o.gender, coat, tail: part(PT_TAIL), ears: part(PT_EARS), mane: part(PT_MANE), hooves: part(PT_HOOVES), name: String::new(), listed: None, thumb: Vec::new(), blends, layers })
     })
     .into_iter()
     .flatten()
@@ -684,6 +714,8 @@ pub fn bake_pets(root: &crate::BakeRoot, pkgs: &PackageSet, install_root: &std::
         b.thumb = p.unwrap_or_default();
     }
     progress(&format!("Converting: {} breeds named, {} pictured", breeds.iter().filter(|b| b.listed.is_some()).count(), breeds.iter().filter(|b| !b.thumb.is_empty()).count()));
+    // (The breeds' layers' masks too, for Create a Pet's Advanced coat.)
+    textures.extend(breeds.iter().flat_map(|b| b.layers.iter().map(|l| (l.mask, false))));
     textures.sort();
     textures.dedup();
     let n = crate::bake::bake_textures(root, pkgs, &textures, 1024, "Converting pets", progress);
@@ -798,6 +830,20 @@ mod tests {
         // (deltaOld isn't offered, nor any for a cat.)
         assert_eq!(data.furs_for("ad").iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), ["ChowChow", "Poodle"]);
         assert!(data.furs_for("ac").is_empty());
+    }
+
+    #[test]
+    fn a_coat_is_painted_from_its_layers_in_turn() {
+        let flat = |c: [u8; 4]| s3formats::dds::Rgba { width: 2, height: 2, data: c.repeat(4) };
+        // (Mid-grey shading: the colours as they are.)
+        let shading = flat([128, 128, 128, 255]);
+        let red = CoatLayer { part: "base".into(), colors: vec![(0, [1.0, 0.0, 0.0])], opacity: 1.0, ..Default::default() };
+        let blue = CoatLayer { part: "spots".into(), colors: vec![(1, [0.0, 0.0, 1.0])], opacity: 0.5, ..Default::default() };
+        let (all, green) = (flat([255, 0, 0, 255]), flat([0, 255, 0, 255]));
+        let img = paint_coat(&shading, &[(&all, &red), (&green, &blue)]);
+        let px = &img.data[..3];
+        // (Red, then half blue over it through the second channel.)
+        assert!(px[0] > 120 && px[0] < 135 && px[1] < 5 && px[2] > 120 && px[2] < 135, "{px:?}");
     }
 
     #[test]

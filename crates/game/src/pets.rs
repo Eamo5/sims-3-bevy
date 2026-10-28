@@ -503,7 +503,17 @@ pub fn spawn_pet(
     // The coat over the fur, nose and pads (another breed's of its kind, where it has one; its
     // colour shifted, where it's been given one); dark glossy eyes.
     let coat_key = look.coat.and_then(|o| data.breeds.iter().find(|x| x.outfit == o && x.kind == b.kind)).map_or(b.coat, |x| x.coat);
+    // (Its own layers, Create a Pet's Advanced coat: painted here, kept by what they are.)
+    let layered = look.layers.as_ref().zip(kind.shading).map(|(layers, shading)| {
+        let key = layers_key(layers);
+        if assets.cached_texture(key).is_none() {
+            let img = layered_coat(ctx.baked, shading, layers);
+            assets.ingest_texture(ctx.images, key, img);
+        }
+        key
+    });
     let coat = match look.tint {
+        _ if layered.is_some() => layered.and_then(|k| assets.cached_texture(k).flatten()).or_else(|| assets.texture(ctx, coat_key)),
         Some(t) => {
             let key = tint_key(coat_key, t);
             if assets.cached_texture(key).is_none() {
@@ -558,6 +568,32 @@ pub fn spawn_pet(
     }
     commands.entity(root).insert(PetSkeleton { rig, joints, bind, inverse, shape });
     Some(root)
+}
+
+/// The texture-store key of a coat painted from layers.
+pub fn layers_key(layers: &[s3bake::pets::CoatLayer]) -> s3bake::Key {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    for l in layers {
+        for v in [l.mask.0 as u64, l.mask.1 as u64, l.mask.2, (l.opacity * 1000.0) as u64].into_iter().chain(l.colors.iter().map(|(ch, c)| (*ch as u64) << 48 | c.iter().fold(0u64, |a, v| a << 16 | (v * 65535.0) as u64))) {
+            h = (h ^ v).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    (0x7000_0000, 0x4c41_5952, h)
+}
+
+/// A coat painted from its layers over the kind's fur shading (as the bake paints the breeds').
+fn layered_coat(baked: &crate::baked::BakedData, shading: s3bake::Key, layers: &[s3bake::pets::CoatLayer]) -> Option<Image> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let dec = |k: s3bake::Key| baked.texture_bytes(&k).and_then(|d| s3formats::dds::decode(&d, 1024));
+    let shade = dec(shading)?;
+    let masks: Vec<(s3formats::dds::Rgba, &s3bake::pets::CoatLayer)> = layers.iter().filter_map(|l| Some((dec(l.mask)?, l))).collect();
+    let img = s3bake::pets::paint_coat(&shade, &masks.iter().map(|(m, l)| (m, *l)).collect::<Vec<_>>());
+    let (mips, levels) = s3formats::dds::build_mips(&img);
+    let mut out = Image::new(Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 }, TextureDimension::D2, mips, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
+    out.texture_descriptor.mip_level_count = levels;
+    out.sampler = crate::objects::sampler();
+    Some(out)
 }
 
 /// The texture-store key of a coat shifted to a colour.
@@ -886,12 +922,15 @@ pub struct SavedPet {
     /// The fur shape picked for it (Create a Pet's Fur Shape), in place of its breed's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fur: Option<u64>,
+    /// Its coat's layers as Create a Pet's Advanced coat left them (in place of its coat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layers: Option<Vec<s3bake::pets::CoatLayer>>,
 }
 
 impl SavedPet {
     /// How it looks, beyond its breed.
     pub fn look(&self) -> PetLook {
-        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone(), hooves: self.hooves.clone(), sliders: self.sliders.clone(), fur: self.fur }
+        PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone(), hooves: self.hooves.clone(), sliders: self.sliders.clone(), fur: self.fur, layers: self.layers.clone() }
     }
 }
 
@@ -907,6 +946,7 @@ pub struct PetLook {
     pub hooves: Option<String>,
     pub sliders: Vec<(u64, f32)>,
     pub fur: Option<u64>,
+    pub layers: Option<Vec<s3bake::pets::CoatLayer>>,
 }
 
 /// Pets to put on the home lot once it's ready (a premade household's, or a save's).
@@ -968,7 +1008,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, layers: None });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -996,7 +1036,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, layers: None })
     }
 }
 
@@ -1151,7 +1191,7 @@ pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::
         .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, layers: p.look.layers.clone() })
         })
         .collect()
 }

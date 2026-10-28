@@ -31,7 +31,7 @@ impl Plugin for CapPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Cap>()
             .add_message::<CapRequest>()
-            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel).chain().run_if(in_state(AppState::CreateHousehold)))
+            .add_systems(Update, (requests, pet_stage, pet_sheet, basics_panel, breeds_panel, character_panel, accessories_panel, shape_panel, advanced_panel, coat_panel, tmh_panel, fur_panel, pelt_panel).chain().run_if(in_state(AppState::CreateHousehold)))
             .add_systems(Update, cap_test)
             .add_systems(PreUpdate, minimap_hits.after(bevy::ui::UiSystems::Focus).run_if(in_state(AppState::CreateHousehold)))
             .add_systems(OnExit(AppState::CreateHousehold), |mut cap: ResMut<Cap>| {
@@ -146,6 +146,25 @@ pub struct Cap {
     fur_bar: Option<Entity>,
     fur_scroll: usize,
     fur_shown: Option<(usize, Option<u64>, usize, bool)>,
+    /// Coat's Advanced (pelt layers): its panel, whether it's up, the layer worked on, whether the
+    /// bin's up (its markings, or the map region's regions), the region picked on the map, its
+    /// cells, swatches, bin cells and bar and first row, what it shows, the opacity slider last
+    /// seen, and whether its test's done.
+    pelt: Option<Spawned>,
+    pelt_open: bool,
+    pelt_layer: usize,
+    pelt_bin: bool,
+    pelt_markings: bool,
+    pelt_region: u32,
+    pelt_pick: Option<u32>,
+    pelt_cells: Option<Entity>,
+    pelt_swatches: Option<Entity>,
+    pelt_bin_cells: Option<Entity>,
+    pelt_bin_bar: Option<Entity>,
+    pelt_bin_scroll: usize,
+    pelt_shown: Option<(usize, String, u64, usize, bool, bool, u32, usize, bool)>,
+    pelt_opacity_seen: Option<(usize, f32)>,
+    pelt_tested: bool,
     /// The picker asked for by a test.
     test_picker: bool,
 }
@@ -207,6 +226,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         hooves: None,
         sliders: Vec::new(),
         fur: None,
+        layers: None,
     })
 }
 
@@ -291,7 +311,7 @@ fn pet_stage(
         let parts = [&p.tail, &p.mane, &p.hooves].map(|n| n.as_deref().map_or(0, |n| s3pkg::fnv64(n) | 1));
         let fur = p.fur.unwrap_or(0);
         // (The sliders too: their blends' geometry goes with the bones.)
-        let slid = p.sliders.iter().fold(0u64, |h, (b, a)| h.rotate_left(5) ^ b ^ ((a * 256.0).round() as i64 as u64));
+        let slid = p.sliders.iter().fold(0u64, |h, (b, a)| h.rotate_left(5) ^ b ^ ((a * 256.0).round() as i64 as u64)) ^ p.layers.as_deref().map_or(0, |l| crate::pets::layers_key(l).2);
         p.shapes.iter().chain(p.coat.iter()).chain([&tint, &fur, &slid]).chain(parts.iter()).fold(p.outfit, |h, s| h.rotate_left(7) ^ s)
     });
     if cap.model.map(|m| m.1) != want {
@@ -396,7 +416,8 @@ fn pet_sheet(
     let Some(s) = cap.sheet.clone() else { return };
     let modal = crate::casfamily::UP.load(Ordering::Relaxed) || crate::casgenetics::UP.load(Ordering::Relaxed);
     let pet = cap.pet.and_then(|i| pending.pets.get(i)).cloned();
-    crate::livehud::set_visible(&mut vis, s.root, pet.is_some() && !modal);
+    // (Put away while the coat's layers are worked on: their map's in its place.)
+    crate::livehud::set_visible(&mut vis, s.root, pet.is_some() && !modal && !cap.pelt_open);
     let Some(pet) = pet else {
         cap.sheet_shown = None;
         return;
@@ -898,7 +919,7 @@ fn minimap_hits(
     mouse: Res<ButtonInput<MouseButton>>,
 ) {
     let Some(ui) = ui else { return };
-    if !cap.adv_open {
+    if !cap.adv_open && !cap.pelt_open {
         return;
     }
     let mut hit: Option<u32> = None;
@@ -924,7 +945,11 @@ fn minimap_hits(
         i.set_if_neq(want);
     }
     if let Some(r) = hit.filter(|_| mouse.just_pressed(MouseButton::Left)) {
-        cap.adv_pick = Some(r);
+        if cap.pelt_open {
+            cap.pelt_pick = Some(r);
+        } else {
+            cap.adv_pick = Some(r);
+        }
     }
 }
 
@@ -1340,7 +1365,9 @@ const COATS_GRID: u32 = 0x05db_cf21;
 const COAT_COLORS: u32 = 0x05db_cf22;
 const COAT_TRASH: u32 = 0x05db_b903;
 const COAT_PICKER: u32 = 0x05db_b950;
-const COAT_NOT_HERE: [u32; 3] = [0x05db_b90f, 0x05db_cf30, 0x05db_b90d];
+const COAT_NOT_HERE: [u32; 2] = [0x05db_b90f, 0x05db_cf30];
+/// Coat's Advanced: its pelt layers (`CAPCCMAdvanced`).
+const COAT_ADVANCED: u32 = 0x05db_b90d;
 // `CAPCCMBasic`'s, the frame Coat sits in: its species' tabs, Close, the long backing.
 const CCM_CLOSE: u32 = 0x05db_9c00;
 const CCM_COAT: u32 = 0x05db_9c03;
@@ -1394,7 +1421,7 @@ fn tmh_panel(
     wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
 ) {
     let Some(mut ui) = ui else { return };
-    let on = cap.panel == Some(Panel::Coat) && !matches!(cap.ccm_tab, CcmTab::Coat | CcmTab::Fur);
+    let on = cap.panel == Some(Panel::Coat) && !matches!(cap.ccm_tab, CcmTab::Coat | CcmTab::Fur) && !cap.pelt_open;
     if on && cap.tmh.is_none() && ui.layout("CAPColoringTMH").is_some() {
         cap.tmh = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPColoringTMH", 7);
         if let Some(s) = cap.tmh.clone() {
@@ -1549,7 +1576,7 @@ fn fur_panel(
     wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
 ) {
     let Some(mut ui) = ui else { return };
-    let on = cap.panel == Some(Panel::Coat) && cap.ccm_tab == CcmTab::Fur;
+    let on = cap.panel == Some(Panel::Coat) && cap.ccm_tab == CcmTab::Fur && !cap.pelt_open;
     if on && cap.fur.is_none() && ui.layout("CAPFurShapes").is_some() {
         cap.fur = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPFurShapes", 7);
         if let Some(s) = cap.fur.clone() {
@@ -1657,6 +1684,487 @@ fn fur_panel(
     }
 }
 
+// `CAPCCMAdvanced`'s windows (`ControlIDs`): the layers panel (its close, the species' category
+// buttons, the layers' grid and its New, Copy and Remove, the colours' grid with Color and Delete,
+// Opacity and Rotation), the bin (its grid, Regions and Markings, close), the region map (the
+// species' regions, the region's name) and what isn't here.
+const PELT_CLOSE: u32 = 0x0bdf_a110;
+const PELT_LAYERS: u32 = 0x0bdf_a101;
+const PELT_NEW: u32 = 0x0bdf_a10f;
+const PELT_COPY: u32 = 0x0bdf_a102;
+const PELT_REMOVE: u32 = 0x0bdf_a103;
+const PELT_COLOURS: u32 = 0x0bdf_a105;
+const PELT_PICKER: u32 = 0x0bdf_a106;
+const PELT_TRASH: u32 = 0x0bdf_a107;
+const PELT_OPACITY: u32 = 0x0bdf_a108;
+const PELT_BIN: u32 = 0x0bdf_a000;
+const PELT_BIN_GRID: u32 = 0x0bdf_a005;
+const PELT_BIN_REGIONS: u32 = 0x0bdf_a011;
+const PELT_BIN_MARKINGS: u32 = 0x0bdf_a010;
+const PELT_BIN_CLOSE: u32 = 0x0bdf_a020;
+const PELT_REGION_TEXT: u32 = 0x0bdf_a217;
+const PELT_LAYERS_TAB: u32 = 0x0bdf_a014;
+const PELT_CATEGORIES: [u32; 3] = [0x0bdf_a019, 0x0bdf_a01a, 0x0bdf_a01b];
+const PELT_OTHER_TABS: [u32; 2] = [0x0bdf_a012, 0x0bdf_a013];
+/// The region maps: a dog's (and a little dog's), a horse's, a cat's.
+const PELT_MAPS: [(&str, u32); 3] = [("d", 0x0bdf_a202), ("h", 0x0bdf_a203), ("c", 0x0bdf_a204)];
+const PELT_NOT_HERE: [u32; 15] = [
+    0x0bdf_a300, 0x0bdf_a10b, 0x0bdf_a116, 0x0bdf_a113, 0x0bdf_a109, 0x0bdf_a007, 0x0bdf_a111, 0x0bdf_a220, 0x0bdf_a015, 0x0bdf_a211, 0x0bdf_a212, 0x0bdf_a213,
+    0x0bdf_a214, 0x0bdf_a215, 0x0bdf_a216,
+];
+/// A pelt layer's cell (`CAPPeltLayerItem`): its thumbnail's button and picture, its colours'
+/// button and their windows, its name's button.
+const LAYER_THUMB_BUTTON: u32 = 0x104;
+const LAYER_THUMB: u32 = 0x100;
+const LAYER_COLOR_BUTTON: u32 = 0x101;
+const LAYER_COLOR_THUMB: u32 = 0x20;
+const LAYER_NAME: u32 = 0x102;
+const LAYER_LINK: u32 = 0x103;
+/// The game's most layers (`kMaxLayers`).
+const MAX_LAYERS: usize = 10;
+
+/// The regions of the region map, and the parts' names for them (`adRegionsBack_...`).
+const PELT_REGIONS: [(u32, &str); 10] = [
+    (0x0200_0000, "Head"),
+    (0x0400_0000, "Chest"),
+    (0x0600_0000, "Belly"),
+    (0x0800_0000, "Back"),
+    (0x0a00_0000, "Tail"),
+    (0x0c00_0000, "LegFL"),
+    (0x0e00_0000, "LegFR"),
+    (0x1000_0000, "LegRL"),
+    (0x1200_0000, "LegRR"),
+    (0x1400_0000, "All"),
+];
+
+/// A pelt layer's cell (its place in the pet's layers), its colours' button, a part in the bin
+/// (its place in the kind's regions), a colour.
+#[derive(Component)]
+struct PeltLayer(usize);
+#[derive(Component)]
+struct PeltLayerColour(usize);
+#[derive(Component)]
+struct PeltPart(usize);
+#[derive(Component)]
+struct PeltColour([f32; 3]);
+
+/// Whether a region or marking part is a marking (`adMarkings_...`), and which region of the map
+/// a region part is for.
+fn pelt_marking(name: &str) -> bool {
+    name.get(2..).is_some_and(|n| n.starts_with("Markings"))
+}
+
+fn pelt_region_of(name: &str) -> Option<&'static str> {
+    let rest = name.get(2..)?.strip_prefix("Regions")?;
+    PELT_REGIONS.iter().map(|r| r.1).find(|r| rest.starts_with(r) && rest[r.len()..].starts_with('_'))
+}
+
+/// A layer's colours made another colour, as the game's colour presets recolour a layer: each
+/// channel the colour, as much lighter or darker than it as the channel was than the first.
+pub fn pelt_recolour(layer: &mut s3bake::pets::CoatLayer, to: [f32; 3]) {
+    let lum = |c: &[f32; 3]| (0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]).max(1e-3);
+    let first = layer.colors.first().map_or(1.0, |c| lum(&c.1));
+    for (_, c) in layer.colors.iter_mut() {
+        let k = (lum(c) / first).clamp(0.25, 4.0);
+        *c = to.map(|v| (v * k).clamp(0.0, 1.0));
+    }
+}
+
+/// Coat's Advanced (`CAPCCMAdvanced`): the pet's coat as its layers, the base and the regions and
+/// markings over it (its own, or its breed's to begin with). A layer clicked is the one worked on:
+/// the colours under them recolour it (Color: any colour; Delete: its own colours again), Opacity
+/// how much it shows; New opens the bin of the kind's regions (those of the region clicked on the
+/// map) and markings, a click laying one on top; Copy and Remove. The pet's coat is painted from
+/// them as they change, and kept with it.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn pelt_panel(
+    mut commands: Commands,
+    mut cap: ResMut<Cap>,
+    ui: Option<ResMut<UiAssets>>,
+    (mut images, mut fonts, mut gu): (ResMut<Assets<Image>>, ResMut<Assets<Font>>, Option<ResMut<crate::icons::GameUi>>),
+    mut pending: ResMut<PendingHousehold>,
+    data: Res<crate::pets::PetData>,
+    (clicks, layers_q, colours_q, parts_q, swatches_q): (
+        Query<(Entity, &Interaction), Changed<Interaction>>,
+        Query<(&Interaction, &PeltLayer), Changed<Interaction>>,
+        Query<(&Interaction, &PeltLayerColour), Changed<Interaction>>,
+        Query<(&Interaction, &PeltPart), Changed<Interaction>>,
+        Query<(&Interaction, &PeltColour), Changed<Interaction>>,
+    ),
+    (mut vis, mut buttons, mut sliders, over): (Query<&mut Visibility>, Query<&mut UiButton>, Query<&mut UiSlider>, Query<&bevy::ui::RelativeCursorPosition>),
+    mut bars: Query<&mut UiScrollBar>,
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    mut picked: MessageReader<crate::cas::CasActionRequest>,
+) {
+    let Some(mut ui) = ui else { return };
+    let on = cap.panel == Some(Panel::Coat) && cap.pelt_open;
+    let picks: Vec<[f32; 3]> = picked.read().filter_map(|a| if let CasAction::CoatRgb(c) = a.0 { Some(c) } else { None }).collect();
+    if on && cap.pelt.is_none() && ui.layout("CAPCCMAdvanced").is_some() {
+        let Some(s) = spawn_layout(&mut commands, &mut ui, &mut images, &mut fonts, "CAPCCMAdvanced", 7) else { return };
+        for id in PELT_NOT_HERE.into_iter().chain(PELT_OTHER_TABS) {
+            for e in s.all_with(id) {
+                commands.entity(e).insert(Visibility::Hidden);
+            }
+        }
+        for (id, tip) in [(PELT_NEW, "New Layer"), (PELT_COPY, "Copy Layer"), (PELT_REMOVE, "Remove Layer"), (PELT_PICKER, "Color"), (PELT_TRASH, "Its Own Colors"), (PELT_CLOSE, "Close")] {
+            if let Some(e) = s.id(id) {
+                commands.entity(e).insert(crate::icons::Tooltip(tip.into()));
+            }
+        }
+        // (The map's regions, found where their pictures are, as Shape's minimap's.)
+        let layout = ui.layout("CAPCCMAdvanced").cloned();
+        for (_, map) in PELT_MAPS {
+            let (Some(win), Some(pe)) = (layout.as_ref().and_then(|l| l.find(map)), s.id(map)) else { continue };
+            for c in win.children.iter().filter(|c| c.cls.contains("Button") && c.id != 0) {
+                let (Some(e), Some(mask)) = (s.within(pe, c.id), c.drawable.as_ref().and_then(first_image)) else { continue };
+                commands.entity(e).insert((RegionButton { region: c.id, mask }, bevy::ui::RelativeCursorPosition::default(), bevy::ui::FocusPolicy::Pass, crate::icons::Tooltip(c.comment.clone())));
+            }
+        }
+        if let (Some(grid), Some(g), Some(mut b)) = (s.id(PELT_BIN_GRID), ui.find("CAPCCMAdvanced", PELT_BIN_GRID).cloned(), ui.find("ItemGrid", GRID_SCROLLBAR).cloned()) {
+            let (w, h) = (g.area[2] - g.area[0], g.area[3] - g.area[1]);
+            b.flags |= s3bake::ui::WIN_VISIBLE;
+            b.place = s3bake::ui::UiPlace::Fixed;
+            b.area = [w - 20.0, 0.0, w - 2.0, h - 4.0];
+            cap.pelt_bin_bar = ui.spawn_under(&mut commands, &mut images, &mut fonts, &b, grid).root;
+            commands.entity(grid).insert(bevy::ui::RelativeCursorPosition::default()).entry::<Node>().and_modify(|mut n| n.overflow = Overflow::clip());
+        }
+        cap.pelt = Some(s);
+        return;
+    }
+    let Some(s) = cap.pelt.clone() else { return };
+    crate::livehud::set_visible(&mut vis, s.root, on);
+    let (Some(i), Some(d)) = (cap.pet.filter(|_| on), data.0.clone()) else {
+        cap.pelt_shown = None;
+        return;
+    };
+    let pet = pending.pets[i].clone();
+    let species = pet.kind.get(1..).map_or("d", |s| if s == "l" { "d" } else { s });
+    let Some(kind) = d.kinds.iter().find(|k| k.code == pet.kind) else { return };
+    // (Its layers to begin with: those of its coat's breed.)
+    if pending.pets[i].layers.is_none() {
+        let from = pet.coat.unwrap_or(pet.outfit);
+        let start = d.breeds.iter().find(|b| b.outfit == from).or_else(|| d.breeds.iter().find(|b| b.outfit == pet.outfit)).map(|b| b.layers.clone()).unwrap_or_default();
+        pending.pets[i].layers = Some(start);
+        pending.pets[i].tint = None;
+        cap.pelt_layer = 0;
+    }
+    let mut layers = pending.pets[i].layers.clone().unwrap_or_default();
+    let mut changed = false;
+    if crate::livehud::pressed(&clicks, s.id(PELT_CLOSE)) {
+        cap.pelt_open = false;
+        cap.coat_shown = None;
+        return;
+    }
+    // A layer chosen (top first: the list's last).
+    for (x, l) in &layers_q {
+        if *x == Interaction::Pressed {
+            cap.pelt_layer = l.0;
+        }
+    }
+    for (x, l) in &colours_q {
+        if *x == Interaction::Pressed {
+            cap.pelt_layer = l.0;
+        }
+    }
+    let sel = cap.pelt_layer.min(layers.len().saturating_sub(1));
+    // Its colours.
+    for (x, c) in &swatches_q {
+        if *x == Interaction::Pressed
+            && let Some(l) = layers.get_mut(sel)
+        {
+            pelt_recolour(l, c.0);
+            changed = true;
+        }
+    }
+    for c in &picks {
+        if let Some(l) = layers.get_mut(sel) {
+            pelt_recolour(l, *c);
+            changed = true;
+        }
+    }
+    if crate::livehud::pressed(&clicks, s.id(PELT_PICKER)) {
+        let c = layers.get(sel).and_then(|l| l.colors.first()).map_or([0.45, 0.32, 0.2], |c| c.1);
+        commands.insert_resource(crate::cascolour::PickColour(crate::cascolour::PickFor::Coat, c));
+    }
+    if crate::livehud::pressed(&clicks, s.id(PELT_TRASH))
+        && let Some(l) = layers.get_mut(sel)
+    {
+        // (Its own colours: its part's, or the breed's for its base.)
+        let own = kind.regions.iter().find(|r| r.name == l.part).map(|r| r.layer.colors.clone()).or_else(|| d.breeds.iter().find(|b| b.outfit == pet.outfit).and_then(|b| b.layers.iter().find(|x| x.part == l.part)).map(|x| x.colors.clone()));
+        if let Some(own) = own {
+            l.colors = own;
+            changed = true;
+        }
+    }
+    // How much it shows.
+    if let Some(mut sl) = s.id(PELT_OPACITY).and_then(|e| sliders.get_mut(e).ok()) {
+        let want = layers.get(sel).map_or(1.0, |l| l.opacity) * 256.0;
+        if cap.pelt_opacity_seen.is_none_or(|(l, v)| l != sel || (v - sl.value).abs() < 0.5) && !sl.is_grabbed() {
+            if (sl.value - want).abs() > 0.5 {
+                sl.value = want;
+            }
+        } else if let Some(l) = layers.get_mut(sel) {
+            l.opacity = (sl.value / 256.0).clamp(0.0, 1.0);
+            changed = true;
+        }
+        cap.pelt_opacity_seen = Some((sel, sl.value));
+    }
+    // New, Copy, Remove (not the base).
+    if crate::livehud::pressed(&clicks, s.id(PELT_NEW)) && layers.len() < MAX_LAYERS {
+        cap.pelt_bin = !cap.pelt_bin;
+        cap.pelt_shown = None;
+    }
+    if crate::livehud::pressed(&clicks, s.id(PELT_BIN_CLOSE)) {
+        cap.pelt_bin = false;
+        cap.pelt_shown = None;
+    }
+    if crate::livehud::pressed(&clicks, s.id(PELT_COPY)) && sel > 0 && layers.len() < MAX_LAYERS {
+        let l = layers[sel].clone();
+        layers.insert(sel + 1, l);
+        cap.pelt_layer = sel + 1;
+        changed = true;
+    }
+    if crate::livehud::pressed(&clicks, s.id(PELT_REMOVE)) && sel > 0 {
+        layers.remove(sel);
+        cap.pelt_layer = sel - 1;
+        changed = true;
+    }
+    // The bin: its tabs, the map's region, a part laid on top.
+    for (id, markings) in [(PELT_BIN_REGIONS, false), (PELT_BIN_MARKINGS, true)] {
+        if crate::livehud::pressed(&clicks, s.id(id)) && cap.pelt_markings != markings {
+            cap.pelt_markings = markings;
+            cap.pelt_bin_scroll = 0;
+        }
+    }
+    if cap.pelt_region == 0 {
+        cap.pelt_region = PELT_REGIONS[9].0;
+    }
+    if let Some(r) = cap.pelt_pick.take() {
+        cap.pelt_region = r;
+        cap.pelt_markings = false;
+        cap.pelt_bin = true;
+        cap.pelt_bin_scroll = 0;
+    }
+    let region = PELT_REGIONS.iter().find(|r| r.0 == cap.pelt_region).map_or("All", |r| r.1);
+    let bin: Vec<usize> = (0..kind.regions.len())
+        .filter(|n| {
+            let name = &kind.regions[*n].name;
+            if cap.pelt_markings { pelt_marking(name) } else { pelt_region_of(name) == Some(region) }
+        })
+        .collect();
+    for (x, p) in &parts_q {
+        if *x == Interaction::Pressed
+            && layers.len() < MAX_LAYERS
+            && let Some(r) = kind.regions.get(p.0)
+        {
+            layers.push(r.layer.clone());
+            cap.pelt_layer = layers.len() - 1;
+            cap.pelt_bin = false;
+            changed = true;
+            info!("create a pet: the {} laid on its coat", r.name);
+        }
+    }
+    // (CAP_PELT=<part>[:<r>,<g>,<b>] (tests): that part laid on, once, in that colour.)
+    if !cap.pelt_tested
+        && let Ok(t) = std::env::var("CAP_PELT")
+    {
+        cap.pelt_tested = true;
+        let (name, rgb) = t.split_once(':').map_or((t.as_str(), None), |(n, c)| (n, Some(c)));
+        if let Some(r) = kind.regions.iter().find(|r| r.name.eq_ignore_ascii_case(name)) {
+            let mut l = r.layer.clone();
+            if let Some(c) = rgb.map(|c| c.split(',').filter_map(|v| v.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|c| c.len() == 3) {
+                pelt_recolour(&mut l, [c[0], c[1], c[2]]);
+            }
+            layers.push(l);
+            cap.pelt_layer = layers.len() - 1;
+            changed = true;
+            info!("create a pet test: the {} laid on its coat", r.name);
+        }
+    }
+    if changed {
+        pending.pets[i].layers = Some(layers.clone());
+        pending.pets[i].tint = None;
+    }
+    let sel = cap.pelt_layer.min(layers.len().saturating_sub(1));
+    for (b, enabled) in [(PELT_COPY, sel > 0 && layers.len() < MAX_LAYERS), (PELT_REMOVE, sel > 0), (PELT_NEW, layers.len() < MAX_LAYERS)] {
+        if let Some(mut btn) = s.id(b).and_then(|e| buttons.get_mut(e).ok())
+            && btn.disabled == enabled
+        {
+            btn.disabled = !enabled;
+        }
+    }
+    // The bin's rows.
+    let bg = ui.find("CAPCCMAdvanced", PELT_BIN_GRID).and_then(|w| w.grid);
+    if let Some(g) = bg {
+        let cols = g.columns.max(1) as usize;
+        let rows = bin.len().div_ceil(cols);
+        let most = rows.saturating_sub(g.rows.max(1) as usize);
+        let over_grid = s.id(PELT_BIN_GRID).and_then(|e| over.get(e).ok()).is_some_and(|r| r.cursor_over());
+        if over_grid && wheel.delta.y != 0.0 {
+            cap.pelt_bin_scroll = (cap.pelt_bin_scroll as i64 + if wheel.delta.y > 0.0 { -1 } else { 1 }).clamp(0, most as i64) as usize;
+            if let Some(mut b) = cap.pelt_bin_bar.and_then(|e| bars.get_mut(e).ok()) {
+                b.value = cap.pelt_bin_scroll;
+            }
+        } else if let Some(b) = cap.pelt_bin_bar.and_then(|e| bars.get(e).ok())
+            && b.value != cap.pelt_bin_scroll
+        {
+            cap.pelt_bin_scroll = b.value.min(most);
+        }
+        if let Some(mut b) = cap.pelt_bin_bar.and_then(|e| bars.get_mut(e).ok())
+            && (b.total, b.visible) != (rows, g.rows.max(1) as usize)
+        {
+            (b.total, b.visible) = (rows, g.rows.max(1) as usize);
+        }
+        crate::livehud::set_visible(&mut vis, cap.pelt_bin_bar, rows > g.rows.max(1) as usize);
+    }
+    let layers_hash = crate::pets::layers_key(&layers).2;
+    let want = (i, species.to_string(), layers_hash, sel, cap.pelt_bin, cap.pelt_markings, cap.pelt_region, cap.pelt_bin_scroll, gu.is_some());
+    if cap.pelt_shown.as_ref() == Some(&want) {
+        return;
+    }
+    let fresh = cap.pelt_shown.as_ref().is_none_or(|w| w.0 != i || w.1 != species);
+    cap.pelt_shown = Some(want);
+    // The species' category buttons (Layers lit) and region map; the bin.
+    for (n, id) in PELT_CATEGORIES.into_iter().enumerate() {
+        crate::livehud::set_visible(&mut vis, s.id(id), n == match species { "c" => 0, "h" => 1, _ => 2 });
+    }
+    for e in s.all_with(PELT_LAYERS_TAB) {
+        if let Ok(mut b) = buttons.get_mut(e) {
+            b.selected = true;
+        }
+    }
+    for (sp, id) in PELT_MAPS {
+        crate::livehud::set_visible(&mut vis, s.id(id), sp == species);
+    }
+    for (e, r) in [(PELT_BIN_REGIONS, !cap.pelt_markings), (PELT_BIN_MARKINGS, cap.pelt_markings)] {
+        if let Some(mut b) = s.id(e).and_then(|e| buttons.get_mut(e).ok()) {
+            b.selected = r;
+        }
+    }
+    crate::livehud::set_visible(&mut vis, s.id(PELT_BIN), cap.pelt_bin);
+    if let Some(t) = s.text(PELT_REGION_TEXT) {
+        let name = ui.layout("CAPCCMAdvanced").and_then(|l| l.find(PELT_MAPS.iter().find(|m| m.0 == species).map_or(0, |m| m.1))).and_then(|m| m.find(cap.pelt_region)).map(|w| w.comment.clone()).unwrap_or_default();
+        commands.entity(t).insert(Text::new(name));
+    }
+    // The layers, top first.
+    if let Some(old) = cap.pelt_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    let lg = ui.find("CAPCCMAdvanced", PELT_LAYERS).and_then(|w| w.grid);
+    if let (Some(grid), Some(g), Some(item), Some(base)) = (s.id(PELT_LAYERS), lg, ui.layout("CAPPeltLayerItem").cloned(), ui.layout("CAPBasePeltLayerItem").cloned()) {
+        let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+        commands.entity(grid).insert_children(0, &[holder]);
+        cap.pelt_cells = Some(holder);
+        let step = g.cell[1] + g.cell_padding[1] + g.cell_padding[3];
+        let shown: Vec<usize> = (0..layers.len()).rev().take(g.rows.max(1) as usize).collect();
+        for (row, &n) in shown.iter().enumerate() {
+            let l = &layers[n];
+            let mut cell = if n == 0 { base.clone() } else { item.clone() };
+            let (x, y) = (g.padding[0], g.padding[1] + row as f32 * step);
+            let (w, h) = (cell.area[2] - cell.area[0], cell.area[3] - cell.area[1]);
+            cell.area = [x, y, x + w.max(g.cell[0]), y + h.max(g.cell[1])];
+            let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+            let Some(root) = c.root else { continue };
+            let words = part_words(&l.part);
+            let words = if n == 0 { "Base".to_string() } else { words };
+            commands.entity(root).insert(crate::icons::Tooltip(words.clone()));
+            if let Some(b) = c.id(LAYER_THUMB_BUTTON) {
+                commands.entity(b).insert(PeltLayer(n));
+                if let Ok(mut btn) = buttons.get_mut(b) {
+                    btn.selected = n == sel;
+                }
+                if n == sel {
+                    commands.entity(b).insert(crate::layout::Selected);
+                }
+            }
+            if let Some(b) = c.id(LAYER_COLOR_BUTTON) {
+                commands.entity(b).insert((PeltLayerColour(n), crate::icons::Tooltip("Colors".into())));
+            }
+            if let Some(b) = c.id(LAYER_NAME) {
+                commands.entity(b).insert(crate::icons::Tooltip(words));
+            }
+            if let Some(b) = c.id(LAYER_LINK) {
+                commands.entity(b).insert(Visibility::Hidden);
+            }
+            // (Its picture: its part's; its colours side by side.)
+            let inst = kind.regions.iter().find(|r| r.name == l.part).map_or(0, |r| r.instance);
+            let pic = (inst != 0).then(|| gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(inst)))).flatten();
+            if let (Some(win), Some(h)) = (c.id(LAYER_THUMB), pic) {
+                crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+            }
+            if let Some(win) = c.id(LAYER_COLOR_THUMB) {
+                let k = l.colors.len().max(1) as f32;
+                commands.entity(win).with_children(|p| {
+                    for (j, (_, col)) in l.colors.iter().enumerate() {
+                        p.spawn((
+                            Node { position_type: PositionType::Absolute, left: Val::Percent(j as f32 * 100.0 / k), width: Val::Percent(100.0 / k), top: Val::Px(0.0), bottom: Val::Px(0.0), ..default() },
+                            BackgroundColor(Color::srgb(col[0], col[1], col[2])),
+                            Pickable::IGNORE,
+                        ));
+                    }
+                });
+            }
+        }
+    }
+    // The colours under them, once.
+    if fresh
+        && let (Some(cgrid), Some(cg), Some(swatch)) = (s.id(PELT_COLOURS), ui.find("CAPCCMAdvanced", PELT_COLOURS).and_then(|w| w.grid), ui.layout("TinyHairColorPresetGridItem").cloned())
+    {
+        if let Some(old) = cap.pelt_swatches.take() {
+            commands.entity(old).try_despawn();
+        }
+        let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+        commands.entity(cgrid).insert_children(0, &[holder]);
+        cap.pelt_swatches = Some(holder);
+        for (n, c) in crate::sim::HAIRS.iter().take(cg.columns.max(1) as usize * cg.rows.max(1) as usize).enumerate() {
+            let (x, y) = (cg.padding[0] + n as f32 * cg.cell[0], cg.padding[1]);
+            let mut cell = swatch.clone();
+            cell.area = [x, y, x + cg.cell[0], y + cg.cell[1]];
+            cell.cls = "Button".into();
+            let w = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+            let Some(root) = w.root else { continue };
+            commands.entity(root).insert(PeltColour([c.0, c.1, c.2]));
+            // (The colour over the cell's own picture, inside its frame.)
+            commands.entity(root).with_children(|p| {
+                p.spawn((
+                    Node { position_type: PositionType::Absolute, left: Val::Px(3.0), top: Val::Px(3.0), right: Val::Px(3.0), bottom: Val::Px(3.0), ..default() },
+                    BackgroundColor(Color::srgb(c.0, c.1, c.2)),
+                    ZIndex(3),
+                    Pickable::IGNORE,
+                ));
+            });
+        }
+    }
+    // The bin's parts.
+    if let Some(old) = cap.pelt_bin_cells.take() {
+        commands.entity(old).try_despawn();
+    }
+    if cap.pelt_bin
+        && let (Some(grid), Some(g), Some(template)) = (s.id(PELT_BIN_GRID), bg, ui.layout("GenericCasItem").cloned())
+    {
+        let holder = commands.spawn((Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), right: Val::Px(0.0), bottom: Val::Px(0.0), ..default() }, Pickable::IGNORE)).id();
+        commands.entity(grid).insert_children(0, &[holder]);
+        cap.pelt_bin_cells = Some(holder);
+        let cols = g.columns.max(1) as usize;
+        let step = Vec2::new(g.cell[0] + g.cell_padding[0] + g.cell_padding[2], g.cell[1] + g.cell_padding[1] + g.cell_padding[3]);
+        for (k, &n) in bin.iter().enumerate().skip(cap.pelt_bin_scroll * cols).take(cols * g.rows.max(1) as usize) {
+            let k = k - cap.pelt_bin_scroll * cols;
+            let r = &kind.regions[n];
+            let (x, y) = (g.padding[0] + (k % cols) as f32 * step.x, g.padding[1] + (k / cols) as f32 * step.y);
+            let mut cell = template.clone();
+            cell.area = [x, y, x + g.cell[0], y + g.cell[1]];
+            cell.cls = "Button".into();
+            let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &cell, holder);
+            let Some(root) = c.root else { continue };
+            commands.entity(root).insert((PeltPart(n), crate::icons::Tooltip(part_words(&r.name))));
+            let pic = (r.instance != 0).then(|| gu.as_deref_mut().and_then(|g| g.icon(&mut images, &s3bake::gamedata::cas_thumb_name(r.instance)))).flatten();
+            if let (Some(win), Some(h)) = (c.id(CELL_THUMBNAIL), pic) {
+                crate::hudpanels::picture(&mut commands, win, h, Color::WHITE);
+            }
+        }
+    }
+}
+
 /// A coat's cell (its breed's outfit), and a colour's.
 #[derive(Component)]
 struct CoatCell(u64);
@@ -1685,9 +2193,11 @@ fn coat_panel(
     // (A colour of its own from the picker.)
     for a in picked.read() {
         if let CasAction::CoatRgb(c) = a.0
+            && !cap.pelt_open
             && let Some(p) = cap.pet.and_then(|i| pending.pets.get_mut(i))
         {
             p.tint = Some(c);
+            p.layers = None;
         }
     }
     if on && cap.coat.is_none() && ui.layout("CAPCoat").is_some() && ui.layout("CAPCCMBasic").is_some() {
@@ -1739,6 +2249,15 @@ fn coat_panel(
         return;
     }
     let (Some(s), Some(frame)) = (cap.coat.clone(), cap.ccm.clone()) else { return };
+    // (Advanced: the pelt layers in its place.)
+    if on && crate::livehud::pressed(&clicks, s.id(COAT_ADVANCED)) {
+        cap.pelt_open = true;
+        cap.pelt_shown = None;
+    }
+    if cap.panel != Some(Panel::Coat) {
+        cap.pelt_open = false;
+    }
+    let on = on && !cap.pelt_open;
     crate::livehud::set_visible(&mut vis, frame.root, on);
     let pet = cap.pet.filter(|_| on).and_then(|i| pending.pets.get(i)).cloned();
     if let Some(pet) = &pet {
@@ -1795,13 +2314,18 @@ fn coat_panel(
     for (x, c) in &cells {
         if *x == Interaction::Pressed {
             pending.pets[i].coat = (c.0 != pet.outfit).then_some(c.0);
+            pending.pets[i].layers = None;
             info!("create a pet: the coat of {:016x}", c.0);
         }
     }
     for (x, c) in &colours {
         if *x == Interaction::Pressed {
             pending.pets[i].tint = Some(c.0);
+            pending.pets[i].layers = None;
         }
+    }
+    if let Some(e) = s.id(COAT_ADVANCED) {
+        commands.entity(e).insert(crate::icons::Tooltip(ui.localize("Ui/Tooltip/CAS/CAP/Coat:Advanced").filter(|t| !t.is_empty()).unwrap_or_else(|| "Advanced".into())));
     }
     if crate::livehud::pressed(&clicks, s.id(COAT_TRASH)) {
         pending.pets[i].tint = None;
@@ -2270,6 +2794,20 @@ fn cap_test(
                 Ok("fur") => cap.ccm_tab = CcmTab::Fur,
                 _ => {}
             }
+            // (CAP_PELT=<part>: Coat's Advanced up, that part laid on.)
+            if std::env::var("CAP_PELT").is_ok() {
+                cap.pelt_open = true;
+            }
+            // (CAP_PELT_BIN=markings|<region hex>: its bin up, at its markings or a region's.)
+            match std::env::var("CAP_PELT_BIN").as_deref() {
+                Ok("markings") => (cap.pelt_bin, cap.pelt_markings) = (true, true),
+                Ok(r) => {
+                    if let Ok(r) = u32::from_str_radix(r.trim_start_matches("0x"), 16) {
+                        (cap.pelt_bin, cap.pelt_region) = (true, r);
+                    }
+                }
+                _ => {}
+            }
             // (CAP_ADV=<region, hex> (tests): Shape's sliders up, at that region.)
             if let Some(r) = std::env::var("CAP_ADV").ok().and_then(|r| u32::from_str_radix(r.trim_start_matches("0x"), 16).ok()) {
                 (cap.adv_open, cap.adv_region, cap.adv_body) = (true, r, matches!(r, 2 | 0x200 | 0x400 | 0x800));
@@ -2322,6 +2860,20 @@ mod tests {
         assert_eq!(accessory_kind(51, "ah"), "Bridle");
         assert_eq!(accessory_kind(51, "ad"), "Collar");
         assert_eq!(accessory_kind(52, "ah"), "Saddle");
+    }
+
+    #[test]
+    fn a_pelt_layer_recolours_keeping_its_shades() {
+        let mut l = s3bake::pets::CoatLayer { part: "adRegionsBack_top".into(), colors: vec![(0, [0.4, 0.4, 0.4]), (1, [0.2, 0.2, 0.2])], opacity: 1.0, ..Default::default() };
+        pelt_recolour(&mut l, [0.8, 0.4, 0.2]);
+        assert_eq!(l.colors[0], (0, [0.8, 0.4, 0.2]));
+        // (The second as much darker than the first as it was.)
+        assert!((l.colors[1].1[0] - 0.4).abs() < 1e-4 && l.colors[1].0 == 1);
+        // (The bin's regions by the map's: a back's, a leg's; markings apart.)
+        assert_eq!(pelt_region_of("adRegionsBack_top"), Some("Back"));
+        assert_eq!(pelt_region_of("adRegionsLegFL_socksToe"), Some("LegFL"));
+        assert_eq!(pelt_region_of("acRegionsAll_tabby"), Some("All"));
+        assert!(pelt_marking("adMarkings_blaze") && !pelt_marking("adRegionsChest_blaze"));
     }
 
     #[test]

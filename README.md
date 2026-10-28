@@ -1635,7 +1635,18 @@ installation is unreachable.
   Shape (`CAPFurShapes`: the pack's fur shapes for its species, `GetFurBlends`, but the one the
   game keeps back and `deltaOld`, two by two with the game's pictures, the blend's own name as its
   tooltip; a click gives the pet that fur at `kMaxHairLength`, its breed's let go, lit as the game
-  lights it). Every breed is built as the game builds it: its outfit's
+  lights it). Coat's Advanced (`CAPCCMAdvanced`) works on the coat as the game's pelt layers:
+  the base and each region and marking over it (the breed's own to begin with: each layer its
+  part's mask, its colours by the mask's channel, and its opacity, as the outfit's presets have
+  them), listed top first in the game's layer cells with their parts' pictures and colours; a layer
+  clicked is the one worked on, the colours under them recolouring it (each channel as much lighter
+  or darker than the first as it was; Color for any colour; the bin for its own again) and Opacity
+  how much it shows; New opens the bin of the kind's Regions (those of the region clicked on the
+  game's region map, found by its pictures' hit masks) and Markings, a click laying one on top;
+  Copy and Remove (never the base), ten at most. The pet's coat is painted from its layers as they
+  change, as the bake paints the breeds' (shared `paint_coat`), and kept with it.
+  `CAP_PELT=<part>[:<r,g,b>]`, `CAP_PELT_BIN=markings|<region>` (tests). Every breed is built as the
+  game builds it: its outfit's
   face and body blends (a Chihuahua's large head and short muzzle, a Great Dane's deep chest and
   long legs), their bone adjustments for its kind added to its skeleton under its animations,
   and their geometry on its meshes by vertex id (the face blends' BGEO deltas, and its fur shape's
@@ -1842,7 +1853,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-Create a Pet's Advanced coat painting; complete object placement and routing compatibility; the rest of the expansions'
+Create a Pet's Advanced coat's marking placement, fur blend sliders and saved coats; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls
