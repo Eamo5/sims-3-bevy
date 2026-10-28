@@ -514,20 +514,32 @@ impl LotBuildingBaked {
         if self.in_basement(o.local, o.position[1]) { 0 } else { o.level.max(1) }
     }
 
-    /// A basement's tiles the ground over is left open for (to look into it): those under a
-    /// whole tile of the ground floor, but for any beside a basement tile left shut (under the
-    /// garden or the paving, or part of a tile), whose dug edge would show under a deck's or
-    /// porch's edge.
+    /// A basement's tiles the ground over is left open for (to look into it): those whose dug
+    /// triangles the ground floor covers (a whole tile, or a diagonal basement's half under a
+    /// diagonal room's half), but for any beside a basement tile left shut (under the garden or
+    /// the paving, or part of a tile), whose dug edge would show under a deck's or porch's edge.
     pub fn basement_open(&self) -> std::collections::HashSet<(u16, u16)> {
-        let over: std::collections::HashSet<(u16, u16)> = self.floors.iter().filter(|f| f.level == 1 && f.mask == 0xF).map(|f| (f.x, f.z)).collect();
-        let below: std::collections::HashSet<(u16, u16)> = self.floors.iter().filter(|f| f.level == 0 && f.y.is_some()).map(|f| (f.x, f.z)).collect();
-        let shut = |x: i32, z: i32| x >= 0 && z >= 0 && below.contains(&(x as u16, z as u16)) && !over.contains(&(x as u16, z as u16));
+        let masks = |level: u8, dug: bool| {
+            let mut m: std::collections::HashMap<(u16, u16), u8> = std::collections::HashMap::new();
+            for f in self.floors.iter().filter(|f| f.level == level && (!dug || f.y.is_some())) {
+                *m.entry((f.x, f.z)).or_default() |= f.mask;
+            }
+            m
+        };
+        let (over, below) = (masks(1, false), masks(0, true));
+        let covered = |t: &(u16, u16), m: u8| m & !over.get(t).copied().unwrap_or(0) == 0;
+        let shut = |x: i32, z: i32| x >= 0 && z >= 0 && below.get(&(x as u16, z as u16)).is_some_and(|m| !covered(&(x as u16, z as u16), *m));
         below
             .iter()
-            .copied()
-            .filter(|t| over.contains(t))
+            .filter(|(t, m)| covered(t, **m))
+            .map(|(t, _)| *t)
             .filter(|&(x, z)| ![(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|(dx, dz)| shut(x as i32 + dx, z as i32 + dz)))
             .collect()
+    }
+
+    /// The triangles of a basement tile that are dug (a floor's mask; 0 for none).
+    pub fn basement_mask(&self, x: u16, z: u16) -> u8 {
+        self.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z).fold(0, |m, f| m | f.mask)
     }
 
     /// The lowest storey: the basement's, or the ground floor.

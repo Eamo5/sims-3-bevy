@@ -3631,10 +3631,18 @@ fn auto_build(
             }
             // (BUILD_BASEMENT=1: a basement dug under it first, with stairs up from it.)
             if std::env::var("BUILD_BASEMENT").is_ok() {
-                let (ops, cost) = crate::build::plan_basement(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1));
+                // (With BUILD_DIAGONAL, the Diagonal basement's diamond under the diagonal room,
+                // the stairs in its middle.)
+                let diagonal = std::env::var("BUILD_DIAGONAL").is_ok();
+                let (ops, cost) = if diagonal {
+                    crate::build::plan_diagonal_basement(b, false, 1, IVec2::new(x, z), IVec2::new(x + w, z + d))
+                } else {
+                    crate::build::plan_basement(b, false, 1, IVec2::new(x, z), IVec2::new(x + w - 1, z + d - 1))
+                };
                 info!("build test: basement — {} tiles, §{cost}", ops.len());
                 apply(&mut commands, &mut assets, b, &mut ctx, ops);
-                match crate::build::plan_stairs(b, 0, IVec2::new(x + 1, z + d - 2), 0, false) {
+                let stairs_at = if diagonal { IVec2::new(x + w / 2 - 1, z + d / 2 - 1) } else { IVec2::new(x + 1, z + d - 2) };
+                match crate::build::plan_stairs(b, 0, stairs_at, 0, false) {
                     Ok(ops) => apply(&mut commands, &mut assets, b, &mut ctx, ops),
                     Err(why) => warn!("build test: basement stairs: {why}"),
                 }
@@ -3701,7 +3709,7 @@ fn auto_build(
             *stage = 4;
             // (Down into the basement.)
             if std::env::var("BUILD_BASEMENT").is_ok() {
-                let to = b.world(x as f32 + w as f32 - 1.5, z as f32 + 1.5, 0.0).xz();
+                let to = if std::env::var("BUILD_DIAGONAL").is_ok() { b.world(x as f32 + w as f32 * 0.5 + 1.5, z as f32 + d as f32 * 0.5, 0.0).xz() } else { b.world(x as f32 + w as f32 - 1.5, z as f32 + 1.5, 0.0).xz() };
                 if let Ok((mut q, ..)) = sel.single_mut() {
                     q.0.clear();
                     q.0.push_back(crate::interact::Action::new("Go Here", crate::interact::ActionKind::GoHere(to, 0), false));
@@ -5338,7 +5346,8 @@ fn auto_view_level(
         }
         (Some(l), Some(mut b)) if !*done => {
             b.view_level = if l == BASEMENT_VIEW { b.data.lowest_storey() } else { l.clamp(1, b.top_level) };
-            *done = true;
+            // (The basement's, once there's one: one dug by the test comes later.)
+            *done = l != BASEMENT_VIEW || b.view_level == 0;
         }
         _ => {}
     }

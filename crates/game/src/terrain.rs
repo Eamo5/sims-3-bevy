@@ -223,6 +223,29 @@ pub fn collar_mesh(hm: &Heightmap, lot: &s3bake::LotInfo, b: &s3bake::LotBuildin
             }
         }
     }
+    // (A diagonal basement's half tiles, opened whole: their undug halves the ground again.)
+    for &(x, z) in tiles.iter().filter(|(x, z)| *x >= 0 && *z >= 0) {
+        let dug = b.basement_mask(x as u16, z as u16);
+        if dug == 0 || dug == 0xF || b.pool.iter().any(|f| f.x as i32 == x && f.z as i32 == z) {
+            continue;
+        }
+        let (fx, fz) = (x as f32, z as f32);
+        let mid = [fx + 0.5, fz + 0.5];
+        let sides = [[[fx, fz], [fx + 1.0, fz]], [[fx + 1.0, fz], [fx + 1.0, fz + 1.0]], [[fx + 1.0, fz + 1.0], [fx, fz + 1.0]], [[fx, fz + 1.0], [fx, fz]]];
+        for (_, [p, q]) in sides.into_iter().enumerate().filter(|(t, _)| dug & (1 << t) == 0) {
+            // (Wound as the collar's quads are, whichever way round the side goes.)
+            let cross = (p[0] - mid[0]) * (q[1] - mid[1]) - (p[1] - mid[1]) * (q[0] - mid[0]);
+            let corners = if cross < 0.0 { [mid, p, q] } else { [mid, q, p] };
+            let base = pos.len() as u32;
+            for [lx, lz] in corners {
+                let (wx, wz) = to_world(lx, lz);
+                pos.push([wx, b.ground_at(lx, lz).unwrap_or(b.levels[0]) + 0.015, wz]);
+                nrm.push(hm.normal(wx.round() as i64, wz.round() as i64));
+                uv.push([wx / wsize, wz / wsize]);
+            }
+            idx.extend_from_slice(&[base, base + 1, base + 2]);
+        }
+    }
     let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pos);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, nrm);
@@ -483,6 +506,7 @@ fn dig_pools(
     }
     // (And a basement's under the ground floor over it, open to look into, as the bake left them.)
     let open = b.data.basement_open();
+
     let mut basement = std::collections::HashSet::new();
     let mut basement_y = f32::MAX;
     for f in b.data.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && open.contains(&(f.x, f.z))) {

@@ -1416,7 +1416,15 @@ installation is unreachable.
   paving; Ctrl+drag fills it in. Page Down goes down into it, to look or to build: walls
   there stand on its floor, and staircases lead up from it to the floor above (its stairwell
   opened, a landing at the top), Sims going down and up them. As the game's houses' basements,
-  it's open to look into where the ground floor's over it, under the ground elsewhere. A Terrain tab paints the ground on the lot with
+  it's open to look into where the ground floor's over it, under the ground elsewhere. The
+  panel's Diagonal tool digs one turned 45°: a diamond dragged out as the Diagonal Room tool's,
+  its whole tiles and the half tiles its edges cut across (§30 a half), its walls along the
+  diagonals (each tile's two halves one wall, corner to corner); dig the other half and the
+  diagonal comes down. Rooms are found triangle by triangle, so a diagonal room walled over it
+  (or anywhere) is floored to its walls, its half tiles and all, its walls' insides facing it,
+  and roofed in the household's style turned with it (a hip, gable, shed or mansard roof over
+  the rectangle its triangles make on the grid turned 45°).
+  A Terrain tab paints the ground on the lot with
   the world's own terrain paints (pictured from their textures), in three brush sizes, or
   erases back to how the world had it; its terrain tools raise, lower, flatten and smooth the
   ground (not under the house, the pool or anything standing on the lot, nor at its edges).
@@ -1819,7 +1827,7 @@ installation is unreachable.
 ## Parity status
 
 Full parity is still a work in progress. Remaining milestones include the original-layout
-complete Build Mode interface (curved pools, diagonal basements); Create a Pet's Advanced coat painting and fur shapes; complete object placement and routing compatibility; the rest of the expansions'
+complete Build Mode interface (curved pools); Create a Pet's Advanced coat painting and fur shapes; complete object placement and routing compatibility; the rest of the expansions'
 gameplay; and systematic side-by-side visual and interaction checks against the original.
 
 ## Controls

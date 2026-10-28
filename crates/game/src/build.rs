@@ -54,6 +54,9 @@ pub enum BuildTool {
     DiagonalFoundation,
     /// Dig a basement, a storey under the ground floor.
     Basement,
+    /// A basement turned 45°: a diamond dug, its edges along the tiles' diagonals (the game's
+    /// Diagonal basement tool).
+    DiagonalBasement,
     /// Build a fountain out of doors on the ground floor (the game's Fountain tool).
     Fountain,
     /// Paint the ground (the paint picked on the Terrain tab).
@@ -80,6 +83,7 @@ impl BuildTool {
             BuildTool::Foundation => format!("Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::DiagonalFoundation => format!("Diagonal Foundation Tool\n§{FOUNDATION_PRICE} a tile"),
             BuildTool::Basement => format!("Basement Tool\n§{BASEMENT_PRICE} a tile"),
+            BuildTool::DiagonalBasement => format!("Diagonal Basement Tool\n§{BASEMENT_PRICE} a tile"),
             BuildTool::Fountain => format!("Fountain Tool\n§{POOL_PRICE} a tile"),
             BuildTool::Terrain => "Terrain Paint".to_string(),
             BuildTool::Sculpt => "Terrain Tools".to_string(),
@@ -100,6 +104,7 @@ impl BuildTool {
             BuildTool::Foundation => "Drag out a foundation to build the house on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::DiagonalFoundation => "Drag out a diamond of foundation to build a house turned 45° on; Ctrl+drag takes it away. Lay it before the walls.",
             BuildTool::Basement => "Drag out a basement to dig under the house; Ctrl+drag fills it in. Page Down to go down and build there; stairs lead up from it.",
+            BuildTool::DiagonalBasement => "Drag out a diamond of basement to dig under a house turned 45°; Ctrl+drag fills it in. Page Down to go down and build there.",
             BuildTool::Fountain => "Drag out a fountain on the ground out of doors; Ctrl+drag takes it out. Buy fountain jets to put in it.",
             BuildTool::Terrain => "Hold the mouse down to paint the ground on the lot.",
             BuildTool::Sculpt => "Hold the mouse down to work the ground on the lot (not under the house or things).",
@@ -523,7 +528,7 @@ mod wall_placement_tests {
 pub fn edges(tool: BuildTool, start: IVec2, cur: IVec2) -> Vec<(IVec2, IVec2)> {
     match tool {
         BuildTool::Room => room(start, cur),
-        BuildTool::DiagonalRoom | BuildTool::DiagonalFoundation => diagonal_room(start, cur),
+        BuildTool::DiagonalRoom | BuildTool::DiagonalFoundation | BuildTool::DiagonalBasement => diagonal_room(start, cur),
         _ => line(start, cur),
     }
 }
@@ -622,7 +627,7 @@ pub fn plan_stairs(b: &ActiveBuilding, level: u8, at: IVec2, dir: u8, removing: 
         }
     }
     if !has_floor(level + 1, landing) {
-        ops.push(PaintOp::AddFloor { level: level + 1, x: landing.x as u16, z: landing.y as u16, region: 0 });
+        ops.push(PaintOp::AddFloor { level: level + 1, x: landing.x as u16, z: landing.y as u16, region: 0, mask: 0xF });
     }
     Ok(ops)
 }
@@ -810,31 +815,46 @@ fn plan_foundation_tiles(b: &ActiveBuilding, removing: bool, level: u8, tiles: &
 /// A basement dug under the tiles from `start` to `cur` (or filled in), from the ground floor:
 /// its ops and what it costs. Not under a pool or paving, nor filled in under a staircase.
 pub fn plan_basement(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    let (lo, hi) = (start.min(cur), start.max(cur));
+    let tiles: Vec<(u16, u16, u8)> = (lo.y..=hi.y).flat_map(|z| (lo.x..=hi.x).map(move |x| (x as u16, z as u16, 0xF))).collect();
+    plan_basement_tiles(b, removing, level, &tiles)
+}
+
+/// A diagonal basement dragged from grid point `start` towards `cur` (or filled in): the diamond
+/// `diagonal_room` draws, its tiles and the halves of the tiles its edges cut across.
+pub fn plan_diagonal_basement(b: &ActiveBuilding, removing: bool, level: u8, start: IVec2, cur: IVec2) -> (Vec<PaintOp>, i64) {
+    let tiles: Vec<(u16, u16, u8)> = diamond_triangles(start, cur).into_iter().filter(|(x, z, _)| (*x as u32) < b.data.width && (*z as u32) < b.data.depth).collect();
+    plan_basement_tiles(b, removing, level, &tiles)
+}
+
+/// A basement dug under tiles (or their triangles), or filled in: not under a pool or paving,
+/// nor filled in under a staircase. A tile costs the price, half a tile half of it.
+fn plan_basement_tiles(b: &ActiveBuilding, removing: bool, level: u8, tiles: &[(u16, u16, u8)]) -> (Vec<PaintOp>, i64) {
     if level > 1 {
         return (Vec::new(), 0);
     }
     let d = &b.data;
-    let (lo, hi) = (start.min(cur), start.max(cur));
     let mut ops = Vec::new();
-    for z in lo.y..=hi.y {
-        for x in lo.x..=hi.x {
-            let dug = crate::building::in_basement_tile(d, x, z);
-            let (x, z) = (x as u16, z as u16);
-            let stairs = b.built_stairs.iter().any(|s| s.level == 0 && s.tiles().contains(&IVec2::new(x as i32, z as i32)));
-            if removing {
-                if dug && !stairs {
-                    ops.push(PaintOp::RemoveBasement { x, z });
-                }
-                continue;
+    let mut triangles = 0;
+    for &(x, z, mask) in tiles {
+        let dug = d.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z).fold(0u8, |m, f| m | f.mask);
+        let stairs = b.built_stairs.iter().any(|s| s.level == 0 && s.tiles().contains(&IVec2::new(x as i32, z as i32)));
+        if removing {
+            let gone = dug & mask;
+            if gone != 0 && !stairs {
+                ops.push(PaintOp::RemoveBasement { x, z, mask: gone });
             }
-            let pool = d.pool.iter().any(|f| f.x == x && f.z == z);
-            let paved = d.floors.iter().any(|f| f.level == 0 && f.y.is_none() && f.x == x && f.z == z);
-            if !dug && !pool && !paved {
-                ops.push(PaintOp::AddBasement { x, z });
-            }
+            continue;
+        }
+        let pool = d.pool.iter().any(|f| f.x == x && f.z == z);
+        let paved = d.floors.iter().any(|f| f.level == 0 && f.y.is_none() && f.x == x && f.z == z);
+        let dig = mask & !dug;
+        if dig != 0 && !pool && !paved {
+            ops.push(PaintOp::AddBasement { x, z, mask: dig });
+            triangles += dig.count_ones() as i64;
         }
     }
-    let cost = if removing { 0 } else { ops.len() as i64 * BASEMENT_PRICE };
+    let cost = if removing { 0 } else { (triangles * BASEMENT_PRICE + 3) / 4 };
     (ops, cost)
 }
 
@@ -894,7 +914,7 @@ pub fn plan(b: &ActiveBuilding, tool: BuildTool, removing: bool, level: u8, star
                 if removing && tile.is_some() {
                     ops.push(PaintOp::RemoveFloor { level, x, z });
                 } else if !removing && tile.is_none_or(|t| t.mask != 0xF) {
-                    ops.push(PaintOp::AddFloor { level, x, z, region: 0 });
+                    ops.push(PaintOp::AddFloor { level, x, z, region: 0, mask: 0xF });
                     cost += FLOOR_PRICE;
                 }
             }
@@ -1214,6 +1234,7 @@ fn build_tool(
         (_, BuildTool::Pool) => plan_pool(b, removing, level, start, cur),
         (_, BuildTool::Fountain) => plan_fountain(b, removing, level, start, cur),
         (_, BuildTool::Basement) => plan_basement(b, removing, level, start, cur),
+        (_, BuildTool::DiagonalBasement) => plan_diagonal_basement(b, removing, level, start, cur),
         _ => plan(b, tool, removing, level, start, cur),
     };
     let funds = household.as_ref().map_or(i64::MAX, |h| h.funds);
@@ -1238,8 +1259,8 @@ fn build_tool(
             }
         }
     } else {
-        // (A diagonal foundation's tiles and half tiles, faintly.)
-        if tool == BuildTool::DiagonalFoundation {
+        // (A diagonal foundation's or basement's tiles and half tiles, faintly.)
+        if matches!(tool, BuildTool::DiagonalFoundation | BuildTool::DiagonalBasement) {
             for (x, z, mask) in diamond_triangles(start, cur) {
                 let c = Vec2::new(x as f32 + 0.5, z as f32 + 0.5);
                 for t in 0..4usize {
@@ -1303,7 +1324,7 @@ fn build_tool(
     if let Some(h) = household.as_mut() {
         h.funds -= cost;
     }
-    let sold = if removing && !tiles && !matches!(tool, BuildTool::Fence | BuildTool::DiagonalFoundation) {
+    let sold = if removing && !tiles && !matches!(tool, BuildTool::Fence | BuildTool::DiagonalFoundation | BuildTool::DiagonalBasement) {
         sell_openings(&mut commands, b, level, &edges(tool, start, cur), &objects, &mut removed, household.as_deref_mut(), &mut notes)
     } else { Vec::new() };
     let funds = household.as_ref().map_or(0, |h| h.funds - funds_before);
@@ -1320,7 +1341,7 @@ fn build_tool(
     play.write(crate::sound::PlaySound::ui(match (tiles, removing) {
         (true, _) if matches!(tool, BuildTool::Pool | BuildTool::Fountain) => "ui_build_pool_mdown",
         (_, _) if matches!(tool, BuildTool::Foundation | BuildTool::DiagonalFoundation) => "ui_build_deck_section",
-        (true, _) if tool == BuildTool::Basement => "ui_build_pool_mdown",
+        (true, _) if matches!(tool, BuildTool::Basement | BuildTool::DiagonalBasement) => "ui_build_pool_mdown",
         (true, _) => "ui_build_flooring_section",
         (false, true) => "ui_build_walldelete_section",
         (false, false) if tool == BuildTool::Fence => "ui_build_rail_plop",

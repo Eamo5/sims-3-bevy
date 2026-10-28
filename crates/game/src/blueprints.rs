@@ -137,7 +137,7 @@ pub fn plan(b: &s3bake::LotBuildingBaked, bp: &s3bake::gamedata::BlueprintInfo, 
     for (f, t) in bp.floors.iter().zip(tiles(bp, origin, turns)) {
         let (x, z) = (t.x as u16, t.y as u16);
         if !sim.floors.iter().any(|g| g.level == level && g.x == x && g.z == z) {
-            push(&mut sim, &mut ops, PaintOp::AddFloor { level, x, z, region: 0 });
+            push(&mut sim, &mut ops, PaintOp::AddFloor { level, x, z, region: 0, mask: 0xF });
         }
         if let Some(texture) = f.cover {
             push(&mut sim, &mut ops, PaintOp::Floor { level, x, z, texture });

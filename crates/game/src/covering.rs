@@ -243,7 +243,7 @@ mod tests {
             crate::building::apply_paint(&mut b, &PaintOp::AddWall { a, b: c, level: 1 });
         }
         for z in 0..5 { for x in 0..5 {
-            crate::building::apply_paint(&mut b, &PaintOp::AddFloor { level: 1, x, z, region: 99 });
+            crate::building::apply_paint(&mut b, &PaintOp::AddFloor { level: 1, x, z, region: 99, mask: 0xF });
         }}
         b
     }

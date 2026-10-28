@@ -520,7 +520,7 @@ mod foundation_tests {
         let mut b = deck_lot();
         b.levels = vec![0.0, 0.12, 3.12];
         for (x, z) in [(1, 1), (2, 1)] {
-            apply_paint(&mut b, &PaintOp::AddBasement { x, z });
+            apply_paint(&mut b, &PaintOp::AddBasement { x, z, mask: 0xF });
         }
         let y = 0.12 - s3bake::building::LEVEL_HEIGHT;
         assert_eq!(b.basement, Some(y));
@@ -533,15 +533,69 @@ mod foundation_tests {
         apply_paint(&mut b, &PaintOp::AddWall { a: [1.0, 1.5], b: [1.0, 2.0], level: 0 });
         assert_eq!(b.walls.last().unwrap().y, Some(y));
         // (Filled in: four round the tile left; then none, and no basement.)
-        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 2, z: 1 });
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 2, z: 1, mask: 0xF });
         assert_eq!(standing(&b) - 1, 4);
-        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 1, z: 1 });
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 1, z: 1, mask: 0xF });
         assert_eq!(b.basement, None);
         // (Paving's on the ground over it, not its floor.)
-        apply_paint(&mut b, &PaintOp::AddBasement { x: 5, z: 5 });
+        apply_paint(&mut b, &PaintOp::AddBasement { x: 5, z: 5, mask: 0xF });
         assert!(crate::covering::pave_room(&b, Vec2::new(5.5, 5.5), Key::default(), false, |_| [0.0; 4]).is_empty());
     }
 
+    #[test]
+    fn a_diagonal_room_is_floored_to_its_walls_half_tiles_and_all() {
+        let mut b = deck_lot();
+        // (A diamond two tiles from its middle, at (6, 6).)
+        for (p, q) in [([4.0, 6.0], [6.0, 8.0]), ([6.0, 8.0], [8.0, 6.0]), ([8.0, 6.0], [6.0, 4.0]), ([6.0, 4.0], [4.0, 6.0])] {
+            apply_paint(&mut b, &PaintOp::AddWall { a: p, b: q, level: 1 });
+        }
+        let rooms = room_triangles(&b, 1);
+        assert_eq!(room_at(&rooms, 10, 10, Vec2::new(6.0, 6.0)), 1);
+        assert_eq!(room_at(&rooms, 10, 10, Vec2::new(4.2, 4.2)), 0);
+        // (Just inside the diagonal, and just outside it, in the same tile.)
+        assert_eq!(room_at(&rooms, 10, 10, Vec2::new(4.2, 5.3)), 0);
+        assert_eq!(room_at(&rooms, 10, 10, Vec2::new(4.8, 5.7)), 1);
+        for op in room_floors(&b, 1) {
+            apply_paint(&mut b, &op);
+        }
+        let floors: Vec<&FloorBaked> = b.floors.iter().filter(|f| f.level == 1 && f.region > 0).collect();
+        // (Its eight tiles' worth: four whole, eight halves.)
+        assert_eq!(floors.len(), 12);
+        assert_eq!(floors.iter().map(|f| f.mask.count_ones()).sum::<u32>(), 32);
+        assert_eq!(floors.iter().filter(|f| f.mask == 0xF).count(), 4);
+        // (Its walls' insides face the room.)
+        assert!(rooms.iter().flatten().all(|r| *r <= 1));
+        // (Its roof's rectangle on the grid turned 45°: two tiles' diagonals each way.)
+        let rect = diagonal_rooms(&rooms, 10);
+        assert_eq!(rect.len(), 1);
+        let (a0, c0, a1, c1) = rect[0].1;
+        assert!(((a1 - a0) - 2.0 * 2f32.sqrt()).abs() < 1e-4 && ((c1 - c0) - 2.0 * 2f32.sqrt()).abs() < 1e-4, "{:?}", rect[0].1);
+    }
+    #[test]
+    fn half_a_tile_of_basement_is_walled_along_the_diagonal() {
+        let mut b = deck_lot();
+        b.levels = vec![0.0, 0.12, 3.12];
+        // (A tile, and beside it the half towards it: its -X and -Z triangles.)
+        apply_paint(&mut b, &PaintOp::AddBasement { x: 5, z: 5, mask: 0xF });
+        apply_paint(&mut b, &PaintOp::AddBasement { x: 6, z: 5, mask: 0b1001 });
+        assert_eq!(basement_mask(&b, 6, 5), 0b1001);
+        let standing = |b: &LotBuildingBaked| b.walls.iter().filter(|w| w.level == 0 && w.y.is_some() && w.a != w.b).map(|w| (w.a, w.b)).collect::<Vec<_>>();
+        let walls = standing(&b);
+        // (The tile's three sides, the half's one along -Z, and the diagonal from corner to
+        // corner as one wall; none between the tile and the half.)
+        assert_eq!(walls.len(), 3 + 1 + 1, "{walls:?}");
+        let diagonal = |p: [f32; 2], q: [f32; 2]| walls.iter().any(|w| (w.0 == p && w.1 == q) || (w.0 == q && w.1 == p));
+        assert!(diagonal([6.0, 6.0], [7.0, 5.0]));
+        // (The other half dug: the diagonal gone, the tile's sides round both.)
+        apply_paint(&mut b, &PaintOp::AddBasement { x: 6, z: 5, mask: 0b0110 });
+        assert_eq!(standing(&b).len(), 6);
+        // (Half filled in again: the diagonal back.)
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 6, z: 5, mask: 0b0110 });
+        assert_eq!(standing(&b).len(), 5);
+        apply_paint(&mut b, &PaintOp::RemoveBasement { x: 6, z: 5, mask: 0xF });
+        assert_eq!(standing(&b).len(), 4);
+        assert_eq!(basement_mask(&b, 6, 5), 0);
+    }
     #[test]
     fn a_foundation_taken_away_leaves_its_neighbour_a_side() {
         let mut b = deck_lot();
@@ -919,7 +973,15 @@ pub enum PaintOp {
     /// A wall cut in two at `at`: it keeps the part from its start; the rest is added to the end.
     SplitWall { wall: u32, at: [f32; 2] },
     /// A floor tile laid; `region` groups a room's tiles for painting (0 = a tile on its own).
-    AddFloor { level: u8, x: u16, z: u16, region: u16 },
+    AddFloor {
+        level: u8,
+        x: u16,
+        z: u16,
+        region: u16,
+        /// Its triangles (half a tile in a diagonal room).
+        #[serde(default = "whole_tile")]
+        mask: u8,
+    },
     RemoveFloor { level: u8, x: u16, z: u16 },
     /// A staircase built (see [`BuiltStairs`]), or the one standing on tile (`x`, `z`) taken away.
     AddStairs { x: u16, z: u16, dir: u8, level: u8 },
@@ -962,9 +1024,20 @@ pub enum PaintOp {
         mask: u8,
     },
     /// A tile of basement dug (its floor a storey under the ground floor, walls round the dug
-    /// area), or filled in again.
-    AddBasement { x: u16, z: u16 },
-    RemoveBasement { x: u16, z: u16 },
+    /// area), or filled in again: the whole tile, or its triangles in `mask` (half a tile, along
+    /// a diagonal basement's edge).
+    AddBasement {
+        x: u16,
+        z: u16,
+        #[serde(default = "whole_tile")]
+        mask: u8,
+    },
+    RemoveBasement {
+        x: u16,
+        z: u16,
+        #[serde(default = "whole_tile")]
+        mask: u8,
+    },
     /// A fountain tile built (on the ground out of doors: its basin a quarter metre down, its
     /// water and ledge over the ground, as the game's Fountain tool builds them), or taken out.
     AddFountain { x: u16, z: u16 },
@@ -1354,13 +1427,35 @@ fn respawn_walls(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
     }
 }
 
-/// Every tile of `level` with the room it's in (row by row along z; 0 = outdoors). Rooms are
-/// what the walls along the lot's grid lines close off from the lot's edge.
+/// Every tile of `level` with the room it's in (row by row along z; 0 = outdoors): the room of
+/// any of its triangles (a diagonal room's half tiles theirs).
 pub fn rooms(b: &LotBuildingBaked, level: u8) -> Vec<u16> {
+    room_triangles(b, level).into_iter().map(|t| t.into_iter().find(|r| *r > 0).unwrap_or(0)).collect()
+}
+
+/// The room of the triangle of `rooms` (from `room_triangles`) a lot-local point is in (0:
+/// outdoors, or off the lot).
+pub fn room_at(rooms: &[[u16; 4]], w: usize, d: usize, p: Vec2) -> u16 {
+    let (x, z) = (p.x.floor(), p.y.floor());
+    if x < 0.0 || z < 0.0 || x as usize >= w || z as usize >= d {
+        return 0;
+    }
+    let (u, v) = (p.x - x, p.y - z);
+    // (The triangle whose side of the tile it's nearest: -Z, +X, +Z, -X.)
+    let t = [v, 1.0 - u, 1.0 - v, u].iter().enumerate().min_by(|a, b| a.1.total_cmp(b.1)).map_or(0, |m| m.0);
+    rooms[z as usize * w + x as usize][t]
+}
+
+/// Every tile's triangles of `level` (as a floor's mask has them: -Z, +X, +Z, -X) with the room
+/// each is in (0 = outdoors). Rooms are what the walls close off from the lot's edge: those
+/// along the grid lines between tiles, and diagonal ones across tiles between their halves.
+pub fn room_triangles(b: &LotBuildingBaked, level: u8) -> Vec<[u16; 4]> {
     let (w, d) = (b.width as usize, b.depth as usize);
-    // Walled grid edges: along x on line z (`hz`), and along z on line x (`vt`).
+    // Walled grid edges: along x on line z (`hz`), and along z on line x (`vt`); and each tile's
+    // walled half diagonals (bit 0: between -Z and -X, 1: +X and +Z, 2: -Z and +X, 3: +Z and -X).
     let mut hz = vec![false; w * (d + 1)];
     let mut vt = vec![false; (w + 1) * d];
+    let mut diag = vec![0u8; w * d];
     for wall in b.walls.iter().filter(|wl| wl.storey() == level) {
         let (a, c) = (Vec2::from(wall.a), Vec2::from(wall.b));
         if a.distance(c) < 0.5 {
@@ -1381,69 +1476,122 @@ pub fn rooms(b: &LotBuildingBaked, level: u8) -> Vec<u16> {
                     vt[z as usize * (w + 1) + x as usize] = true;
                 }
             }
-        }
-    }
-    // Flood the grid, with a ring of outdoor cells around it (padded coordinates).
-    let (pw, pd) = (w as i32 + 2, d as i32 + 2);
-    let mut label = vec![u16::MAX; (pw * pd) as usize];
-    let blocked = |x: i32, z: i32, dx: i32, dz: i32| -> bool {
-        // Crossing from padded cell (x, z) to its neighbour (x + dx, z + dz).
-        if dx != 0 {
-            let line = x.max(x + dx) - 1; // the grid line x between the cells (lot coordinates)
-            let rz = z - 1;
-            rz >= 0 && rz < d as i32 && line <= w as i32 && line >= 0 && vt[rz as usize * (w + 1) + line as usize]
-        } else {
-            let line = z.max(z + dz) - 1;
-            let rx = x - 1;
-            rx >= 0 && rx < w as i32 && line <= d as i32 && line >= 0 && hz[line as usize * w + rx as usize]
-        }
-    };
-    let mut next_room = 0u16;
-    for start in 0..label.len() {
-        if label[start] != u16::MAX {
-            continue;
-        }
-        let id = next_room;
-        next_room += 1;
-        let mut stack = vec![start as i32];
-        label[start] = id;
-        while let Some(c) = stack.pop() {
-            let (x, z) = (c % pw, c / pw);
-            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                let (nx, nz) = (x + dx, z + dz);
-                if nx < 0 || nz < 0 || nx >= pw || nz >= pd || blocked(x, z, dx, dz) {
+        } else if ((a.x - c.x).abs() - (a.y - c.y).abs()).abs() < 0.05 {
+            // (A diagonal, half a tile's diagonal at a time.)
+            let halves = ((c.x - a.x).abs() * 2.0).round() as i32;
+            let step = (c - a) / halves.max(1) as f32;
+            for k in 0..halves {
+                let mid = a + step * (k as f32 + 0.5);
+                let (x, z) = (mid.x.floor(), mid.y.floor());
+                if x < 0.0 || z < 0.0 || x as usize >= w || z as usize >= d {
                     continue;
                 }
-                let n = (nz * pw + nx) as usize;
-                if label[n] == u16::MAX {
-                    label[n] = id;
-                    stack.push(n as i32);
+                let (u, v) = (mid.x - x, mid.y - z);
+                let bit = match (u < 0.5, v < 0.5) {
+                    (true, true) => 0,
+                    (false, false) => 1,
+                    (false, true) => 2,
+                    (true, false) => 3,
+                };
+                diag[z as usize * w + x as usize] |= 1 << bit;
+            }
+        }
+    }
+    // The triangles each triangle meets, and whether a wall's between: across its side of the
+    // tile (none: off the lot, the outdoors), and its tile's two beside it.
+    let side_walled = |x: usize, z: usize, t: usize| match t {
+        0 => hz[z * w + x],
+        1 => vt[z * (w + 1) + x + 1],
+        2 => hz[(z + 1) * w + x],
+        _ => vt[z * (w + 1) + x],
+    };
+    // (Triangle t's tile neighbours: t+1 and t+3, and the half diagonal between.)
+    const BETWEEN: [[u8; 4]; 4] = [[0, 2, 0, 0], [2, 0, 1, 0], [0, 1, 0, 3], [0, 0, 3, 0]];
+    let inner_walled = |x: usize, z: usize, t: usize, o: usize| diag[z * w + x] & (1 << BETWEEN[t][o]) != 0;
+    let across = |x: usize, z: usize, t: usize| -> Option<(usize, usize, usize)> {
+        let (dx, dz) = [(0, -1), (1, 0), (0, 1), (-1, 0)][t];
+        let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+        (nx >= 0 && nz >= 0 && (nx as usize) < w && (nz as usize) < d).then(|| (nx as usize, nz as usize, (t + 2) % 4))
+    };
+    const UNSET: u16 = u16::MAX;
+    let mut label = vec![[UNSET; 4]; w * d];
+    let flood = |label: &mut Vec<[u16; 4]>, seeds: Vec<(usize, usize, usize)>, id: u16| {
+        let mut stack = Vec::new();
+        for (x, z, t) in seeds {
+            if label[z * w + x][t] == UNSET {
+                label[z * w + x][t] = id;
+                stack.push((x, z, t));
+            }
+        }
+        while let Some((x, z, t)) = stack.pop() {
+            let mut next = Vec::with_capacity(3);
+            for o in [(t + 1) % 4, (t + 3) % 4] {
+                if !inner_walled(x, z, t, o) {
+                    next.push((x, z, o));
+                }
+            }
+            if !side_walled(x, z, t)
+                && let Some(n) = across(x, z, t)
+            {
+                next.push(n);
+            }
+            for (nx, nz, nt) in next {
+                if label[nz * w + nx][nt] == UNSET {
+                    label[nz * w + nx][nt] = id;
+                    stack.push((nx, nz, nt));
+                }
+            }
+        }
+    };
+    // The outdoors first: in from the lot's edge where no wall stands along it.
+    let mut edge = Vec::new();
+    for z in 0..d {
+        for x in 0..w {
+            for t in 0..4 {
+                if across(x, z, t).is_none() && !side_walled(x, z, t) {
+                    edge.push((x, z, t));
                 }
             }
         }
     }
-    // The first region flooded holds the padding: the outdoors.
-    let mut out = vec![0u16; w * d];
-    for z in 0..d {
-        for x in 0..w {
-            out[z * w + x] = label[(z as i32 + 1) as usize * pw as usize + x + 1];
+    flood(&mut label, edge, 0);
+    let mut next_room = 1u16;
+    for i in 0..w * d {
+        for t in 0..4 {
+            if label[i][t] == UNSET {
+                flood(&mut label, vec![(i % w, i / w, t)], next_room);
+                next_room += 1;
+            }
         }
     }
-    out
+    label
 }
-
 /// Floor for the rooms on `level` that have none yet (as the game lays when walls close a room),
 /// and the outdoor floor they close in (a deck's) made theirs.
 pub fn room_floors(b: &LotBuildingBaked, level: u8) -> Vec<PaintOp> {
-    let rooms = rooms(b, level);
+    let rooms = room_triangles(b, level);
     let w = b.width as usize;
-    let have: HashSet<(u16, u16)> = b.floors.iter().filter(|f| f.level == level && f.region > 0).map(|f| (f.x, f.z)).collect();
+    let mut have: HashMap<(u16, u16), u8> = HashMap::new();
+    for f in b.floors.iter().filter(|f| f.level == level && f.region > 0) {
+        *have.entry((f.x, f.z)).or_default() |= f.mask;
+    }
     let base = b.floors.iter().map(|f| f.region).max().unwrap_or(0);
     let mut ops = Vec::new();
-    for (i, &room) in rooms.iter().enumerate() {
+    for (i, tri) in rooms.iter().enumerate() {
         let (x, z) = ((i % w) as u16, (i / w) as u16);
-        if room > 0 && !have.contains(&(x, z)) {
-            ops.push(PaintOp::AddFloor { level, x, z, region: base + room });
+        let missing = !have.get(&(x, z)).copied().unwrap_or(0);
+        // (Each room in the tile its triangles: half a tile in a diagonal room.)
+        let mut done = 0u8;
+        for t in 0..4 {
+            let room = tri[t];
+            if room == 0 || done & (1 << t) != 0 {
+                continue;
+            }
+            let mask = (0..4).filter(|o| tri[*o] == room).fold(0u8, |m, o| m | 1 << o);
+            done |= mask;
+            if mask & missing != 0 {
+                ops.push(PaintOp::AddFloor { level, x, z, region: base + room, mask: mask & missing & 0xF });
+            }
         }
     }
     ops
@@ -1453,7 +1601,7 @@ pub fn room_floors(b: &LotBuildingBaked, level: u8) -> Vec<PaintOp> {
 /// outdoors); returns the walls whose sides changed.
 fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
     let levels: BTreeSet<u8> = b.built.iter().filter_map(|&i| b.data.walls.get(i as usize)).map(|w| w.storey()).collect();
-    let rooms: HashMap<u8, Vec<u16>> = levels.into_iter().map(|l| (l, rooms(&b.data, l))).collect();
+    let rooms: HashMap<u8, Vec<[u16; 4]>> = levels.into_iter().map(|l| (l, room_triangles(&b.data, l))).collect();
     let (w, d) = (b.data.width as i32, b.data.depth as i32);
     let mut changed = Vec::new();
     let mut built: Vec<u32> = b.built.iter().copied().collect();
@@ -1470,7 +1618,7 @@ fn restyle(b: &mut ActiveBuilding) -> Vec<u32> {
         let mid = (a + c) * 0.5;
         let kind_at = |p: Vec2| {
             let (x, z) = (p.x.floor() as i32, p.y.floor() as i32);
-            if x < 0 || z < 0 || x >= w || z >= d || rooms[&level][(z * w + x) as usize] == 0 {
+            if room_at(&rooms[&level], w as usize, d as usize, p) == 0 {
                 return ROOM_OUTSIDE;
             }
             // Indoors: the room's own kind where the house has one.
@@ -1638,10 +1786,12 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 }
             }
         }
-        PaintOp::AddFloor { level, x, z, region } => match b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z) {
+        // (Where the tile's floor is another room's, half a tile across a diagonal wall, the
+        // room's own beside it.)
+        PaintOp::AddFloor { level, x, z, region, mask } => match b.floors.iter_mut().find(|f| f.level == level && f.x == x && f.z == z && (f.mask & mask != 0 || f.region == region || f.region == 0)) {
             // (An outdoor floor walls now close in, a deck's say: the room's.)
             Some(f) => {
-                f.mask = 0xF;
+                f.mask |= mask;
                 if region > 0 && f.region == 0 {
                     f.region = region;
                     f.kind = ROOM_LIVING;
@@ -1651,7 +1801,7 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
                 level,
                 x,
                 z,
-                mask: 0xF,
+                mask,
                 kind: if region > 0 { ROOM_LIVING } else { ROOM_OUTSIDE },
                 region,
                 cover: [NO_COVER; 4],
@@ -1711,8 +1861,8 @@ pub fn apply_paint(b: &mut LotBuildingBaked, op: &PaintOp) {
         }
         PaintOp::AddFoundation { x, z, ground, mask } => add_foundation(b, x, z, ground, mask),
         PaintOp::RemoveFoundation { x, z, mask } => remove_foundation(b, x, z, mask),
-        PaintOp::AddBasement { x, z } => add_basement(b, x, z),
-        PaintOp::RemoveBasement { x, z } => remove_basement(b, x, z),
+        PaintOp::AddBasement { x, z, mask } => add_basement(b, x, z, mask),
+        PaintOp::RemoveBasement { x, z, mask } => remove_basement(b, x, z, mask),
         PaintOp::RemoveFence { a, b: end, level } => {
             let near = |p: [f32; 2], q: [f32; 2]| Vec2::from(p).distance(Vec2::from(q)) < 0.05;
             b.fences.retain(|f| !(f.level == level && f.a != f.b && ((near(f.a, a) && near(f.b, end)) || (near(f.a, end) && near(f.b, a)))));
@@ -1895,54 +2045,124 @@ pub fn in_basement_tile(b: &LotBuildingBaked, x: i32, z: i32) -> bool {
     b.floors.iter().any(|f| f.level == 0 && f.y.is_some() && f.x as i32 == x && f.z as i32 == z)
 }
 
-/// Takes down the basement wall along a tile side (left in the list with no length, as walls
-/// knocked down are, so the others keep their places).
-fn collapse_basement_wall(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2]) {
-    let near = |u: [f32; 2], v: [f32; 2]| Vec2::from(u).distance(Vec2::from(v)) < 0.05;
-    for w in b.walls.iter_mut().filter(|w| w.level == 0 && w.y.is_some()) {
-        if (near(w.a, p) && near(w.b, q)) || (near(w.a, q) && near(w.b, p)) {
-            w.b = w.a;
-        }
-    }
+/// The triangles of a tile dug out for the basement (a floor's mask).
+fn basement_mask(b: &LotBuildingBaked, x: i32, z: i32) -> u8 {
+    b.floors.iter().filter(|f| f.level == 0 && f.y.is_some() && f.x as i32 == x && f.z as i32 == z).fold(0, |m, f| m | f.mask)
 }
 
-/// Puts up a basement wall along a tile side, if there isn't one.
+/// Whether point `u` lies on the segment from `a` to `c`.
+fn on_segment(u: Vec2, a: Vec2, c: Vec2) -> bool {
+    (c - a).perp_dot(u - a).abs() < 0.01 && (u - a).dot(c - u) >= -0.01
+}
+
+/// Takes down the basement wall along a tile side or half a diagonal: a wall just that long
+/// left in the list with no length (as walls knocked down are, so the others keep their
+/// places); a longer one along it (a diagonal's other half) cut back to the rest.
+fn collapse_basement_wall(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2]) {
+    let (p, q) = (Vec2::from(p), Vec2::from(q));
+    let mut rest = Vec::new();
+    for w in b.walls.iter_mut().filter(|w| w.level == 0 && w.y.is_some() && w.a != w.b) {
+        let (a, c) = (Vec2::from(w.a), Vec2::from(w.b));
+        if !(on_segment(p, a, c) && on_segment(q, a, c)) {
+            continue;
+        }
+        let (near, far) = if a.distance(p) <= a.distance(q) { (p, q) } else { (q, p) };
+        match (a.distance(near) > 0.05, far.distance(c) > 0.05) {
+            (true, true) => {
+                let mut r = w.clone();
+                r.a = far.into();
+                rest.push(r);
+                w.b = near.into();
+            }
+            (true, false) => w.b = near.into(),
+            (false, true) => w.a = far.into(),
+            (false, false) => w.b = w.a,
+        }
+    }
+    b.walls.extend(rest);
+}
+
+/// Puts up a basement wall along a tile side or half a diagonal, if there isn't one.
 fn basement_wall(b: &mut LotBuildingBaked, p: [f32; 2], q: [f32; 2], y: f32) {
-    let near = |u: [f32; 2], v: [f32; 2]| Vec2::from(u).distance(Vec2::from(v)) < 0.05;
-    if !b.walls.iter().any(|w| w.level == 0 && w.y.is_some() && ((near(w.a, p) && near(w.b, q)) || (near(w.a, q) && near(w.b, p)))) {
+    let (u, v) = (Vec2::from(p), Vec2::from(q));
+    if !b.walls.iter().any(|w| w.level == 0 && w.y.is_some() && w.a != w.b && on_segment(u, Vec2::from(w.a), Vec2::from(w.b)) && on_segment(v, Vec2::from(w.a), Vec2::from(w.b))) {
         b.walls.push(WallBaked { a: p, b: q, level: 0, left: ROOM_OUTSIDE, right: ROOM_OUTSIDE, cover: [NO_COVER; 2], y: Some(y) });
     }
 }
 
-/// Digs a tile of basement: its floor a storey under the ground floor (the basement's, once
-/// there's one), walls round the dug area and none between tiles dug side by side.
-fn add_basement(b: &mut LotBuildingBaked, x: u16, z: u16) {
-    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 || in_basement_tile(b, x as i32, z as i32) {
+/// The two halves of a diagonal basement wall meeting in a tile's middle `c`, made one wall from
+/// corner to corner (as a diagonal room's are).
+fn join_basement_halves(b: &mut LotBuildingBaked, c: [f32; 2]) {
+    let c = Vec2::from(c);
+    let at: Vec<usize> = (0..b.walls.len())
+        .filter(|&i| {
+            let w = &b.walls[i];
+            w.level == 0 && w.y.is_some() && w.a != w.b && (Vec2::from(w.a).distance(c) < 0.05 || Vec2::from(w.b).distance(c) < 0.05)
+        })
+        .collect();
+    let [i, j] = at[..] else { return };
+    let far = |w: &WallBaked| if Vec2::from(w.a).distance(c) < 0.05 { Vec2::from(w.b) } else { Vec2::from(w.a) };
+    let (u, v) = (far(&b.walls[i]), far(&b.walls[j]));
+    if (u - c).perp_dot(v - c).abs() > 0.01 || (u - c).dot(v - c) > 0.0 {
+        return;
+    }
+    let w = &mut b.walls[i];
+    if Vec2::from(w.b).distance(c) < 0.05 {
+        w.b = v.into();
+    } else {
+        w.a = v.into();
+    }
+    b.walls[j].b = b.walls[j].a;
+}
+
+/// Digs a tile of basement (or its triangles in `mask`: half a tile along a diagonal
+/// basement's edge): its floor a storey under the ground floor (the basement's, once there's
+/// one), walls round the dug area, along the diagonal across a half tile, and none between
+/// tiles dug side by side.
+fn add_basement(b: &mut LotBuildingBaked, x: u16, z: u16, mask: u8) {
+    if x as u32 >= b.width || z as u32 >= b.depth || b.levels.len() < 2 {
+        return;
+    }
+    let dig = mask & 0xF & !basement_mask(b, x as i32, z as i32);
+    if dig == 0 {
         return;
     }
     let y = *b.basement.get_or_insert(b.levels[1] - s3bake::building::LEVEL_HEIGHT);
-    b.floors.push(FloorBaked { level: 0, x, z, mask: 0xF, kind: ROOM_LIVING, region: 0, cover: [NO_COVER; 4], y: Some(y) });
-    for (p, q, (nx, nz)) in tile_sides(x, z) {
-        if in_basement_tile(b, nx, nz) {
-            collapse_basement_wall(b, p, q);
-        } else {
-            basement_wall(b, p, q, y);
+    match b.floors.iter_mut().find(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z) {
+        Some(f) => f.mask |= dig,
+        None => b.floors.push(FloorBaked { level: 0, x, z, mask: dig, kind: ROOM_LIVING, region: 0, cover: [NO_COVER; 4], y: Some(y) }),
+    }
+    for t in (0..4u8).filter(|t| dig & (1 << t) != 0) {
+        for (p, q, (nx, nz, nt)) in triangle_sides(x, z, t) {
+            if basement_mask(b, nx, nz) & (1 << nt) != 0 {
+                collapse_basement_wall(b, p, q);
+            } else {
+                basement_wall(b, p, q, y);
+            }
         }
     }
+    join_basement_halves(b, [x as f32 + 0.5, z as f32 + 0.5]);
 }
 
-/// Fills a tile of basement in again: its floor and walls go, and the dug tiles beside it get
-/// a wall where it was. With none left, there's no basement.
-fn remove_basement(b: &mut LotBuildingBaked, x: u16, z: u16) {
+/// Fills a tile of basement in again (its triangles in `mask`): its floor and walls go, and the
+/// dug ground beside it gets a wall where it was. With none left, there's no basement.
+fn remove_basement(b: &mut LotBuildingBaked, x: u16, z: u16, mask: u8) {
     let Some(i) = b.floors.iter().position(|f| f.level == 0 && f.y.is_some() && f.x == x && f.z == z) else { return };
-    b.floors.remove(i);
+    let gone = b.floors[i].mask & mask;
+    b.floors[i].mask &= !mask;
+    if b.floors[i].mask == 0 {
+        b.floors.remove(i);
+    }
     let y = b.basement.unwrap_or(b.levels[1] - s3bake::building::LEVEL_HEIGHT);
-    for (p, q, (nx, nz)) in tile_sides(x, z) {
-        collapse_basement_wall(b, p, q);
-        if in_basement_tile(b, nx, nz) {
-            basement_wall(b, q, p, y);
+    for t in (0..4u8).filter(|t| gone & (1 << t) != 0) {
+        for (p, q, (nx, nz, nt)) in triangle_sides(x, z, t) {
+            collapse_basement_wall(b, p, q);
+            if basement_mask(b, nx, nz) & (1 << nt) != 0 {
+                basement_wall(b, q, p, y);
+            }
         }
     }
+    join_basement_halves(b, [x as f32 + 0.5, z as f32 + 0.5]);
     if !b.floors.iter().any(|f| f.level == 0 && f.y.is_some()) {
         b.basement = None;
     }
@@ -2504,7 +2724,10 @@ fn rectangles(cells: &mut [bool], w: usize, d: usize) -> Vec<(usize, usize, usiz
 
 /// A roof of a style over the lot-local rectangle (`x0`, `z0`)-(`x1`, `z1`) with its eaves at
 /// height `y`: its slopes in `buf`, and the walls its gable and shed ends close in, in `ends`.
-fn style_roof(buf: &mut MeshBuf, ends: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, f32, f32), y: f32, style: RoofStyle) {
+/// A roof in the household's style over a rectangle: of the lot's grid, or (`diagonal`) of the
+/// grid turned 45° (a diagonal room's: `a = (x + z) / √2`, `c = (z - x) / √2`).
+#[allow(clippy::too_many_arguments)]
+fn style_roof(buf: &mut MeshBuf, ends: &mut MeshBuf, b: &ActiveBuilding, (x0, z0, x1, z1): (f32, f32, f32, f32), y: f32, style: RoofStyle, diagonal: bool) {
     // (As steep as the household's pitch: the shed's and the mansard's slopes in proportion.)
     let k = b.roof_pitch / ROOF_PITCH;
     let (pitch, shed, steep, mtop) = (b.roof_pitch, SHED_PITCH * k, MANSARD_STEEP * k.sqrt(), MANSARD_TOP * k);
@@ -2517,7 +2740,11 @@ fn style_roof(buf: &mut MeshBuf, ends: &mut MeshBuf, b: &ActiveBuilding, (x0, z0
     let (a0, a1, c0, c1) = if along_x { (x0, x1, z0, z1) } else { (z0, z1, x0, x1) };
     let half = (c1 - c0) * 0.5;
     let cm = c0 + half;
-    let pt = |a: f32, c: f32, h: f32| if along_x { b.world(a, c, h) } else { b.world(c, a, h) };
+    let pt = |a: f32, c: f32, h: f32| {
+        let (u, v) = if along_x { (a, c) } else { (c, a) };
+        let (x, z) = if diagonal { ((u - v) * std::f32::consts::FRAC_1_SQRT_2, (u + v) * std::f32::consts::FRAC_1_SQRT_2) } else { (u, v) };
+        b.world(x, z, h)
+    };
     // A slope: textured along its eave and up the slope.
     let mut face = |pts: &[(f32, f32, f32)], eave: ((f32, f32), (f32, f32)), eave_y: f32| {
         let p: Vec<Vec3> = pts.iter().map(|&(a, c, h)| pt(a, c, h)).collect();
@@ -2599,6 +2826,34 @@ fn style_roof(buf: &mut MeshBuf, ends: &mut MeshBuf, b: &ActiveBuilding, (x0, z0
     }
 }
 
+/// The rooms with half tiles in them (walled diagonally), each with the rectangle its triangles
+/// make on the grid turned 45° (as `style_roof` takes it).
+fn diagonal_rooms(triangles: &[[u16; 4]], w: usize) -> Vec<(u16, (f32, f32, f32, f32))> {
+    let mut out: Vec<(u16, (f32, f32, f32, f32))> = Vec::new();
+    let half: HashSet<u16> = triangles.iter().flat_map(|t| t.iter().copied().filter(|r| *r > 0 && t.iter().any(|o| o != r))).collect();
+    let s = std::f32::consts::FRAC_1_SQRT_2;
+    for (i, t) in triangles.iter().enumerate() {
+        let (x, z) = ((i % w) as f32, (i / w) as f32);
+        // (Each triangle's corners: its side of the tile and the middle.)
+        const SIDES: [[(f32, f32); 2]; 4] = [[(0.0, 0.0), (1.0, 0.0)], [(1.0, 0.0), (1.0, 1.0)], [(1.0, 1.0), (0.0, 1.0)], [(0.0, 1.0), (0.0, 0.0)]];
+        for (k, &room) in t.iter().enumerate().filter(|(_, r)| half.contains(r)) {
+            let pts = [SIDES[k][0], SIDES[k][1], (0.5, 0.5)].map(|(dx, dz)| ((x + dx + z + dz) * s, (z + dz - x - dx) * s));
+            let at = match out.iter().position(|o| o.0 == room) {
+                Some(p) => p,
+                None => {
+                    out.push((room, (f32::MAX, f32::MAX, f32::MIN, f32::MIN)));
+                    out.len() - 1
+                }
+            };
+            let r = &mut out[at].1;
+            for (a, c) in pts {
+                *r = (r.0.min(a), r.1.min(c), r.2.max(a), r.3.max(c));
+            }
+        }
+    }
+    out
+}
+
 /// Roofs over the household's rooms: each room's top floor (no floor above it) gets hip roofs
 /// over rectangles of its tiles. On a lot that came with a house only rooms the household
 /// walled get one (the game's imposter shows the house's own roof).
@@ -2615,7 +2870,8 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
     let mut ends = MeshBuf::default();
     let has_floor: HashSet<(u8, u16, u16)> = b.data.floors.iter().map(|f| (f.level, f.x, f.z)).collect();
     for level in 1..b.levels.len() as u8 {
-        let rooms = rooms(&b.data, level);
+        let triangles = room_triangles(&b.data, level);
+        let rooms: Vec<u16> = triangles.iter().map(|t| t.iter().copied().find(|r| *r > 0).unwrap_or(0)).collect();
         if rooms.iter().all(|r| *r == 0) {
             continue;
         }
@@ -2644,8 +2900,20 @@ fn respawn_roofs(commands: &mut Commands, b: &mut ActiveBuilding, assets: &mut O
         };
         let mut cells: Vec<bool> = (0..w * d).map(|i| roofed.contains(&rooms[i]) && !has_floor.contains(&(level + 1, (i % w) as u16, (i / w) as u16))).collect();
         let y = b.levels[level as usize] + WALL_H;
+        // (A diagonal room, its walls across tiles: one roof turned with it, over the rectangle
+        // its triangles make on the grid turned 45°.)
+        for (room, (a0, c0, a1, c1)) in diagonal_rooms(&triangles, w).into_iter().filter(|(r, _)| roofed.contains(r)) {
+            let tiles: Vec<usize> = (0..w * d).filter(|i| triangles[*i].contains(&room)).collect();
+            if tiles.iter().any(|i| has_floor.contains(&(level + 1, (i % w) as u16, (i / w) as u16))) {
+                continue;
+            }
+            for i in tiles {
+                cells[i] = false;
+            }
+            style_roof(&mut buf, &mut ends, b, (a0, c0, a1, c1), y, b.roof_style, true);
+        }
         for (x0, z0, x1, z1) in rectangles(&mut cells, w, d) {
-            style_roof(&mut buf, &mut ends, b, (x0 as f32, z0 as f32, x1 as f32, z1 as f32), y, b.roof_style);
+            style_roof(&mut buf, &mut ends, b, (x0 as f32, z0 as f32, x1 as f32, z1 as f32), y, b.roof_style, false);
         }
     }
     if buf.is_empty() {
