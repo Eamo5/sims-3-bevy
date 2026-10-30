@@ -215,6 +215,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2al_soc_dogTricks_",
     // (Talking to a pet; whispering to a horse; cleaning its hooves, the hoof pick in hand.)
     "a_talkToPets_",
+    // (A Sim scolding a dog that growls at them.)
+    "a_growlAt_",
     "c_talkToPets_",
     "a2ah_whisperTo_",
     "c2ah_whisperTo_",
@@ -847,7 +849,7 @@ fn pet_social(name: &str) -> bool {
     const PETS: [&str; 8] = ["ac", "cc", "ad", "cd", "al", "cl", "ah", "ch"];
     let Some((who, rest)) = name.split_once('_') else { return false };
     let Some((p, t)) = who.split_once('2') else { return false };
-    PETS.contains(&p) && (t == "a" || t == "c" || PETS.contains(&t)) && rest.starts_with("soc_neutral_")
+    PETS.contains(&p) && (t == "a" || t == "c" || PETS.contains(&t)) && ["soc_neutral_", "socialGroom_", "soc_pounce_", "barkAt_", "growlAt_", "HissAt_"].iter().any(|s| rest.starts_with(s))
 }
 
 /// Whether a clip should be baked.

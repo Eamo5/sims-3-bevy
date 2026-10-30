@@ -46,9 +46,35 @@ pub enum Greet {
     AttackSim,
     BiteAt,
     Play,
+    /// Grooming each other (cats, horses: the pack's `socialGroom`, in rounds).
+    Groom,
+    /// A cat pouncing on another in play (`soc_pounce`, in rounds).
+    Pounce,
+    /// A dog barking happily at a Sim (`barkAt_positive`).
+    BarkAt,
+    /// A dog growling at a Sim it dislikes, the Sim scolding it (`growlAt_scold`).
+    GrowlAt,
+    /// A cat hissing at a Sim it dislikes (`HissAt_recoil`).
+    Hiss,
 }
 
 impl Greet {
+    pub const ALL: [Greet; 13] = [
+        Greet::Sniff,
+        Greet::Nuzzle,
+        Greet::Lick,
+        Greet::MarkSim,
+        Greet::PeeOn,
+        Greet::AttackSim,
+        Greet::BiteAt,
+        Greet::Play,
+        Greet::Groom,
+        Greet::Pounce,
+        Greet::BarkAt,
+        Greet::GrowlAt,
+        Greet::Hiss,
+    ];
+
     /// The pack's clip stem (`<pet>2<them>_soc_neutral_<stem>_x`).
     fn stem(self) -> &'static str {
         match self {
@@ -60,11 +86,36 @@ impl Greet {
             Greet::AttackSim => "attackSim_insulting_neutral",
             Greet::BiteAt => "biteAt_insulting_neutral",
             Greet::Play => "play",
+            Greet::Groom => "socialGroom",
+            Greet::Pounce => "soc_pounce",
+            Greet::BarkAt => "barkAt_positive",
+            Greet::GrowlAt => "growlAt_scold",
+            Greet::Hiss => "HissAt_recoil",
         }
     }
 
     pub fn mean(self) -> bool {
-        matches!(self, Greet::PeeOn | Greet::AttackSim | Greet::BiteAt)
+        matches!(self, Greet::PeeOn | Greet::AttackSim | Greet::BiteAt | Greet::GrowlAt | Greet::Hiss)
+    }
+
+    /// The rounds of one played in parts (its start, then these in turn, then its end).
+    pub fn rounds(self) -> &'static [&'static str] {
+        match self {
+            Greet::Play => &["loop1", "loop2", "swap"],
+            Greet::Groom => &["loop1", "loop2", "loop3"],
+            Greet::Pounce => &["loop1", "loop2"],
+            _ => &[],
+        }
+    }
+
+    /// The part it begins with (its start, for one in parts).
+    fn first(self) -> &'static str {
+        if self.rounds().is_empty() { "" } else { "start" }
+    }
+
+    /// Fun for the other pet too (a game).
+    fn game(self) -> bool {
+        matches!(self, Greet::Play | Greet::Pounce)
     }
 
     /// What it does for the pet's company and fun, the other's company, and the liking between
@@ -72,7 +123,9 @@ impl Greet {
     fn effects(self) -> (f32, f32, f32, f32) {
         match self {
             _ if self.mean() => (10.0, 10.0, -10.0, -5.0),
-            Greet::Play => (25.0, 45.0, 20.0, 2.0),
+            Greet::Play | Greet::Pounce => (25.0, 45.0, 20.0, 2.0),
+            Greet::Groom => (40.0, 10.0, 25.0, 3.0),
+            Greet::BarkAt => (15.0, 20.0, 5.0, 1.0),
             Greet::Sniff => (15.0, 5.0, 5.0, 1.0),
             _ => (30.0, 10.0, 15.0, 3.0),
         }
@@ -88,19 +141,25 @@ fn friendly(kind: &str) -> Greet {
     }
 }
 
-/// The mean one for a Sim it dislikes.
-fn unfriendly(kind: &str) -> Greet {
+/// The mean one for a Sim it dislikes: a dog pees on them or growls, a cat scratches or hisses,
+/// a horse bites at them.
+fn unfriendly(kind: &str, roll: f32) -> Greet {
     match kind.get(1..) {
+        Some("d" | "l") if roll < 0.25 => Greet::GrowlAt,
         Some("d" | "l") => Greet::PeeOn,
+        Some("c") if roll < 0.25 => Greet::Hiss,
         Some("c") => Greet::AttackSim,
         _ => Greet::BiteAt,
     }
 }
 
-/// How a pet would greet a Sim it likes this much (none of the mean ones from the young).
+/// How a pet would greet a Sim it likes this much (none of the mean ones from the young; a
+/// dog that's fond of them barks for joy now and then).
 pub fn greeting_for_sim(kind: &str, liking: f32, roll: f32) -> Greet {
     if liking < DISLIKE && roll < 0.5 && kind.starts_with('a') {
-        unfriendly(kind)
+        unfriendly(kind, roll)
+    } else if liking >= LIKE && roll > 0.8 && matches!(kind.get(1..), Some("d" | "l")) {
+        Greet::BarkAt
     } else if liking >= LIKE {
         friendly(kind)
     } else {
@@ -108,12 +167,17 @@ pub fn greeting_for_sim(kind: &str, liking: f32, roll: f32) -> Greet {
     }
 }
 
-/// How a pet would greet another pet: cats and dogs short of fun play; otherwise a nuzzle, now
-/// and then a sniff.
+/// How a pet would greet another pet: cats and dogs short of fun play (cats pounce, now and
+/// then); cats and horses groom each other; otherwise a nuzzle, now and then a sniff.
 pub fn greeting_for_pet(kind: &str, other: &str, bored: bool, roll: f32) -> Greet {
     let playful = |k: &str| matches!(k.get(1..), Some("c" | "d" | "l"));
-    if bored && playful(kind) && playful(other) {
+    let same = kind.get(1..) == other.get(1..);
+    if bored && same && kind.ends_with('c') && roll < 0.5 {
+        Greet::Pounce
+    } else if bored && playful(kind) && playful(other) {
         Greet::Play
+    } else if same && matches!(kind.get(1..), Some("c" | "h")) && roll < 0.35 {
+        Greet::Groom
     } else if roll < 0.6 {
         Greet::Nuzzle
     } else {
@@ -162,6 +226,8 @@ pub struct Greeting {
     until: f64,
     /// The clips being played (the pet's, the other's), for a game of play its rounds.
     round: u32,
+    /// One in parts at its end.
+    stopping: bool,
 }
 
 /// A pet being greeted by another: it stays where it is.
@@ -177,13 +243,28 @@ fn sim_code(sim: &Sim) -> Option<&'static str> {
     }
 }
 
-/// The clips for a greeting, the pet's and the other's, if the game has them.
-fn clips(data: &Baked, kind: &str, them: &str, how: Greet, part: &str) -> Option<(&'static str, &'static str)> {
+/// The clips for a greeting (a part of one in parts), the pet's and the other's, if the game has
+/// them: most the pack's socials (`<pet>2<them>_soc_neutral_<stem>_x`, `_y`), a few named for
+/// themselves; a bark or hiss has no other side, a growl's only a grown Sim's scolding.
+fn clips(data: &Baked, kind: &str, them: &str, how: Greet, part: &str) -> Option<(&'static str, Option<&'static str>)> {
     let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
-    let stem = if how == Greet::Play { format!("play_{part}") } else { how.stem().to_string() };
-    let x = format!("{kind}2{them}_soc_neutral_{stem}_x");
-    let y = format!("{kind}2{them}_soc_neutral_{stem}_y");
-    (has(&x) && has(&y)).then(|| (crate::pets::intern(x), crate::pets::intern(y)))
+    let stem = how.stem();
+    let pair = |base: String| (format!("{base}_x"), Some(format!("{base}_y")));
+    let (x, y) = match how {
+        Greet::Play => pair(format!("{kind}2{them}_soc_neutral_play_{part}")),
+        Greet::Groom | Greet::Pounce => pair(format!("{kind}2{them}_{stem}_{part}")),
+        Greet::BarkAt | Greet::Hiss => (format!("{kind}2{them}_{stem}_x"), None),
+        Greet::GrowlAt => (format!("{kind}2{them}_{stem}_x"), Some(format!("{them}_{stem}_x"))),
+        _ => pair(format!("{kind}2{them}_soc_neutral_{stem}")),
+    };
+    if !has(&x) {
+        return None;
+    }
+    let y = y.filter(|y| has(y));
+    if y.is_none() && !matches!(how, Greet::BarkAt | Greet::GrowlAt | Greet::Hiss) {
+        return None;
+    }
+    Some((crate::pets::intern(x), y.map(crate::pets::intern)))
 }
 
 /// Where a pet stands to greet someone at `at` coming from `from`: facing them, as far off as
@@ -220,6 +301,10 @@ fn seek_company(
         let forced = pet.name.eq_ignore_ascii_case(who);
         let named = |n: &str| !forced || whom.is_none_or(|w| w.eq_ignore_ascii_case(n));
         if !forced {
+            // (None of their own while a test's waiting to send one.)
+            if !*tested && std::env::var("PET_GREET").is_ok() {
+                continue;
+            }
             if claimed.contains(&e) || night || anim.is_some_and(|a| a.clip.contains("sleep")) {
                 continue;
             }
@@ -248,10 +333,10 @@ fn seek_company(
             }
             let liking = bonds.map_or(crate::pets::FAMILY_LIKING, |b| b.liking(sim.id, true));
             let mut how = greeting_for_sim(&pet.kind, liking, rng.random());
-            if clips(&data, &pet.kind, code, how, "").is_none() {
+            if clips(&data, &pet.kind, code, how, how.first()).is_none() {
                 how = Greet::Sniff;
             }
-            if clips(&data, &pet.kind, code, how, "").is_some() {
+            if clips(&data, &pet.kind, code, how, how.first()).is_some() {
                 best = Some((d, Other::Sim(s), how, stf.translation.xz()));
             }
         }
@@ -265,16 +350,21 @@ fn seek_company(
                 continue;
             }
             let mut how = greeting_for_pet(&pet.kind, &other.kind, bored, rng.random());
-            let part = if how == Greet::Play { "start" } else { "" };
-            if clips(&data, &pet.kind, &other.kind, how, part).is_none() {
+            if clips(&data, &pet.kind, &other.kind, how, how.first()).is_none() {
                 how = Greet::Sniff;
             }
-            let part = if how == Greet::Play { "start" } else { "" };
-            if clips(&data, &pet.kind, &other.kind, how, part).is_some() {
+            if clips(&data, &pet.kind, &other.kind, how, how.first()).is_some() {
                 best = Some((d, Other::Pet(o), how, otf.translation.xz()));
             }
         }
-        let Some((_, other, how, at)) = best else { continue };
+        let Some((_, other, mut how, at)) = best else { continue };
+        // (PET_GREET_HOW=<greeting> (tests): that way, where the game has it.)
+        if forced
+            && let Ok(w) = std::env::var("PET_GREET_HOW")
+            && let Some(g) = Greet::ALL.into_iter().find(|g| format!("{g:?}").eq_ignore_ascii_case(&w))
+        {
+            how = g;
+        }
         let to = spot(at, here, &pet.kind);
         let path = grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z))));
         let Some(mut path) = path else { continue };
@@ -287,7 +377,7 @@ fn seek_company(
         if let Other::Pet(o) = other {
             commands.entity(o).insert(Greeted(e));
         }
-        commands.entity(e).insert(Greeting { other, how, path, set_off: now, since: None, until: 0.0, round: 0 });
+        commands.entity(e).insert(Greeting { other, how, path, set_off: now, since: None, until: 0.0, round: 0, stopping: false });
     }
 }
 
@@ -388,14 +478,13 @@ fn greet(
                 continue;
             }
             // There: the two face each other and play their sides.
-            let part = if g.how == Greet::Play { "start" } else { "" };
-            let Some((x, y)) = clips(&data, &kind, &code, g.how, part) else {
+            let Some((x, y)) = clips(&data, &kind, &code, g.how, g.how.first()) else {
                 end(&mut commands, e, Some(other), &mut pets, &mut rng);
                 continue;
             };
             let secs = lib.get(&data, x).map_or(4.0, |c| c.duration);
             let toward = there - here;
-            let until = now + if g.how == Greet::Play { PLAY_MINUTES } else { secs as f64 };
+            let until = now + if g.how.rounds().is_empty() { secs as f64 } else { PLAY_MINUTES };
             if let Ok((_, _, mut tf, mut anim, Some(mut gm), ..)) = pets.get_mut(e) {
                 if toward.length() > 0.05 {
                     tf.rotation = Quat::from_rotation_y(toward.x.atan2(toward.y));
@@ -407,35 +496,54 @@ fn greet(
             match g.other {
                 Other::Sim(s) => {
                     if let Ok((sim, _, mut q, ..)) = sims.get_mut(s) {
-                        q.0.push_front(Action::new("Greeted", ActionKind::Outro { clips: Box::leak(vec![y].into_boxed_slice()), then: None, secs, stand_at: None, target: e }, true));
-                        commands.entity(s).try_remove::<crate::anim::FaceOverlay>().try_insert((ActionClip::steps(y, &[], &[]), crate::reactions::Facing(Quat::from_rotation_y((-toward).x.atan2((-toward).y)))));
+                        // (Their side, where they have one: turned to it and playing it.)
+                        if let Some(y) = y {
+                            q.0.push_front(Action::new("Greeted", ActionKind::Outro { clips: Box::leak(vec![y].into_boxed_slice()), then: None, secs, stand_at: None, target: e }, true));
+                            commands.entity(s).try_remove::<crate::anim::FaceOverlay>().try_insert((ActionClip::steps(y, &[], &[]), crate::reactions::Facing(Quat::from_rotation_y((-toward).x.atan2((-toward).y)))));
+                        }
                         info!("pet {name} greets {} ({:?})", sim.first, g.how);
                     }
                 }
                 Other::Pet(p) => {
                     if let Ok((_, _, mut otf, mut oanim, ..)) = pets.get_mut(p) {
                         otf.rotation = Quat::from_rotation_y((-toward).x.atan2((-toward).y));
-                        oanim.replay(y.to_string());
+                        if let Some(y) = y {
+                            oanim.replay(y.to_string());
+                        }
                     }
                 }
             }
             continue;
         }
-        // At it: a game of play goes round in rounds (play, and swap who chases).
-        if g.how == Greet::Play && now < g.until {
+        // At it: one in parts goes round in rounds (play, and swap who chases; grooming; pounces).
+        let rounds = g.how.rounds();
+        if !rounds.is_empty() && !g.stopping {
+            let done = now >= g.until;
             let at = lib.get(&data, pets.get(e).map(|p| p.3.clip.clone()).unwrap_or_default().as_str()).map_or(3.0, |c| c.duration);
-            let played = pets.get(e).map_or(0.0, |p| p.3.time());
-            if played >= at {
-                const ROUNDS: [&str; 3] = ["loop1", "loop2", "swap"];
-                let part = ROUNDS[rng.random_range(0..ROUNDS.len())];
-                if let Some((x, y)) = clips(&data, &kind, &code, Greet::Play, part) {
-                    if let Ok((_, _, _, mut anim, Some(mut gm), ..)) = pets.get_mut(e) {
-                        anim.replay(x.to_string());
-                        gm.round += 1;
+            let played_out = pets.get(e).map_or(0.0, |p| p.3.time()) >= at;
+            if played_out || done {
+                // (Its end, once its time's up: then over.)
+                let part = if done { "stop" } else { rounds[rng.random_range(0..rounds.len())] };
+                match clips(&data, &kind, &code, g.how, part) {
+                    Some((x, y)) => {
+                        let secs = lib.get(&data, x).map_or(2.0, |c| c.duration) as f64;
+                        if let Ok((_, _, _, mut anim, Some(mut gm), ..)) = pets.get_mut(e) {
+                            anim.replay(x.to_string());
+                            gm.round += 1;
+                            if done {
+                                (gm.stopping, gm.until) = (true, now + secs);
+                            }
+                        }
+                        if let (Some(y), Ok((_, _, _, mut oanim, ..))) = (y, pets.get_mut(other)) {
+                            oanim.replay(y.to_string());
+                        }
                     }
-                    if let Ok((_, _, _, mut oanim, ..)) = pets.get_mut(other) {
-                        oanim.replay(y.to_string());
+                    None if done => {
+                        if let Ok((.., Some(mut gm), _, _)) = pets.get_mut(e) {
+                            gm.stopping = true;
+                        }
                     }
+                    None => {}
                 }
             }
             continue;
@@ -467,7 +575,7 @@ fn greet(
             Other::Pet(p) => {
                 if let Ok((.., Some(mut m), _)) = pets.get_mut(p) {
                     m.add(SOCIAL, their_social);
-                    if g.how == Greet::Play {
+                    if g.how.game() {
                         m.add(FUN, pet_fun);
                     }
                 }
@@ -502,17 +610,29 @@ mod tests {
 
     #[test]
     fn pets_greet_those_they_like_warmly_and_those_they_dont_meanly() {
-        assert_eq!(greeting_for_sim("ad", 50.0, 0.9), Greet::Lick);
+        assert_eq!(greeting_for_sim("ad", 50.0, 0.6), Greet::Lick);
         assert_eq!(greeting_for_sim("ac", 50.0, 0.9), Greet::MarkSim);
         assert_eq!(greeting_for_sim("ah", 50.0, 0.9), Greet::Nuzzle);
         assert_eq!(greeting_for_sim("ad", 0.0, 0.9), Greet::Sniff);
-        assert_eq!(greeting_for_sim("ad", -60.0, 0.1), Greet::PeeOn);
-        assert_eq!(greeting_for_sim("ac", -60.0, 0.1), Greet::AttackSim);
+        assert_eq!(greeting_for_sim("ad", -60.0, 0.4), Greet::PeeOn);
+        assert_eq!(greeting_for_sim("ad", -60.0, 0.1), Greet::GrowlAt);
+        assert_eq!(greeting_for_sim("ac", -60.0, 0.4), Greet::AttackSim);
+        assert_eq!(greeting_for_sim("ac", -60.0, 0.1), Greet::Hiss);
+        assert!(Greet::Hiss.mean() && Greet::GrowlAt.mean());
+        // (A fond dog barks for joy now and then.)
+        assert_eq!(greeting_for_sim("ad", 50.0, 0.95), Greet::BarkAt);
+        assert_eq!(greeting_for_sim("ac", 50.0, 0.95), Greet::MarkSim);
         assert_eq!(greeting_for_sim("cd", -60.0, 0.1), Greet::Sniff, "the young aren't mean");
         assert!(Greet::BiteAt.mean() && !Greet::Lick.mean());
         // (Cats and dogs short of fun play; horses don't.)
         assert_eq!(greeting_for_pet("ad", "ac", true, 0.9), Greet::Play);
         assert_eq!(greeting_for_pet("ah", "ad", true, 0.1), Greet::Nuzzle);
         assert_eq!(greeting_for_pet("ad", "ac", false, 0.9), Greet::Sniff);
+        // (Cats pounce, now and then; cats and horses groom their own kind.)
+        assert_eq!(greeting_for_pet("ac", "ac", true, 0.2), Greet::Pounce);
+        assert_eq!(greeting_for_pet("ac", "ac", false, 0.2), Greet::Groom);
+        assert_eq!(greeting_for_pet("ah", "ah", false, 0.2), Greet::Groom);
+        assert_eq!(greeting_for_pet("ad", "ad", false, 0.2), Greet::Nuzzle);
+        assert_eq!((Greet::Groom.first(), Greet::Sniff.first()), ("start", ""));
     }
 }

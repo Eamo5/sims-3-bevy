@@ -1015,7 +1015,11 @@ installation is unreachable.
   at. Pets nuzzle and sniff each other, and cats and dogs short of fun play together
   (`PlayPetToPet`: its start, then rounds of play and swapping who chases). A Sim busy at
   something is waited for; company and fun for the pet, company for the other, and the pet's
-  liking up a little, or down for a mean one. `PET_GREET=<pet>[:<whom>]` (tests).
+  liking up a little, or down for a mean one. A dog fond of a Sim barks for joy now and then
+  (`barkAt_positive`); one that dislikes them may growl instead, the Sim scolding it
+  (`growlAt_scold`), and a cat hiss (`HissAt_recoil`). Cats and horses groom their own kind
+  (`socialGroom`: its start, rounds and end, both sides), and bored cats pounce on each other in
+  play (`soc_pounce`). `PET_GREET=<pet>[:<whom>]`, `PET_GREET_HOW=<greeting>` (tests).
   Dogs learn tricks (the pack's `TrickSkill`): "Teach Trick..." on a household dog's menu (for
   teens and up) offers each trick its Tricks level allows (Sit, Sit Up, Speak, Shake, Roll Over,
   Play Dead, from the tuning's `kTrickSkillLevelRequired` 0 to 5), and teaching goes round the
