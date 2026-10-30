@@ -94,6 +94,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("treat", "accessoryDogTreat", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (A game of fetch's stick: thrown, and carried back in the dog's mouth.)
     ("stick", "accessoryPetFetchStick", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (Cleaning a horse's hooves.)
+    ("hoofPick", "accessoryHoofPick", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Tug of war's rope, a rig of its own: in the Sim's hand, and taken in the dog's mouth.)
     ("ropeFK", "accessoryToyRopeFK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("ropeIK", "accessoryToyRopeIK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),

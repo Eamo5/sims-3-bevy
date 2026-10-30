@@ -129,7 +129,7 @@ const GROWN: &[&str] = &["ac", "ad", "al", "ah"];
 
 /// A friendly social's liking, as a Sim's friendly talk until they're friends (the OK context's
 /// step), a hug or a smoochie more; a scolding costs some.
-pub static PET_SOCIALS: [PetSocial; 15] = [
+pub static PET_SOCIALS: [PetSocial; 18] = [
     PetSocial { name: "Pet", clip: "petFloor_friendly_neutral", kinds: ALL, minutes: 8.0, fun: 40.0, social: 70.0, min_liking: Some(10.0), liking: 2.5, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
     PetSocial { name: "Let Sniff Hand", clip: "letSniffHand_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: 10.0, social: 40.0, min_liking: Some(-80.0), liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
     PetSocial { name: "Praise", clip: "praise_friendly_neutral", kinds: GROWN, minutes: 4.0, fun: 15.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
@@ -148,6 +148,13 @@ pub static PET_SOCIALS: [PetSocial; 15] = [
     PetSocial { name: "Play Fetch", clip: "playFetch", kinds: &["ad", "al"], minutes: 20.0, fun: 100.0, social: 50.0, min_liking: Some(-20.0), liking: 3.0, loops: FETCH, hygiene: 0.0, apart: 0.2, ordered: true },
     // (Tug of war with a dog, the pack's rope between them: fun for both, and tiring for the dog.)
     PetSocial { name: "Tug of War", clip: "soc_tugOfWar", kinds: &["ad", "al", "cd"], minutes: 15.0, fun: 160.0, social: 40.0, min_liking: Some(-10.0), liking: 2.5, loops: &["loop1", "loop2", "loop3"], hygiene: 0.0, apart: 0.35, ordered: false },
+    // (Talking to a pet, its size's way: the game's `TalkToPet`, the Sim's `talkToPets` reaction
+    // low for a cat or little dog, medium for a dog, high for a horse; the pet sitting to listen.)
+    PetSocial { name: "Talk To Pet", clip: "talkToPets", kinds: ALL, minutes: 6.0, fun: 10.0, social: 50.0, min_liking: None, liking: 1.67, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
+    // (Whispering to a horse, the pack's start, loop and end.)
+    PetSocial { name: "Whisper To", clip: "whisperTo", kinds: &["ah", "ch"], minutes: 10.0, fun: 20.0, social: 60.0, min_liking: Some(-20.0), liking: 3.0, loops: &["loop"], hygiene: 0.0, apart: 0.0, ordered: false },
+    // (A horse's hooves cleaned, the pack's hoof pick in hand: cleaner for it.)
+    PetSocial { name: "Clean Hooves", clip: "cleanHooves_accept", kinds: &["ah"], minutes: 8.0, fun: 10.0, social: 30.0, min_liking: Some(-40.0), liking: 2.0, loops: &[], hygiene: 300.0, apart: 0.0, ordered: false },
     PetSocial { name: "Scold", clip: "scold_neutral_neutral", kinds: GROWN, minutes: 4.0, fun: -10.0, social: 10.0, min_liking: None, liking: -3.0, loops: &[], hygiene: 0.0, apart: 0.0, ordered: false },
 ];
 
@@ -203,6 +210,22 @@ impl PetSocial {
         if !self.loops.is_empty() {
             return self.part(data, child, kind, self.loops[0], side);
         }
+        // (Talked to: the Sim's reaction for its size; the pet sits to listen, a horse stands.)
+        if self.clip == "talkToPets" {
+            let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
+            let name = match side {
+                'x' => {
+                    let size = match kind {
+                        "ah" | "ch" => "high",
+                        "ad" | "cd" => "medium",
+                        _ => "low",
+                    };
+                    [if child { Some('c') } else { None }, Some('a')].into_iter().flatten().map(|w| format!("{w}_talkToPets_{size}_x")).find(|n| has(n))?
+                }
+                _ => [format!("{kind}_idle_sit_breathe_x"), format!("{kind}_idle_stand_breathe_x")].into_iter().find(|n| has(n) && !(kind.ends_with('h') && n.contains("_sit_")))?,
+            };
+            return Some(intern(name));
+        }
         social_clip(data, child, kind, self.clip, side)
     }
 
@@ -244,9 +267,10 @@ impl PetSocial {
 /// A pet social's animation by its suite and outcome (`petFloor_friendly_neutral`, the pack's
 /// rejection), for a Sim's side or the pet's.
 pub fn social_clip(data: &Baked, child: bool, kind: &str, clip: &str, side: char) -> Option<&'static str> {
-    let want = |who: char| format!("{who}2{kind}_soc_neutral_{clip}_{side}");
+    // (Most are the pack's socials; a few are named for themselves: `a2ah_cleanHooves_accept`.)
+    let want = |who: char| [format!("{who}2{kind}_soc_neutral_{clip}_{side}"), format!("{who}2{kind}_{clip}_{side}")];
     let has = |n: &str| data.0.clip_names.iter().any(|c| c.eq_ignore_ascii_case(n));
-    let name = [if child { Some(want('c')) } else { None }, Some(want('a'))].into_iter().flatten().find(|n| has(n))?;
+    let name = [if child { Some('c') } else { None }, Some('a')].into_iter().flatten().flat_map(want).find(|n| has(n))?;
     Some(intern(name))
 }
 
@@ -1321,6 +1345,17 @@ mod tests {
         let fetch = PET_SOCIALS.iter().find(|s| s.name == "Play Fetch").unwrap();
         assert!(fetch.suits("ad") && fetch.suits("al") && !fetch.suits("ac") && !fetch.suits("ah"));
         assert!(fetch.ordered && fetch.loops.contains(&"throwShort") && fetch.loops.contains(&"fakeOut"));
+    }
+
+    #[test]
+    fn horses_are_whispered_to_and_their_hooves_cleaned() {
+        let by = |n: &str| PET_SOCIALS.iter().find(|s| s.name == n).unwrap();
+        assert!(by("Whisper To").suits("ah") && by("Whisper To").suits("ch") && !by("Whisper To").suits("ad"));
+        // (Only a grown horse's hooves; cleaner for it, the pack's hoof pick in hand.)
+        assert!(by("Clean Hooves").suits("ah") && !by("Clean Hooves").suits("ch") && by("Clean Hooves").hygiene > 0.0);
+        assert!(crate::props::prop_actor("hoofPick"));
+        // (Any pet's talked to.)
+        assert!(ALL.iter().all(|k| by("Talk To Pet").suits(k)));
     }
 
     #[test]

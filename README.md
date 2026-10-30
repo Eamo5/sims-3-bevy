@@ -1002,7 +1002,11 @@ installation is unreachable.
   the Sim's hand, drawn out to reach it as the game's IK does, as the two pull back and forth; the
   clips' visibility events swap the dangling rope for the held one and back. Fun for both, and
   tiring for the dog (`kTugOfWarEnergyCommodityUpdate`). `PET_YAW`, `PET_PITCH` with `PET_CAM`
-  (tests).
+  (tests). Talk To Pet (any pet, the game's `TalkToPet`): the Sim's `talkToPets` reaction for the
+  pet's size, low for a cat or little dog, medium for a dog, high for a horse, the pet sitting (a
+  horse standing) to listen. Whisper To (horses and foals): the pack's start, loop and end, both
+  sides. Clean Hooves (grown horses): the pack's clip with its hoof pick in hand, the horse lifting
+  each hoof in turn, cleaner for it.
   Pets seek company of their own accord, as the pack's autonomous socials have them: one short of
   company or fun goes to one of the family standing free, or another of the household's pets, and
   greets them the pack's way, each playing its side of the pack's clip turned to the other: a dog
