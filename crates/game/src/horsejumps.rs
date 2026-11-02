@@ -296,9 +296,9 @@ pub fn roll(t: &HorseJumpTuning, level: u32, rider_level: Option<u32>, mood: f32
 }
 
 /// What a jump's worth: the horse's Jumping points (more the better its rider rides, the game's
-/// `JumpingSkillMultiplier`, 1 untrained to 1.8 at Riding 10) and the rider's Riding points.
+/// `JumpingSkillMultiplier`, 1 untrained to 1.75 at Riding 10) and the rider's Riding points.
 pub fn gains(t: &HorseJumpTuning, outcome: Outcome, rider_level: Option<u32>) -> (f32, f32) {
-    let mult = rider_level.map_or(1.0, |l| 1.0 + 0.8 * l.min(10) as f32 / 10.0);
+    let mult = rider_level.map_or(1.0, |l| 1.0 + 0.75 * l.min(10) as f32 / 10.0);
     let rider = |g: f32| if rider_level.is_some() { g } else { 0.0 };
     match outcome {
         Outcome::Clean => (t.high_gain * mult, rider(t.rider_high_gain)),
@@ -881,7 +881,7 @@ mod tests {
         let t = gate();
         assert_eq!(gains(&t, Outcome::Clean, None), (75.0, 0.0));
         let (h, r) = gains(&t, Outcome::Scrape, Some(10));
-        assert!((h - 135.0).abs() < 1e-3 && r == 20.0, "a Riding 10 rider: 1.8 times");
+        assert!((h - 131.25).abs() < 1e-3 && r == 20.0, "a Riding 10 rider: 1.75 times");
         assert_eq!(gains(&t, Outcome::Refuse, Some(5)), (0.0, 0.0));
         let mut s = HorseSkills::default();
         s.tire(1.0);

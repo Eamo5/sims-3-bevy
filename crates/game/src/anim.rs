@@ -218,6 +218,12 @@ pub fn rider_clip(name: &str) -> Option<Option<&'static str>> {
         "a_rideHorse_run_y" => return Some(Some("ah_run_x")),
         "a_run_speed2_rider_y" => return Some(Some("ah_run_speed2_x")),
         "a_run_speed3_rider_y" => return Some(Some("ah_run_speed3_x")),
+        // (Sat unsteadily, below Riding 5.)
+        "a_rideHorse_walk_unsteady_y" => return Some(Some("ah_walk_x")),
+        "a_rideHorse_canter_unsteady_y" => return Some(Some("ah_canter_x")),
+        "a_rideHorse_run_unsteady_y" => return Some(Some("ah_run_x")),
+        "a_run_speed2_unsteady_rider_y" => return Some(Some("ah_run_speed2_x")),
+        "a_run_speed3_unsteady_rider_y" => return Some(Some("ah_run_speed3_x")),
         // (Over a jump: the horse's jump carries it, `horsejumps`.)
         "a2o_jump_highSuccess_rider_y" => return Some(Some("ah2o_jump_highSuccess_x")),
         "a2o_jump_lowSuccess_rider_y" => return Some(Some("ah2o_jump_lowSuccess_x")),

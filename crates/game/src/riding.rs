@@ -43,8 +43,11 @@ impl Plugin for RidingPlugin {
 /// (`kBenefitTimeBetweenUpdates`) liking (`kBenefitLTRDelta`), the horse's exercise and company and
 /// the rider's fun and company (`kBenefit…CommoditiesToUpdateDeltas`) and Riding
 /// (`kBenefitSimSkillsToUpdateDeltas`), as `BeingRiddenPosture`'s tuning has them.
-pub const MIN_LIKING_OFFERED: f32 = 5.0;
-pub const MIN_LIKING_ACCEPTED: f32 = 10.0;
+pub const MIN_LIKING_OFFERED: f32 = -100.0;
+pub const MIN_LIKING_ACCEPTED: f32 = -10.0;
+/// Below this Riding a rider sits a horse's gaits unsteadily (`kLevelForStableRider`, the pack's
+/// `_unsteady` rider clips).
+pub const STABLE_LEVEL: u32 = 5;
 const CANTER_LEVEL: u32 = 1;
 const GALLOP_LEVEL: u32 = 2;
 const POINTS_A_MINUTE: f32 = 1.0;
@@ -119,6 +122,21 @@ pub fn gallop(racing: u32) -> (&'static str, &'static [&'static str]) {
     }
 }
 
+/// A gait's rider's half for a rider of a Riding level: unsteady below `STABLE_LEVEL`.
+pub fn seat(rider: &'static [&'static str], level: u32) -> &'static [&'static str] {
+    if level >= STABLE_LEVEL {
+        return rider;
+    }
+    match rider.first().copied() {
+        Some("a_rideHorse_walk_y") => &["a_rideHorse_walk_unsteady_y"],
+        Some("a_rideHorse_canter_y") => &["a_rideHorse_canter_unsteady_y"],
+        Some("a_rideHorse_run_y") => &["a_rideHorse_run_unsteady_y"],
+        Some("a_run_speed2_rider_y") => &["a_run_speed2_unsteady_rider_y"],
+        Some("a_run_speed3_rider_y") => &["a_run_speed3_unsteady_rider_y"],
+        _ => rider,
+    }
+}
+
 /// The horse's idles with a rider up, each with the rider's half (`GetRiderAnimationName`), the
 /// mounted ones too.
 const IDLES: [(&str, &[&str]); 18] = [
@@ -142,11 +160,12 @@ const IDLES: [(&str, &[&str]); 18] = [
     ("ah_idleMount_stretchShoulders_x", &["a_idleMount_stretchShoulders_rider_y"]),
 ];
 
-/// How a Sim of a Riding level gets on or off: near failing (eight times in ten untrained, never
-/// at 10), with a swing (never untrained, always at 10), else amateurishly.
+/// How a Sim of a Riding level gets on or off: near failing (three times in ten untrained, never
+/// at 10: `kNearFailMountChance`), with a swing (never untrained, always at 10:
+/// `kSkilledMountChance`), else amateurishly.
 pub fn way_on(level: u32, roll: f32) -> usize {
     let k = (level.min(10) as f32) / 10.0;
-    let near = 0.8 * (1.0 - k);
+    let near = 0.3 * (1.0 - k);
     if roll < near {
         1
     } else if roll < near + k {
@@ -455,6 +474,7 @@ pub(crate) fn ride(
                 if let Some(&next) = m.path.first() {
                     let gait = if m.jump.is_some() && m.path.len() == 1 { 2 } else { m.gait };
                     let (clip, rider) = if gait == 2 { gallop(hskills.as_ref().map_or(0, |s| s.racing_level())) } else { GAITS[gait] };
+                    let rider = seat(rider, level);
                     if hanim.clip != clip {
                         play(&mut hanim, &mut m, (clip, rider));
                     }
@@ -647,8 +667,9 @@ mod tests {
 
     #[test]
     fn skill_brings_better_mounts_and_faster_gaits() {
-        // (Untrained: near failing four times in five.)
-        assert_eq!(way_on(0, 0.5), 1);
+        // (Untrained: near failing three times in ten.)
+        assert_eq!(way_on(0, 0.25), 1);
+        assert_eq!(way_on(0, 0.5), 0);
         assert_eq!(way_on(0, 0.9), 0);
         // (Master riders always with a swing.)
         assert_eq!(way_on(10, 0.0), 2);

@@ -1001,16 +1001,17 @@ installation is unreachable.
   as often, a Proud cat grooms itself from half clean; Lazy dogs, Playful cats, Aggressive and
   Piggy pets eat from the bowl in the pack's own ways (`GetEatingStylesForSim`), and Aggressive
   and Skittish pets turn Sims down with the pack's aggressive and cowering rejections.
-  Horses are ridden (the horse's menu's "Ride", for teens and up it likes well enough: the
-  pack's `kMinLtrForMountAvailability`, and it lets them up from `kMinLtrForMountAccept`): the Sim
+  Horses are ridden (the horse's menu's "Ride", for teens and up it doesn't dislike too much: the
+  pack's tuned `kMinLtrForMountAvailability`, and it lets them up from `kMinLtrForMountAccept`, -10): the Sim
   goes round to its left side, where the game's mounting jig stands them, saddles it first if
   it isn't (the pack's swipe, its English saddle and bridle put on in their own colours, skinned
   to it and left on after: "Unsaddle" on its menu takes them off; kept in saves), and climbs up with the
-  pack's clips, the horse's half and the rider's together (near failing at it at first, with a
-  swing once skilled: `kNearFailMountChance`, `kSkilledMountChance`). Up there the rider sits
+  pack's clips, the horse's half and the rider's together (near failing at it three times in ten at
+  first, with a swing once skilled: `kNearFailMountChance`, `kSkilledMountChance`). Up there the rider sits
   the horse's every move in the pack's rider clips, in step with its own: its idles (each horse
   idle's rider's half, as `GetRiderAnimationName`; the mounted idles, a pat on the neck, the
-  bridle adjusted), and "Ride Here" on the ground takes them there at a walk, or a way off at a
+  bridle adjusted; at its gaits unsteadily below Riding 5, `kLevelForStableRider`, the pack's
+  `_unsteady` halves), and "Ride Here" on the ground takes them there at a walk, or a way off at a
   canter (Riding 1) and a gallop (Riding 2), the horse going at its clips' own pace, a horse good
   at Racing at a faster gallop (from 4, `kLevelForGallopFasterSpeed`, the pack's `ah_run_speed2`
   and its rider's half in step with it) and the fastest at 10. Riding teaches Riding (a point a
@@ -1020,7 +1021,7 @@ installation is unreachable.
   `BeingRiddenPosture`'s tuning has it, the two grow fonder, the horse's exercise and company and
   the rider's fun and company are seen to, and the rider learns Riding; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
-  `RIDE_SKILL=<level>` (tests).
+  `RIDE_SKILL=<level>`, `HORSE_RACING=<level>` (tests).
   Horses go over the pack's jumps (the gate, wall and scary wall, the oxer and triple bars, the
   water jumps, the fire jumps, the cavaletti trainer), each with its own tuning from the game's
   data (`kJumpTuning`; an oxer's and triple bars' as they stand high). A rider up on a horse picks
@@ -1037,7 +1038,7 @@ installation is unreachable.
   (`o_jump_down_pose`), till a Sim sets them back up ("Pick Up", "Replace All Rails": the swipe of
   a hand), and a knocked-down jump is ridden straight through (`RideThrough`); a water jump scraped
   over soaks its rider. Going over gives the horse Jumping (`HighSuccessGain`, `LowSuccessGain`,
-  more the better its rider rides: `JumpingSkillMultiplier`, up to 1.8) and the rider Riding
+  more the better its rider rides: `JumpingSkillMultiplier`, up to 1.75) and the rider Riding
   (`RiderHighSuccessGain`); each jump tires a horse for learning (`PetSkillFatigue`, by its
   level's `FatigueModifiers`; never after a hundred and fifty jumps, Tireless Leaper) till it needs a break,
   fresh again over four hours; its Jumping is on its tooltip and kept in saves. The household's

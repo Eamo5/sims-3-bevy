@@ -209,6 +209,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_rideHorse_run_y",
     "a_run_speed2_rider_y",
     "a_run_speed3_rider_y",
+    "a_rideHorse_walk_unsteady_y",
+    "a_rideHorse_canter_unsteady_y",
+    "a_rideHorse_run_unsteady_y",
+    "a_run_speed2_unsteady_rider_y",
+    "a_run_speed3_unsteady_rider_y",
     "a_saddle_swipe",
     // (Teaching a dog its tricks, and asking it for them.)
     "a2ad_soc_dogTricks_",
