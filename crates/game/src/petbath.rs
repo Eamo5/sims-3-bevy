@@ -339,7 +339,9 @@ fn bathe(
             // (Lifted in from the Sim's arms, or hopping in from beside them; in the tub's frame.)
             let from = if carried(&kind) { s.places.sim } else { s.places.pet };
             let y = crate::nav::floor_height(&world.data, building.as_deref(), s.level, Vec3::new(from.x, ptf.translation.y, from.y));
-            s.base = (Vec3::new(from.x, y, from.y), s.places.pet_turn);
+            // (The clips' anchor: the Sim's slot, facing the tub, its arms the cat's; or the dog's
+            // own slot beside them.)
+            s.base = (Vec3::new(from.x, y, from.y), Quat::from_rotation_y(s.places.face.x.atan2(s.places.face.y)));
             let traits = traits.map_or(&[][..], |t| &t.0[..]);
             s.bad = bad_bath(&kind, traits, rng.random());
             let fail = kind == "ac" && rng.random_bool(CAT_FAIL_CHANCE);
@@ -387,8 +389,6 @@ fn bathe(
                 s.round += 1;
             }
             s.part = next;
-            // (The pet's own place now: where the last part left it.)
-            s.base = (ptf.translation, ptf.rotation);
         }
         let (x, y) = (clip_name(&kind, s.part, s.round, s.bad, s.places.mirror, 'x'), clip_name(&kind, s.part, s.round, s.bad, s.places.mirror, 'y'));
         if !has(&x) {

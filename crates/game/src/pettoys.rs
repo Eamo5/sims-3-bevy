@@ -5,7 +5,8 @@
 //! `kChanceToFail`) and chews a cat's toy when it's no chew toy (`CatToy.Chew`); a horse plays with
 //! its ball (`HorseBall`: nudged, bitten and thrown, sat on). Each is the pack's clip for the pet,
 //! the toy playing its half; a ball pushed rolls off as its half has it, where there's room, and
-//! stays where it stops.
+//! stays where it stops. A grungy cat or dog walks into the pet hygienator, is washed and dried
+//! and walks out clean (`PetHygienator.Wash`: Hygiene 200 at once).
 
 use bevy::prelude::*;
 
@@ -20,6 +21,8 @@ pub enum Toy {
     ChewCatToy,
     DogBall,
     HorseBall,
+    /// Washed in the pet hygienator.
+    Hygienator,
 }
 
 /// What a pet of a kind plays at with a toy of a kind (none: it doesn't).
@@ -29,6 +32,7 @@ pub fn toy_for(kind: &str, obj: ObjectKind) -> Option<Toy> {
         ("ac" | "cc", ObjectKind::KittyBag) => Some(Toy::KittyBag),
         ("ad" | "al", ObjectKind::DogBall) => Some(Toy::DogBall),
         ("ah", ObjectKind::HorseBall) => Some(Toy::HorseBall),
+        ("ac" | "ad" | "al", ObjectKind::PetHygienator) => Some(Toy::Hygienator),
         _ => None,
     }
 }
@@ -73,6 +77,7 @@ impl Toy {
                 ["push_nudge", "push_biteAndThrow", "push_sitOnBall"].iter().map(|l| format!("ah2o_horseBall_{l}_x")).collect(),
                 s("ah2o_horseBall_play2Neutral_x"),
             ),
+            Toy::Hygienator => (s(&format!("{k}2o_hygienator_getIn_x")), vec![format!("{k}2o_hygienator_use_x")], s(&format!("{k}2o_hygienator_getOut_x"))),
         }
     }
 
@@ -89,7 +94,11 @@ impl Toy {
     /// The need it's for: a dog's chewing its urge to, a horse's ball its exercise
     /// (`HorseExercise`), the rest fun.
     pub fn need(self) -> usize {
-        if matches!(self, Toy::ChewCatToy | Toy::HorseBall) { crate::petneeds::URGE } else { crate::petneeds::FUN }
+        match self {
+            Toy::ChewCatToy | Toy::HorseBall => crate::petneeds::URGE,
+            Toy::Hygienator => crate::petneeds::HYGIENE,
+            _ => crate::petneeds::FUN,
+        }
     }
 
     /// How fast it fills its need, and fun besides (a game hour: the interactions' tuning, `Fun`
@@ -101,6 +110,8 @@ impl Toy {
             Toy::ChewCatToy => (100.0, 15.0),
             Toy::DogBall => (100.0, 0.0),
             Toy::HorseBall => (100.0, 0.0),
+            // (Its 200 over the wash, a fifth of an hour.)
+            Toy::Hygienator => (1000.0, 0.0),
         }
     }
 
@@ -116,6 +127,7 @@ impl Toy {
             (Toy::DogBall, "al") => 0.315,
             (Toy::DogBall, _) => 0.671,
             (Toy::HorseBall, _) => 1.192,
+            (Toy::Hygienator, _) => 1.3,
         }
     }
 
@@ -129,8 +141,25 @@ impl Toy {
     }
 }
 
+/// The pose a toy's held in while it's not in use (the pet hygienator's arms folded away:
+/// `o_petHygienator_pose`).
+pub fn idle_pose(toy: Toy) -> Option<&'static str> {
+    (toy == Toy::Hygienator).then_some("o_petHygienator_pose_petHygienator")
+}
+
+/// Toys new in the world take their idle pose.
+pub fn pose_new_toys(mut commands: Commands, added: Query<(Entity, &crate::interact::GameObject), Added<crate::interact::GameObject>>) {
+    for (e, o) in &added {
+        if o.kind == ObjectKind::PetHygienator
+            && let Some(p) = idle_pose(Toy::Hygienator)
+        {
+            commands.entity(e).insert(crate::objanim::HeldPose(p));
+        }
+    }
+}
+
 /// The actors a toy's half of a pet's clip is named for.
-const TOY_ACTORS: [&str; 4] = ["catToy", "kittyBag", "dogBall", "horseBall"];
+const TOY_ACTORS: [&str; 5] = ["catToy", "kittyBag", "dogBall", "horseBall", "petHygienator"];
 
 /// The toy's half of a pet's clip (`ad2o_dogBall_pushBall_x` → `ad2o_dogBall_pushBall_dogBall`).
 pub fn half_of(names: &[String], clip: &str) -> Option<String> {
@@ -162,6 +191,11 @@ pub fn stand_at(toy: Toy, kind: &str, at: Vec2, facing: Quat, from: Vec2, side: 
         Toy::KittyBag => {
             let f = (facing * Vec3::Z).xz().normalize_or(Vec2::Y);
             (at - f * toy.stand_off(kind), f)
+        }
+        // (Before its door, its routing slot in front of it, facing in.)
+        Toy::Hygienator => {
+            let f = (facing * Vec3::Z).xz().normalize_or(Vec2::Y);
+            (at + f * toy.stand_off(kind), -f)
         }
         _ => {
             let f = side.unwrap_or_else(|| (from - at).normalize_or(Vec2::Y));

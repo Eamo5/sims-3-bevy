@@ -468,20 +468,23 @@ pub fn clip_pace(clip: &s3formats::sim::Clip) -> f32 {
     }
 }
 
-/// How far a clip has taken its animal by `t` (its `world_offset` from its first key: along the
-/// ground in the animal's own frame, and turned), as the game moves an animal by its clips (a cat
-/// into its kitty bag and round to face out).
+/// Where a clip has an animal by `t`, from where its set of clips began (the anchor its jig or
+/// slot puts it at): the `world_offset` helper is the anchor seen from the animal, so the animal
+/// is at the anchor and that undone (along the ground in the anchor's frame, and turned), as the
+/// game moves an animal by its clips (a cat into its kitty bag and round to face out, a dog in
+/// and back out of the pet hygienator). None for a clip that doesn't move it (its helper not
+/// animated): it stays where it is.
 pub fn root_motion(clip: &s3formats::sim::Clip, t: f32) -> Option<(Vec3, Quat)> {
     let w = clip.tracks.get(&WORLD_OFFSET)?;
-    let p0 = w.translation.first().map_or(Vec3::ZERO, |k| Vec3::from(k.1));
-    let r0 = w.rotation.first().map_or(Quat::IDENTITY, |k| Quat::from_array(k.1).normalize());
-    let p = crate::anim::sample_track_vec(&w.translation, t).unwrap_or(p0);
-    let r = crate::anim::sample_track_quat(&w.rotation, t).unwrap_or(r0);
-    let inv = r0.inverse();
-    let mut d = inv * (p - p0);
+    if w.translation.is_empty() {
+        return None;
+    }
+    let p = crate::anim::sample_track_vec(&w.translation, t).unwrap_or(Vec3::ZERO);
+    let r = crate::anim::sample_track_quat(&w.rotation, t).unwrap_or(Quat::IDENTITY);
+    let turn = r.inverse();
+    let mut d = -(turn * p);
     d.y = 0.0;
-    let turn = inv * r;
-    (d.length() > 1e-3 || turn.angle_between(Quat::IDENTITY) > 1e-3).then_some((d, turn))
+    Some((d, turn))
 }
 
 /// The body's shaders: fur (and the horse's coat), the nose and pads, the eyes.

@@ -284,6 +284,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ad2o_dogBall_",
     "al2o_dogBall_",
     "ah2o_horseBall_",
+    // (The pet hygienator, and its own idle pose.)
+    "ac2o_hygienator_",
+    "ad2o_hygienator_",
+    "al2o_hygienator_",
+    "o_petHygienator_",
     // (A pet bathed in a tub: the Sim's, the pet's, the tub's and the hair dryer's.)
     "a2ac_tub_bathe_",
     "a2ad_tub_bathe_",

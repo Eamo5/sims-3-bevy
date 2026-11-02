@@ -957,8 +957,13 @@ installation is unreachable.
   running after it to push it again from the side it can roll on from (never through a wall or off
   the lot), missing it now and then (`kChanceToFail`, one in ten); a restless horse nudges, bites
   and throws or sits on its Happy Horse Ball (`HorseBall`: HorseExercise 100), the ball rolling off
-  nine metres; a dog with no chew toy chews a cat's toy (`CatToy.Chew`). `PET_TOY=<catalogue
-  name>`, `PET_WHO=<pet>`, `PET_NEEDS=bored|restless|dirty` (tests). A teen or older bathes the
+  nine metres; a dog with no chew toy chews a cat's toy (`CatToy.Chew`). A grungy cat or dog walks
+  into the pet hygienator (`PetHygienator.Wash`: Hygiene 200 at once), turns round in it as its arms
+  wash and dry it, and walks back out clean, the machine folding its arms away after
+  (`o_petHygienator_pose`). Pets are moved by their clips as the game moves them: each set of clips
+  from the anchor it began at (its jig or slot), the clip's `world_offset` helper the anchor seen
+  from the animal, undone. `PET_TOY=<catalogue
+  name>`, `PET_TOY_AT=<x>,<z>`, `PET_WHO=<pet>`, `PET_NEEDS=bored|restless|dirty` (tests). A teen or older bathes the
   household's grown cats and dogs in the house's tub (the pet's menu's Bathe, the game's `BathePet`):
   kneeling at the side of the tub that can be reached (its `BathePetHumanSlots` for a dog, the dog
   coming up to its `BathePetDogSlots` beside them and hopping in; a cat or little dog lifted in;

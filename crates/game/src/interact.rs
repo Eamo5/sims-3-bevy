@@ -265,6 +265,8 @@ pub enum ObjectKind {
     KittyBag,
     DogBall,
     HorseBall,
+    /// The pet hygienator: a grungy cat or dog washed in it.
+    PetHygienator,
     /// A minor pet's terrarium (`terrarium`).
     Terrarium,
     /// A bird cage (the Pets pack's: a terrarium for a bird, `terrarium`).
@@ -301,6 +303,8 @@ impl ObjectKind {
             Self::DogBall
         } else if has("objects.pets.horseball") {
             Self::HorseBall
+        } else if has("objects.pets.pethygienator") {
+            Self::PetHygienator
         } else if has("objects.pets.watertrough") {
             Self::WaterTrough
         } else if has("objects.minorpets.terrarium") {
@@ -597,7 +601,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall => "Misc",
+            Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator => "Misc",
             Self::Other => "Misc",
         }
     }

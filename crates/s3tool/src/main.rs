@@ -1594,6 +1594,13 @@ fn main() {
                     t.rotation.first().map(|x| x.1),
                     t.rotation.last().map(|x| x.1)
                 );
+                // (KEYS=1: every key, a few to a line.)
+                if std::env::var("KEYS").is_ok() {
+                    for (k, p) in &t.translation {
+                        let r = t.rotation.iter().min_by(|a, b| (a.0 - k).abs().total_cmp(&(b.0 - k).abs())).map(|r| r.1);
+                        println!("      {k:.2}: {:.3},{:.3},{:.3} rot {:?}", p[0], p[1], p[2], r.map(|r| r.map(|v| (v * 1000.0).round() / 1000.0)));
+                    }
+                }
             }
         }
         return;

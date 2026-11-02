@@ -33,7 +33,8 @@ pub struct PetNeedsPlugin;
 
 impl Plugin for PetNeedsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (bowls, fall, attention, choose, act, filled, chores, thoughts, needs_test).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (bowls, fall, attention, choose, act, filled, chores, thoughts, needs_test).chain().run_if(in_state(PlayMode::Live)))
+            .add_systems(Update, crate::pettoys::pose_new_toys.run_if(in_state(crate::AppState::InGame)));
     }
 }
 
@@ -438,6 +439,10 @@ fn choose(
                 (FUN | URGE, _) => nearest(&|o, _, _| crate::pettoys::toy_for(&pet.kind, o.kind).is_some_and(|t| t.need() == i))
                     .and_then(|(s, at)| Some((PetDo::Play(s, crate::pettoys::toy_for(&pet.kind, objects.get(s).ok()?.1.kind)?), Some(at)))),
                 (THIRST, 'h') => nearest(&|o, _, _| o.kind == ObjectKind::WaterTrough).map(|(s, at)| (PetDo::Drink(s), Some(at))),
+                // (Grungy: the pet hygienator, where there's one; a cat grooms itself else.)
+                (HYGIENE, _) if nearest(&|o, _, _| o.kind == ObjectKind::PetHygienator).is_some() && crate::pettoys::toy_for(&pet.kind, ObjectKind::PetHygienator).is_some() => {
+                    nearest(&|o, _, _| o.kind == ObjectKind::PetHygienator).map(|(s, at)| (PetDo::Play(s, crate::pettoys::Toy::Hygienator), Some(at)))
+                }
                 (HYGIENE, 'c') => Some((PetDo::Groom, None)),
                 _ => None,
             };
@@ -731,6 +736,7 @@ fn act(
                     let face = match (toy, st.side) {
                         (_, Some(s)) => -s,
                         (Toy::KittyBag, _) => (toy_tf.rotation * Vec3::Z).xz(),
+                        (Toy::Hygienator, _) => -(toy_tf.rotation * Vec3::Z).xz(),
                         _ => toy_tf.translation.xz() - here,
                     };
                     if face.length() > 1e-3 {
@@ -748,6 +754,8 @@ fn act(
                     }
                     next = start.clone().filter(|s| !st.started && has(s)).or_else(|| round(&mut rng));
                     st.started = true;
+                    // (Out of its idle pose while it's at work.)
+                    commands.entity(toy_e).remove::<crate::objanim::HeldPose>();
                     if next.is_none() {
                         over = true;
                     }
@@ -788,6 +796,7 @@ fn act(
                                     task.path = path;
                                     st.clip.clear();
                                     st.side = side;
+                                    st.base = None;
                                     task.play = Some(st);
                                     continue;
                                 }
@@ -805,7 +814,8 @@ fn act(
                 if let Some(n) = next {
                     debug!("pet {} at its {toy:?}: {n}", pet.name);
                     anim.replay(n.clone());
-                    st.base = Some((tf.translation, tf.rotation));
+                    // (Its clips' moves from where the set began.)
+                    st.base.get_or_insert((tf.translation, tf.rotation));
                     st.half = crate::pettoys::half_of(names, &n);
                     st.ending = end.as_deref() == Some(n.as_str());
                     st.clip = n;
@@ -834,8 +844,10 @@ fn act(
                 m.add(need, rate * hours);
                 m.add(FUN, fun * hours);
                 if over {
-                    // (The toy at rest again.)
-                    if let Ok(rig) = rigs.get(toy_e) {
+                    // (The toy at rest again: the hygienator in its own pose.)
+                    if let Some(pose) = crate::pettoys::idle_pose(toy) {
+                        commands.entity(toy_e).insert(crate::objanim::HeldPose(pose));
+                    } else if let Ok(rig) = rigs.get(toy_e) {
                         for (b, rest) in rig.rest_pose() {
                             if let Ok(mut btf) = bones.get_mut(b) {
                                 *btf = rest;
@@ -972,7 +984,11 @@ fn needs_test(
                 continue;
             };
             let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-            let p = at + if stall { Vec3::new(5.0, 0.0, 4.0) } else if toy.is_some() { Vec3::new(2.0, 0.0, 1.5) } else { Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0) };
+            let mut p = at + if stall { Vec3::new(5.0, 0.0, 4.0) } else if toy.is_some() { Vec3::new(2.0, 0.0, 1.5) } else { Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0) };
+            // (PET_TOY_AT=<x>,<z>: there instead.)
+            if let Some(v) = std::env::var("PET_TOY_AT").ok().map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 2) {
+                p = Vec3::new(v[0], at.y, v[1]);
+            }
             if let Some(s) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, p, 0.0) {
                 if i == 0 && !stall && toy.is_none() {
                     commands.entity(s.entity).insert(BowlFood(FULL_BOWL));
