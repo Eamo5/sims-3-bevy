@@ -7947,6 +7947,7 @@ mod tests {
         assert_eq!(slide_clip(false, 0.99).start, Some("a2o_waterSlide_succeedSlide3_x"));
         assert!(interactions_for(ObjectKind::SlippySlide).iter().any(|d| d.name == "Slide"));
         assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Environment.SlippySlideGeneric", "SlippySlideFrog"), ObjectKind::SlippySlide);
+        assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Toys.Mimics.ToyboxContemporary", "Roy Rock’s Toy Box"), ObjectKind::ToyBox);
     }
 
     #[test]

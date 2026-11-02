@@ -1011,9 +1011,14 @@ installation is unreachable.
   the horse's every move in the pack's rider clips, in step with its own: its idles (each horse
   idle's rider's half, as `GetRiderAnimationName`; the mounted idles, a pat on the neck, the
   bridle adjusted), and "Ride Here" on the ground takes them there at a walk, or a way off at a
-  canter (Riding 1) and a gallop (Riding 2), the horse going at its clips' own pace. Riding
-  teaches Riding (a point a minute, ten more at speed), the two grow fonder and the horse's fun
-  and company are seen to every five minutes; "Dismount" (or the ride cancelled, or anything
+  canter (Riding 1) and a gallop (Riding 2), the horse going at its clips' own pace, a horse good
+  at Racing at a faster gallop (from 4, `kLevelForGallopFasterSpeed`, the pack's `ah_run_speed2`
+  and its rider's half in step with it) and the fastest at 10. Riding teaches Riding (a point a
+  minute, twenty more at a gallop: `kSimRidingSkillGainWhileGalloping`) and the horse Racing at a
+  gallop (`kHorseRacingSkillGainWhileGalloping`, tiring it for learning as its Racing has it,
+  `kFatigueDecayPerLevel`; on its tooltip, kept in saves); every ten minutes, as
+  `BeingRiddenPosture`'s tuning has it, the two grow fonder, the horse's exercise and company and
+  the rider's fun and company are seen to, and the rider learns Riding; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
   `RIDE_SKILL=<level>` (tests).
   Horses go over the pack's jumps (the gate, wall and scary wall, the oxer and triple bars, the
@@ -1034,7 +1039,7 @@ installation is unreachable.
   over soaks its rider. Going over gives the horse Jumping (`HighSuccessGain`, `LowSuccessGain`,
   more the better its rider rides: `JumpingSkillMultiplier`, up to 1.8) and the rider Riding
   (`RiderHighSuccessGain`); each jump tires a horse for learning (`PetSkillFatigue`, by its
-  level's `FatigueModifiers`; never after a hundred jumps, Tireless Leaper) till it needs a break,
+  level's `FatigueModifiers`; never after a hundred and fifty jumps, Tireless Leaper) till it needs a break,
   fresh again over four hours; its Jumping is on its tooltip and kept in saves. The household's
   horses go over the lot's jumps of their own accord when bored or restless (`Jump`: Fun,
   `HorseExercise`), and one that hates jumping kicks a jump's bars down instead (`KickDown`: the

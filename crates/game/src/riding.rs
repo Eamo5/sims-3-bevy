@@ -38,17 +38,24 @@ impl Plugin for RidingPlugin {
 }
 
 /// The pack's tuning: liking to be offered a ride and to be let up; Riding to canter and gallop;
-/// skill points a minute up there and more at speed; liking and the horse's fun and company each
-/// five minutes.
+/// skill points a minute up there and more at a gallop (`kSimRidingSkillGainWhileGalloping`), the
+/// horse's Racing at a gallop (`kHorseRacingSkillGainWhileGalloping`); every ten minutes
+/// (`kBenefitTimeBetweenUpdates`) liking (`kBenefitLTRDelta`), the horse's exercise and company and
+/// the rider's fun and company (`kBenefit…CommoditiesToUpdateDeltas`) and Riding
+/// (`kBenefitSimSkillsToUpdateDeltas`), as `BeingRiddenPosture`'s tuning has them.
 pub const MIN_LIKING_OFFERED: f32 = 5.0;
 pub const MIN_LIKING_ACCEPTED: f32 = 10.0;
 const CANTER_LEVEL: u32 = 1;
 const GALLOP_LEVEL: u32 = 2;
 const POINTS_A_MINUTE: f32 = 1.0;
-const POINTS_AT_SPEED: f32 = 10.0;
-const BENEFIT_MINUTES: f64 = 5.0;
-const BENEFIT_LIKING: f32 = 0.1;
-const BENEFIT_HORSE: f32 = 5.0;
+const POINTS_AT_SPEED: f32 = 20.0;
+const RACING_AT_SPEED: f32 = 20.0;
+const BENEFIT_MINUTES: f64 = 10.0;
+const BENEFIT_LIKING: f32 = 0.25;
+const BENEFIT_EXERCISE: f32 = 1.0;
+const BENEFIT_HORSE_SOCIAL: f32 = 2.0;
+const BENEFIT_RIDER: f32 = 0.5;
+const BENEFIT_RIDING: f32 = 3.0;
 /// How far off a canter's worth going to, and a gallop's (metres).
 const CANTER_FROM: f32 = 12.0;
 const GALLOP_FROM: f32 = 30.0;
@@ -101,6 +108,16 @@ const DISMOUNTS: [(&str, &[&str]); 3] = [
 
 /// The gaits: walk, canter, gallop (the horse's clip, the rider's).
 const GAITS: [(&str, &[&str]); 3] = [("ah_walk_x", &["a_rideHorse_walk_y"]), ("ah_canter_x", &["a_rideHorse_canter_y"]), ("ah_run_x", &["a_rideHorse_run_y"])];
+
+/// A horse's gallop by its Racing, and its rider's: faster from 4 (`kLevelForGallopFasterSpeed`,
+/// the pack's `ah_run_speed2`), fastest at 10 (`kLevelForGallopFastestSpeed`).
+pub fn gallop(racing: u32) -> (&'static str, &'static [&'static str]) {
+    match racing {
+        10.. => ("ah_run_speed3_x", &["a_run_speed3_rider_y"]),
+        4.. => ("ah_run_speed2_x", &["a_run_speed2_rider_y"]),
+        _ => GAITS[2],
+    }
+}
 
 /// The horse's idles with a rider up, each with the rider's half (`GetRiderAnimationName`), the
 /// mounted ones too.
@@ -267,19 +284,19 @@ pub(crate) fn ride(
     (time, clock, delta): (Res<Time>, Res<GameClock>, Res<crate::clock::SimDelta>),
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
     (grid, world, building): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>),
-    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, Option<&crate::life::Mood>)>,
-    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>)), Without<Sim>>,
+    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>))>,
+    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     (obstacles, jumps): (
         Query<(&crate::horsejumps::Obstacle, &Transform), (Without<Pet>, Without<Sim>)>,
-        Query<(Has<crate::horsejumps::HorseJumping>, Has<crate::horsejumps::JumpRequest>, Option<&crate::horsejumps::HorseSkills>)>,
+        Query<(Has<crate::horsejumps::HorseJumping>, Has<crate::horsejumps::JumpRequest>)>,
     ),
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();
-    for (e, sim, mut m, mut queue, mut anim, mut skills, mood) in &mut sims {
-        let Ok((pet, mut htf, mut hanim, motives, mut bonds, (skel, tack))) = horses.get_mut(m.horse) else {
+    for (e, sim, mut m, mut queue, mut anim, mut skills, (mood, mut sim_motives)) in &mut sims {
+        let Ok((pet, mut htf, mut hanim, motives, mut bonds, (skel, tack, mut hskills))) = horses.get_mut(m.horse) else {
             // (The horse gone: down where they are.)
             queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
             commands.entity(e).remove::<(Mounted, ActionClip)>();
@@ -349,7 +366,7 @@ pub(crate) fn ride(
             }
             // (Over a jump: `horsejumps` plays it, and it's over when it's done with it.)
             Stage::Jump => {
-                if jumps.get(m.horse).is_ok_and(|(over, asked, _)| !over && !asked) {
+                if jumps.get(m.horse).is_ok_and(|(over, asked)| !over && !asked) {
                     m.stage = Stage::Up;
                     play(&mut hanim, &mut m, IDLES[0]);
                 }
@@ -408,7 +425,7 @@ pub(crate) fn ride(
                 let here = htf.translation.xz();
                 // (At a jump: round to its run-up, the nearer way, and in at a gallop.)
                 if let (Some(o), Some(g)) = (jump_to, grid.as_deref()) {
-                    let tired = jumps.get(m.horse).ok().and_then(|j| j.2).is_some_and(|s| s.worn_out);
+                    let tired = hskills.as_ref().is_some_and(|s| s.worn_out);
                     match obstacles.get(o).ok().filter(|_| !tired).and_then(|(obs, otf)| crate::horsejumps::plan(g, here, &obs.world_lanes(otf))) {
                         Some((p, start, face)) => {
                             let far = p.iter().fold((here, 0.0), |(a, d), b| (*b, d + a.distance(*b))).1;
@@ -437,7 +454,7 @@ pub(crate) fn ride(
                 // jump at a gallop).
                 if let Some(&next) = m.path.first() {
                     let gait = if m.jump.is_some() && m.path.len() == 1 { 2 } else { m.gait };
-                    let (clip, rider) = GAITS[gait];
+                    let (clip, rider) = if gait == 2 { gallop(hskills.as_ref().map_or(0, |s| s.racing_level())) } else { GAITS[gait] };
                     if hanim.clip != clip {
                         play(&mut hanim, &mut m, (clip, rider));
                     }
@@ -471,13 +488,26 @@ pub(crate) fn ride(
                 }
                 // What a ride does them both.
                 let minutes = delta.0;
+                let mut riding_points = 0.0;
                 if minutes > 0.0 {
-                    let fast = !m.path.is_empty() && (m.gait > 0 || m.jump.is_some());
-                    let rate = crate::life::skill_rate(&sim.traits, "Riding") * mood.map_or(1.0, |m| m.skill_rate());
-                    let points = (POINTS_A_MINUTE + if fast { POINTS_AT_SPEED } else { 0.0 }) * minutes * rate;
-                    if let Some(l) = skills.add_points("Riding", points) {
-                        notes.push(format!("{} reached level {l} in Riding!", sim.first));
-                        life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::SkillUp { skill: "Riding", level: l }));
+                    // (At a gallop, the walk styles the game counts as galloping.)
+                    let galloping = !m.path.is_empty() && (m.gait == 2 || (m.jump.is_some() && m.path.len() == 1));
+                    riding_points = (POINTS_A_MINUTE + if galloping { POINTS_AT_SPEED } else { 0.0 }) * minutes;
+                    // (The horse's Racing at a gallop, while it's fresh for learning.)
+                    if galloping {
+                        match hskills.as_deref_mut() {
+                            Some(s) if !s.worn_out => {
+                                if let Some(l) = s.race(RACING_AT_SPEED * minutes, minutes) {
+                                    notes.push(format!("{} reached level {l} in Racing!", pet.name));
+                                }
+                            }
+                            Some(_) => {}
+                            None => {
+                                let mut s = crate::horsejumps::HorseSkills::default();
+                                s.race(RACING_AT_SPEED * minutes, minutes);
+                                commands.entity(m.horse).insert(s);
+                            }
+                        }
                     }
                 }
                 if clock.minutes >= m.benefit_at {
@@ -486,8 +516,20 @@ pub(crate) fn ride(
                         b.add(sim.id, true, BENEFIT_LIKING);
                     }
                     if let Some(mut mo) = motives {
-                        mo.add(crate::petneeds::FUN, BENEFIT_HORSE);
-                        mo.add(crate::petneeds::SOCIAL, BENEFIT_HORSE);
+                        mo.add(crate::petneeds::URGE, BENEFIT_EXERCISE);
+                        mo.add(crate::petneeds::SOCIAL, BENEFIT_HORSE_SOCIAL);
+                    }
+                    if let Some(sm) = sim_motives.as_deref_mut() {
+                        sm.add(crate::sim::FUN, BENEFIT_RIDER);
+                        sm.add(crate::sim::SOCIAL, BENEFIT_RIDER);
+                    }
+                    riding_points += BENEFIT_RIDING;
+                }
+                if riding_points > 0.0 {
+                    let rate = crate::life::skill_rate(&sim.traits, "Riding") * mood.map_or(1.0, |m| m.skill_rate());
+                    if let Some(l) = skills.add_points("Riding", riding_points * rate) {
+                        notes.push(format!("{} reached level {l} in Riding!", sim.first));
+                        life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::SkillUp { skill: "Riding", level: l }));
                     }
                 }
             }
@@ -498,8 +540,9 @@ pub(crate) fn ride(
 /// `RIDE_TEST=<horse>[:<dx>,<dz>[,<seconds>]]` (tests): eight seconds in, the selected Sim rides the
 /// household's horse of that name, the camera on it (`RIDE_DIST` away, 6 m); up on it three seconds,
 /// ridden that far off (metres east and south); and after so many seconds up, off again.
-/// `RIDE_SKILL=<level>`: the rider that good.
+/// `RIDE_SKILL=<level>`: the rider that good; `HORSE_RACING=<level>` the horse at Racing.
 fn ride_test(
+    mut commands: Commands,
     time: Res<Time>,
     mut stage: Local<(u8, f32)>,
     mut sel: Query<(&mut ActionQueue, Option<&Mounted>, &mut Skills), With<crate::sim::Selected>>,
@@ -521,6 +564,9 @@ fn ride_test(
             if let Some(l) = std::env::var("RIDE_SKILL").ok().and_then(|l| l.parse::<f32>().ok()) {
                 skills.0.insert("Riding", l);
             }
+            if let Some(l) = std::env::var("HORSE_RACING").ok().and_then(|l| l.parse::<f32>().ok()) {
+                commands.entity(h).insert(crate::horsejumps::HorseSkills { racing: l, ..default() });
+            }
             info!("ride test: riding {name}");
             q.push_player(crate::interact::Action::new("Ride", ActionKind::Ride { horse: h, slot: mount_slot(htf), unsaddle: false }, false));
             *stage = (1, now);
@@ -541,7 +587,12 @@ fn ride_test(
 }
 
 /// The rider's clip played with the horse's, at the same time through it.
-fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&ActionClip>, &mut ClipPlayer)>, horses: Query<(&PetAnim, Option<&crate::horsejumps::HorseJumping>)>) {
+fn in_step(
+    mut commands: Commands,
+    (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
+    mut sims: Query<(Entity, &Mounted, Option<&ActionClip>, &mut ClipPlayer)>,
+    horses: Query<(&PetAnim, Option<&crate::horsejumps::HorseJumping>)>,
+) {
     for (e, m, clip, mut player) in &mut sims {
         // (Over a jump, the rider's half of the horse's jump.)
         let rider = match horses.get(m.horse) {
@@ -557,7 +608,9 @@ fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&Ac
         // (Getting on and off, and a jump, play once, held at their end; the rest go round, the
         // gallop in too till the horse is over the jump.)
         let round = m.up() || (m.stage == Stage::Jump && jumping.is_none());
-        player.time = if round { h.time() % dur } else { h.time().min(dur - 1e-3) };
+        // (Round in step with the horse's own cycle: a faster gallop's shorter.)
+        let cycle = lib.get(&data, &h.clip).map_or(dur, |c| c.duration).max(1e-3);
+        player.time = if round { (h.time() % cycle) / cycle * dur } else { h.time().min(dur - 1e-3) };
     }
 }
 

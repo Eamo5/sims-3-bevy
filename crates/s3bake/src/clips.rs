@@ -188,6 +188,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ah_walk_x",
     "ah_trot_x",
     "ah_run_x",
+    // (A faster gallop, and the fastest, for a horse good at Racing.)
+    "ah_run_speed2_x",
+    "ah_run_speed3_x",
     "ah_idle_",
     "ah_sleep_loop",
     // (Riding: a horse's canter, a rider's seat at each gait and idle, getting on and off.)
@@ -204,6 +207,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_rideHorse_walk_y",
     "a_rideHorse_canter_y",
     "a_rideHorse_run_y",
+    "a_run_speed2_rider_y",
+    "a_run_speed3_rider_y",
     "a_saddle_swipe",
     // (Teaching a dog its tricks, and asking it for them.)
     "a2ad_soc_dogTricks_",
@@ -914,6 +919,7 @@ mod tests {
     #[test]
     fn chess_and_tip_clips_are_baked_but_not_their_props() {
         assert!(wanted("a2o_guitar_tip_x"));
+        assert!(wanted("ah_run_speed2_x"), "a horse's faster gallop");
         assert!(wanted("a2o_chessTable_win_otherSide_x"));
         assert!(!wanted("a2o_chessTable_win_chessTablePiece"));
     }

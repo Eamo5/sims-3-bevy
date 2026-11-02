@@ -51,8 +51,9 @@ impl Plugin for HorseJumpsPlugin {
 /// How far behind its start a horse sets off on its run at a jump (the game's run-up, its
 /// `RadialRangeDestination` 4.5 to 6.75 m out).
 pub const RUN_UP: f32 = 5.5;
-/// A hundred jumps and a horse never tires of them (Tireless Leaper: `kTirelessLeaperRequirement`).
-pub const TIRELESS: u32 = 100;
+/// A hundred and fifty jumps and a horse never tires of them (Tireless Leaper:
+/// `kTirelessLeaperRequirement`).
+pub const TIRELESS: u32 = 150;
 /// A jump's toll on a horse's freshness for learning (`DoJump`'s `PetSkillFatigue`, once), and
 /// its rest from it (back over four hours, as a dog's tricks).
 const FATIGUE: f32 = 5.0;
@@ -171,8 +172,9 @@ fn set_up(
     }
 }
 
-/// A horse's own skills: its Jumping (the level, the way to the next its fraction), the jumps it's
-/// tried and cleared, and how fresh it is for learning (100 rested, -100 worn out).
+/// A horse's own skills: its Jumping and Racing (each the level, the way to the next its
+/// fraction), the jumps it's tried and cleared, and how fresh it is for learning (100 rested,
+/// -100 worn out).
 #[derive(Component, Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct HorseSkills {
     pub jumping: f32,
@@ -180,13 +182,22 @@ pub struct HorseSkills {
     pub clean: u32,
     pub fresh: f32,
     pub worn_out: bool,
+    #[serde(default)]
+    pub racing: f32,
 }
 
 impl Default for HorseSkills {
     fn default() -> Self {
-        Self { jumping: 0.0, jumps: 0, clean: 0, fresh: 100.0, worn_out: false }
+        Self { jumping: 0.0, jumps: 0, clean: 0, fresh: 100.0, worn_out: false, racing: 0.0 }
     }
 }
+
+/// How much a gallop's learning tires a horse, by its Racing (`kFatigueDecayPerLevel`: all of it
+/// untrained, a fifth at 10), and how fast (fresh to worn out over four hours, as a dog's tricks).
+pub fn racing_fatigue(level: u32) -> f32 {
+    1.0 - 0.8 * level.min(10) as f32 / 10.0
+}
+const FATIGUE_HOURS: f32 = 4.0;
 
 impl HorseSkills {
     pub fn level(&self) -> u32 {
@@ -199,6 +210,23 @@ impl HorseSkills {
         let before = self.level();
         self.jumping = crate::interact::points_to_level(table, crate::interact::level_to_points(table, self.jumping) + points.max(0.0));
         (self.level() > before).then_some(self.level())
+    }
+
+    pub fn racing_level(&self) -> u32 {
+        (self.racing as u32).min(10)
+    }
+
+    /// Racing points for galloping so many minutes, tiring it as it learns; the level reached if
+    /// it's a new one.
+    pub fn race(&mut self, points: f32, minutes: f32) -> Option<u32> {
+        let table = crate::interact::skill_points("Racing");
+        let before = self.racing_level();
+        self.racing = crate::interact::points_to_level(table, crate::interact::level_to_points(table, self.racing) + points.max(0.0));
+        self.fresh = (self.fresh - 200.0 / FATIGUE_HOURS * racing_fatigue(before) * minutes / 60.0).max(-100.0);
+        if self.fresh <= -98.0 {
+            self.worn_out = true;
+        }
+        (self.racing_level() > before).then_some(self.racing_level())
     }
 
     /// Never tired by jumping (Tireless Leaper).
@@ -219,11 +247,17 @@ impl HorseSkills {
 
 /// A horse's skills for its tooltip.
 pub fn summary(s: &HorseSkills) -> String {
-    if s.jumping <= 0.0 && s.jumps == 0 {
-        return String::new();
+    let mut out = String::new();
+    if s.racing > 0.0 {
+        out += &format!("\nRacing level {}", s.racing_level());
     }
-    let tired = if s.worn_out { " (needs a break)" } else { "" };
-    format!("\nJumping level {}{tired}", s.level())
+    if s.jumping > 0.0 || s.jumps > 0 {
+        out += &format!("\nJumping level {}", s.level());
+    }
+    if s.worn_out && !out.is_empty() {
+        out += " (needs a break)";
+    }
+    out
 }
 
 /// How a jump goes.
@@ -855,6 +889,19 @@ mod tests {
         s.jumps = TIRELESS;
         s.tire(1.0);
         assert_eq!(s.fresh, 95.0, "a tireless leaper");
+    }
+
+    #[test]
+    fn galloping_teaches_racing_and_tires() {
+        let mut s = HorseSkills::default();
+        // (An hour's gallop: tired by a quarter of the way to worn out, untrained.)
+        s.race(20.0 * 60.0, 60.0);
+        assert!(s.racing > 0.5 && s.racing < 2.0, "{}", s.racing);
+        assert!((s.fresh - 50.0).abs() < 1e-3, "{}", s.fresh);
+        assert!((racing_fatigue(10) - 0.2).abs() < 1e-6);
+        assert_eq!(crate::riding::gallop(4).0, "ah_run_speed2_x");
+        assert_eq!(crate::riding::gallop(10).1, &["a_run_speed3_rider_y"]);
+        assert_eq!(crate::riding::gallop(3).0, "ah_run_x");
     }
 
     #[test]
