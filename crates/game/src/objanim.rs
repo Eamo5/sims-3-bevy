@@ -127,6 +127,11 @@ impl ObjectRig {
         }
         out
     }
+
+    /// Its bones at rest (the rigs' bind poses).
+    pub(crate) fn rest_pose(&self) -> Vec<(Entity, Transform)> {
+        self.rigs.iter().flat_map(|inst| inst.bones.iter().copied().zip(inst.rig.bind.iter().copied())).collect()
+    }
 }
 
 /// The rigs loaded so far, by model.

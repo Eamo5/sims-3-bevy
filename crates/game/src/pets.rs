@@ -466,6 +466,22 @@ pub fn clip_pace(clip: &s3formats::sim::Clip) -> f32 {
     }
 }
 
+/// How far a clip has taken its animal by `t` (its `world_offset` from its first key: along the
+/// ground in the animal's own frame, and turned), as the game moves an animal by its clips (a cat
+/// into its kitty bag and round to face out).
+pub fn root_motion(clip: &s3formats::sim::Clip, t: f32) -> Option<(Vec3, Quat)> {
+    let w = clip.tracks.get(&WORLD_OFFSET)?;
+    let p0 = w.translation.first().map_or(Vec3::ZERO, |k| Vec3::from(k.1));
+    let r0 = w.rotation.first().map_or(Quat::IDENTITY, |k| Quat::from_array(k.1).normalize());
+    let p = crate::anim::sample_track_vec(&w.translation, t).unwrap_or(p0);
+    let r = crate::anim::sample_track_quat(&w.rotation, t).unwrap_or(r0);
+    let inv = r0.inverse();
+    let mut d = inv * (p - p0);
+    d.y = 0.0;
+    let turn = inv * r;
+    (d.length() > 1e-3 || turn.angle_between(Quat::IDENTITY) > 1e-3).then_some((d, turn))
+}
+
 /// The body's shaders: fur (and the horse's coat), the nose and pads, the eyes.
 const SHADER_PET_FUR: u32 = 0xA78F71C4;
 const SHADER_HORSE: u32 = 0x05F75EF1;

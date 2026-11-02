@@ -948,7 +948,17 @@ installation is unreachable.
   post, the chew toy, the water trough, grazing, grooming; a horse with a box stall eats at its
   hay rack (the pack's `EatHay`: Hunger 100 an hour, its head at the rack), naps in it (Energy 24)
   and pees in it, each a dirty spot (five and it wants cleaning, as `kPointsBeforeDirtyLow`), and the
-  household mucks it out with the pack's pitchfork in hand ("Clean Stall"). Sims' petting and praise are company
+  household mucks it out with the pack's pitchfork in hand ("Clean Stall"). Bored pets play with
+  their toys, as the pack's toy classes have them, each with its own clip and the toy playing its
+  half: a cat bats its ball or catnip mouse about (`CatToy.PlayWith`: pounce in, rounds of play,
+  Fun 25 an hour) or hides in the kitty bag (in through its opening by the clip's `world_offset`,
+  turned to peek out, a while, then out again: Fun 15); a dog pushes its Biscuit Ball with its nose
+  (`DogBall.Chase`: Fun 100), the ball rolling off five metres as its half has it and the dog
+  running after it to push it again from the side it can roll on from (never through a wall or off
+  the lot), missing it now and then (`kChanceToFail`, one in ten); a restless horse nudges, bites
+  and throws or sits on its Happy Horse Ball (`HorseBall`: HorseExercise 100), the ball rolling off
+  nine metres; a dog with no chew toy chews a cat's toy (`CatToy.Chew`). `PET_TOY=<catalogue
+  name>`, `PET_WHO=<pet>`, `PET_NEEDS=bored|restless` (tests). Sims' petting and praise are company
   and fun for them. The household's grown-ups fill a bowl down to three bites of their own
   accord (§25 a bite it's short, as the game's `FillBowl`), or from its menu, and pets let it
   be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.

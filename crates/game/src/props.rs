@@ -365,4 +365,4 @@ const ON_PET: usize = usize::MAX - 1;
 const SIM_ACTOR: u32 = 0x050C5D67;
 
 /// fnv32("transformBone"): a prop's root in its clips.
-const TRANSFORM_BONE: u32 = 0xCD68F001;
+pub(crate) const TRANSFORM_BONE: u32 = 0xCD68F001;

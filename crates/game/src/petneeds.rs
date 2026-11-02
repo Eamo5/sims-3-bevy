@@ -260,6 +260,8 @@ pub enum PetDo {
     /// A horse at its box stall's hay (`BoxStall.EatHay`), or peeing in it (a dirty spot).
     Hay(Entity),
     StallPee(Entity),
+    /// At a toy (`pettoys`).
+    Play(Entity, crate::pettoys::Toy),
 }
 
 impl PetDo {
@@ -270,6 +272,7 @@ impl PetDo {
             PetDo::Litter(_) | PetDo::Pee | PetDo::StallPee(_) => BLADDER,
             PetDo::Sleep(_) => ENERGY,
             PetDo::Scratch(_) | PetDo::Chew(_) => URGE,
+            PetDo::Play(_, t) => t.need(),
             PetDo::Drink(_) => THIRST,
             PetDo::Groom => HYGIENE,
         }
@@ -277,7 +280,7 @@ impl PetDo {
 
     fn object(self) -> Option<Entity> {
         match self {
-            PetDo::Eat(e) | PetDo::Litter(e) | PetDo::Scratch(e) | PetDo::Chew(e) | PetDo::Drink(e) | PetDo::Sleep(Some(e)) | PetDo::Hay(e) | PetDo::StallPee(e) => Some(e),
+            PetDo::Eat(e) | PetDo::Litter(e) | PetDo::Scratch(e) | PetDo::Chew(e) | PetDo::Drink(e) | PetDo::Sleep(Some(e)) | PetDo::Hay(e) | PetDo::StallPee(e) | PetDo::Play(e, _) => Some(e),
             _ => None,
         }
     }
@@ -292,6 +295,8 @@ pub struct PetTask {
     next_bite: f64,
     /// A roll for how it goes about it (its eating style, a Piggy cat's litter kicked about).
     roll: f64,
+    /// At play with a toy: how it's going.
+    play: Option<crate::pettoys::Playing>,
 }
 
 /// When each pet thinks again about what it needs (game minutes).
@@ -350,6 +355,7 @@ fn urgent(i: usize, v: f32, night: bool) -> Option<f32> {
         ENERGY => -40.0,
         URGE => -30.0,
         THIRST => -10.0,
+        FUN => -20.0,
         HYGIENE => -20.0,
         _ => return None,
     };
@@ -424,7 +430,13 @@ fn choose(
                     None => Some((PetDo::Sleep(None), None)),
                 },
                 (URGE, 'c') => nearest(&|o, _, _| o.kind == ObjectKind::ScratchingPost).map(|(s, at)| (PetDo::Scratch(s), Some(at))),
-                (URGE, 'd' | 'l') => nearest(&|o, _, _| o.kind == ObjectKind::ChewToy).map(|(s, at)| (PetDo::Chew(s), Some(at))),
+                // (No chew toy: a cat's toy, chewed.)
+                (URGE, 'd' | 'l') => nearest(&|o, _, _| o.kind == ObjectKind::ChewToy).map(|(s, at)| (PetDo::Chew(s), Some(at))).or_else(|| {
+                    nearest(&|o, _, _| crate::pettoys::chew_for(&pet.kind, o.kind).is_some()).map(|(s, at)| (PetDo::Play(s, crate::pettoys::Toy::ChewCatToy), Some(at)))
+                }),
+                // (Bored: a toy of its kind's; a restless horse its ball.)
+                (FUN | URGE, _) => nearest(&|o, _, _| crate::pettoys::toy_for(&pet.kind, o.kind).is_some_and(|t| t.need() == i))
+                    .and_then(|(s, at)| Some((PetDo::Play(s, crate::pettoys::toy_for(&pet.kind, objects.get(s).ok()?.1.kind)?), Some(at)))),
                 (THIRST, 'h') => nearest(&|o, _, _| o.kind == ObjectKind::WaterTrough).map(|(s, at)| (PetDo::Drink(s), Some(at))),
                 (HYGIENE, 'c') => Some((PetDo::Groom, None)),
                 _ => None,
@@ -433,7 +445,19 @@ fn choose(
                 break;
             }
         }
-        let Some((what, to)) = pick else { continue };
+        let Some((what, mut to)) = pick else { continue };
+        // (A toy: to its jig's slot, a ball from the side it can roll off from.)
+        let mut play = None;
+        if let PetDo::Play(s, toy) = what {
+            let Ok((_, _, otf, ..)) = objects.get(s) else { continue };
+            let at = otf.translation.xz();
+            let side = toy.rolls().then(|| crate::pettoys::push_side(at, here, toy.roll(), |a, b| crate::pettoys::room_to_roll(&grid, |p| on_lot(building.as_deref(), p), a, b))).flatten();
+            if toy.rolls() && side.is_none() {
+                continue;
+            }
+            to = Some(crate::pettoys::stand_at(toy, &pet.kind, at, otf.rotation, here, side).0);
+            play = Some(crate::pettoys::Playing { side, ..Default::default() });
+        }
         // (Into a box or a bed: to beside it on the grid, then in, as the game's slots step in.)
         let path = match to {
             Some(to) => match grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z)))) {
@@ -448,7 +472,7 @@ fn choose(
             None => Vec::new(),
         };
         info!("pet {} sets off to {what:?} ({:.0} m)", pet.name, path_len(here, &path));
-        commands.entity(e).insert(PetTask { what, path, since: None, next_bite: 0.0, roll: rng.random() });
+        commands.entity(e).insert(PetTask { what, path, since: None, next_bite: 0.0, roll: rng.random(), play });
     }
 }
 
@@ -463,6 +487,14 @@ fn approach(o: &GameObject, tf: &Transform, from: Vec2, kind: &str) -> Vec2 {
         _ => o.half.max_element() + 0.25,
     };
     c + (from - c).normalize_or(Vec2::Y) * reach
+}
+
+/// Whether a point's on the lot (a little way in from its edge), or anywhere off one.
+fn on_lot(building: Option<&crate::building::ActiveBuilding>, p: Vec2) -> bool {
+    building.is_none_or(|b| {
+        let l = b.local(Vec3::new(p.x, 0.0, p.y));
+        l.x >= 0.5 && l.y >= 0.5 && l.x <= b.data.width as f32 - 0.5 && l.y <= b.data.depth as f32 - 0.5
+    })
 }
 
 /// How far a path goes.
@@ -521,6 +553,7 @@ fn clip_for(kind: &str, what: PetDo, step: u32, traits: &[String], roll: f64) ->
         PetDo::Hay(_) => format!("ah2o_boxStall_eatHay_loop{}_x", 1 + step % 3),
         PetDo::StallPee(_) => format!("{k}_pee_breathe_x"),
         PetDo::Groom => format!("{k}_idle_sit_groomSelf_loop{}_x", 1 + step % 2),
+        PetDo::Play(_, t) => t.parts(k).1.first().cloned().unwrap_or_default(),
     }
 }
 
@@ -535,8 +568,10 @@ fn act(
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     mut pets: Query<(Entity, &Pet, &mut PetTask, &mut PetMotives, &mut Transform, &mut PetAnim, Option<&PetTraits>), Without<PetBusy>>,
-    mut objects: Query<(&GameObject, &Transform, Option<&mut BowlFood>, Option<&mut crate::grime::Grime>), Without<Pet>>,
+    mut objects: Query<(&GameObject, &mut Transform, Option<&mut BowlFood>, Option<&mut crate::grime::Grime>), Without<Pet>>,
     mut puddles: MessageWriter<crate::puddles::AddPuddle>,
+    (data, mut lib, grid): (Res<crate::baked::Baked>, ResMut<crate::anim::ClipLibrary>, Option<Res<crate::nav::NavGrid>>),
+    (rigs, mut bones): (Query<&crate::objanim::ObjectRig>, Query<&mut Transform, (Without<Pet>, Without<GameObject>)>),
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let hours = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed] / 60.0;
@@ -582,7 +617,10 @@ fn act(
             now
         });
         let step = ((now - since) / BITE_MINUTES) as u32;
-        anim.play(clip_for(&pet.kind, what, step, traits, task.roll));
+        // (At a toy, its parts in turn: below.)
+        if !matches!(what, PetDo::Play(..)) {
+            anim.play(clip_for(&pet.kind, what, step, traits, task.roll));
+        }
         let need = what.need();
         let mut done = now - since > LONGEST;
         match what {
@@ -667,6 +705,150 @@ fn act(
                 done |= now - since >= PEE_MINUTES;
             }
             PetDo::Groom => m.add(HYGIENE, GROOM_RATE * hours),
+            PetDo::Play(toy_e, toy) => {
+                use crate::pettoys::Toy;
+                let names = &data.0.clip_names;
+                let has = |n: &str| names.iter().any(|c| c.eq_ignore_ascii_case(n));
+                let k = pet.kind.as_str();
+                let (start, rounds, end) = toy.parts(k);
+                let rounds: Vec<String> = rounds.into_iter().filter(|r| has(r)).collect();
+                let Ok((_, otf, ..)) = objects.get(toy_e) else {
+                    finish(&mut commands, e, &mut anim, pet, &mut rng);
+                    continue;
+                };
+                let toy_tf = *otf;
+                let mut st = task.play.take().unwrap_or_default();
+                let full = done || m.0[need] >= 99.0;
+                let mut over = false;
+                let mut next: Option<String> = None;
+                let round = |rng: &mut rand::rngs::ThreadRng| {
+                    // (A dog misses the ball now and then: `kChanceToFail`.)
+                    toy.miss(k).filter(|m| has(m) && rng.random_bool(crate::pettoys::MISS_CHANCE)).or_else(|| (!rounds.is_empty()).then(|| rounds[rng.random_range(0..rounds.len())].clone()))
+                };
+                if st.clip.is_empty() {
+                    // Up to it: facing it (a ball from the side it's pushed from, turned to roll
+                    // off away; a cat's toy turned with the cat).
+                    let face = match (toy, st.side) {
+                        (_, Some(s)) => -s,
+                        (Toy::KittyBag, _) => (toy_tf.rotation * Vec3::Z).xz(),
+                        _ => toy_tf.translation.xz() - here,
+                    };
+                    if face.length() > 1e-3 {
+                        tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                    }
+                    let turn = match (toy, st.side) {
+                        (_, Some(s)) => Some(s),
+                        (Toy::CatToy, _) => Some(face),
+                        _ => None,
+                    };
+                    if let Some(f) = turn.filter(|f| f.length() > 1e-3)
+                        && let Ok((_, mut otf, ..)) = objects.get_mut(toy_e)
+                    {
+                        otf.rotation = Quat::from_rotation_y(f.x.atan2(f.y));
+                    }
+                    next = start.clone().filter(|s| !st.started && has(s)).or_else(|| round(&mut rng));
+                    st.started = true;
+                    if next.is_none() {
+                        over = true;
+                    }
+                } else {
+                    let dur = lib.get(&data, &st.clip).map_or(2.0, |c| c.duration);
+                    if anim.time() >= dur {
+                        // (A ball pushed: where its half left it, at rest again.)
+                        let rolled = st.half.as_ref().filter(|_| toy.rolls()).and_then(|h| lib.get(&data, h)).and_then(|h| crate::pettoys::rolled_to(&h, &toy_tf));
+                        if let Some(to) = rolled {
+                            let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, to);
+                            if let Ok((_, mut otf, ..)) = objects.get_mut(toy_e) {
+                                otf.translation = Vec3::new(to.x, y, to.z);
+                            }
+                            if let Ok(rig) = rigs.get(toy_e) {
+                                for (b, rest) in rig.rest_pose() {
+                                    if let Ok(mut btf) = bones.get_mut(b) {
+                                        *btf = rest;
+                                    }
+                                }
+                            }
+                            st.half = None;
+                        }
+                        if st.ending {
+                            over = true;
+                        } else if full {
+                            next = end.clone().filter(|e| has(e));
+                            over = next.is_none();
+                        } else if let (Some(to), Some(grid)) = (rolled, grid.as_deref()) {
+                            // (After it again: up from the side it'll roll on from.)
+                            let at = to.xz();
+                            let side = crate::pettoys::push_side(at, here, toy.roll(), |a, b| crate::pettoys::room_to_roll(grid, |p| on_lot(building.as_deref(), p), a, b));
+                            let stand = side.map(|s| crate::pettoys::stand_at(toy, k, at, toy_tf.rotation, here, Some(s)).0);
+                            match stand.and_then(|s| grid.find_path(here, s).map(|mut p| {
+                                p.push(s);
+                                p
+                            })) {
+                                Some(path) => {
+                                    task.path = path;
+                                    st.clip.clear();
+                                    st.side = side;
+                                    task.play = Some(st);
+                                    continue;
+                                }
+                                None => {
+                                    next = end.clone().filter(|e| has(e));
+                                    over = next.is_none();
+                                }
+                            }
+                        } else {
+                            next = round(&mut rng);
+                            over = next.is_none();
+                        }
+                    }
+                }
+                if let Some(n) = next {
+                    debug!("pet {} at its {toy:?}: {n}", pet.name);
+                    anim.replay(n.clone());
+                    st.base = Some((tf.translation, tf.rotation));
+                    st.half = crate::pettoys::half_of(names, &n);
+                    st.ending = end.as_deref() == Some(n.as_str());
+                    st.clip = n;
+                }
+                // (Moved as the part takes it, from where it began.)
+                if let (Some((p, r)), Some(c)) = (st.base, lib.get(&data, &st.clip))
+                    && let Some((d, turn)) = crate::pets::root_motion(&c, anim.time().clamp(0.0, c.duration))
+                {
+                    let to = p + r * d;
+                    let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, to);
+                    tf.translation = Vec3::new(to.x, y, to.z);
+                    tf.rotation = r * turn;
+                }
+                // The toy's half, as far into it as the pet is.
+                if let (Some(h), Ok(rig)) = (st.half.as_ref(), rigs.get(toy_e))
+                    && let Some(hc) = lib.get(&data, h)
+                {
+                    let t = anim.time().clamp(0.0, hc.duration);
+                    for (b, pose) in rig.clip_pose(&hc, t, 0) {
+                        if let Ok(mut btf) = bones.get_mut(b) {
+                            *btf = pose;
+                        }
+                    }
+                }
+                let (rate, fun) = toy.rates();
+                m.add(need, rate * hours);
+                m.add(FUN, fun * hours);
+                if over {
+                    // (The toy at rest again.)
+                    if let Ok(rig) = rigs.get(toy_e) {
+                        for (b, rest) in rig.rest_pose() {
+                            if let Ok(mut btf) = bones.get_mut(b) {
+                                *btf = rest;
+                            }
+                        }
+                    }
+                    info!("pet {} done playing with its {toy:?}: {:?}", pet.name, m.0.map(|v| v.round()));
+                    finish(&mut commands, e, &mut anim, pet, &mut rng);
+                    continue;
+                }
+                task.play = Some(st);
+                continue;
+            }
         }
         if done || m.0[need] >= 99.0 {
             info!("pet {} done with {what:?}: {:?}", pet.name, m.0.map(|v| v.round()));
@@ -737,8 +919,9 @@ fn thoughts(mut commands: Commands, clock: Res<GameClock>, pets: Query<(Entity, 
     }
 }
 
-/// PET_NEEDS=hungry|bladder|tired (tests): the household's pets that need, a few seconds in;
-/// PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them (`stall`: a box stall).
+/// PET_NEEDS=hungry|bladder|tired|bored|restless (tests): the household's pets that need, a few
+/// seconds in; PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them (`stall`: a
+/// box stall); PET_TOY=<catalogue name> that toy a couple of metres off it; PET_WHO=<name> the\n/// pet that's for.
 #[allow(clippy::type_complexity)]
 fn needs_test(
     mut commands: Commands,
@@ -750,18 +933,26 @@ fn needs_test(
     mut done: Local<bool>,
 ) {
     let want = std::env::var("PET_NEEDS").ok();
-    let bowl = std::env::var_os("PET_BOWL").is_some();
+    let toy = std::env::var("PET_TOY").ok();
+    let bowl = std::env::var_os("PET_BOWL").is_some() || toy.is_some();
     if *done || (want.is_none() && !bowl) || time.elapsed_secs() < 10.0 || pets.is_empty() {
         return;
     }
     *done = true;
     let mut first = None;
+    // (PET_WHO=<name>: that pet alone, the toy by it.)
+    let who = std::env::var("PET_WHO").ok();
     for (pet, mut m, tf) in &mut pets {
+        if who.as_ref().is_some_and(|w| !w.eq_ignore_ascii_case(&pet.name)) {
+            continue;
+        }
         first.get_or_insert(tf.translation);
         match want.as_deref() {
             Some("hungry") => m.0[HUNGER] = -50.0,
             Some("bladder") => m.0[BLADDER] = -50.0,
             Some("tired") => m.0[ENERGY] = -70.0,
+            Some("bored") => m.0[FUN] = -60.0,
+            Some("restless") => m.0[URGE] = -70.0,
             _ => {}
         }
         info!("pet needs test: {} {:?}", pet.name, m.0);
@@ -769,16 +960,20 @@ fn needs_test(
     // (PET_BOWL=stall: a box stall instead, a few metres off.)
     let stall = std::env::var("PET_BOWL").is_ok_and(|v| v == "stall");
     if bowl && let Some(at) = first {
-        let things: &[&str] = if stall { &["boxStallAllEnglish"] } else { &["petBowlCheap", "litterBoxCheap"] };
-        for (i, name) in things.iter().copied().enumerate() {
+        let things: Vec<&str> = match toy.as_deref() {
+            Some(t) => vec![t],
+            None if stall => vec!["boxStallAllEnglish"],
+            None => vec!["petBowlCheap", "litterBoxCheap"],
+        };
+        for (i, name) in things.into_iter().enumerate() {
             let Some(key) = data.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(name)).map(|c| c.objd) else {
                 warn!("pet needs test: no {name} in the catalogue");
                 continue;
             };
             let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
-            let p = at + if stall { Vec3::new(5.0, 0.0, 4.0) } else { Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0) };
+            let p = at + if stall { Vec3::new(5.0, 0.0, 4.0) } else if toy.is_some() { Vec3::new(2.0, 0.0, 1.5) } else { Vec3::new(1.5 + i as f32 * 1.5, 0.0, 1.0) };
             if let Some(s) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, p, 0.0) {
-                if i == 0 && !stall {
+                if i == 0 && !stall && toy.is_none() {
                     commands.entity(s.entity).insert(BowlFood(FULL_BOWL));
                 }
                 info!("pet needs test: {name} put down at {p}");

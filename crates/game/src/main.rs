@@ -197,6 +197,7 @@ mod seasonal;
 mod petcompany;
 mod petneeds;
 mod pets;
+mod pettoys;
 mod pettraits;
 mod cap;
 mod buildterrain;
