@@ -1068,7 +1068,7 @@ pub(crate) fn pick_by_box(
         .iter()
         // (Not what there's nothing to do with, a rug: a click there is on the floor. A house
         // phone opens the phone's own menu.)
-        .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| o.kind == ObjectKind::Phone || !crate::interact::interactions_for(o.kind).is_empty()))
+        .filter(|(_, _, vis, obj, _)| vis.get() && obj.is_none_or(|o| matches!(o.kind, ObjectKind::Phone | ObjectKind::HorseJump) || !crate::interact::interactions_for(o.kind).is_empty()))
         .filter_map(|(e, tf, _, obj, pet)| {
             let (mid, size) = match obj {
                 Some(o) => {
@@ -1260,7 +1260,7 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q)), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q))), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1274,7 +1274,17 @@ fn world_click(
         Query<(), With<crate::little::Labour>>,
         Query<&crate::tvchannels::TvLevel>,
         Query<(&Sim, Option<&crate::classes::ClassesTaken>)>,
-        (Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>, Query<(&crate::novels::Novels, Has<HouseholdMember>)>, crate::carry::CarryLook, (Query<(), With<crate::guests::StayingOver>>, Query<&crate::collecting::FishingSpot>, Query<(), With<crate::swim::Swimming>>)),
+        (
+            Query<(&crate::skillbooks::SkillBooks, Has<HouseholdMember>)>,
+            Query<(&crate::novels::Novels, Has<HouseholdMember>)>,
+            crate::carry::CarryLook,
+            (
+                Query<(), With<crate::guests::StayingOver>>,
+                Query<&crate::collecting::FishingSpot>,
+                Query<(), With<crate::swim::Swimming>>,
+                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>),
+            ),
+        ),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
     ),
 ) {
@@ -1684,6 +1694,14 @@ fn world_click(
                 }) {
                     options.push((GO_SHOPPING.to_string(), ActionKind::Visit { lot, activity: task }));
                 }
+            }
+            // (A horse jump: "Jump" up on a horse, "Pick Up" its bars knocked down.)
+            if obj.kind == ObjectKind::HorseJump
+                && let (Ok(obs), Ok((_, gtf, ..))) = (obstacles_q.get(t), pickable.get(t))
+            {
+                let otf = gtf.compute_transform();
+                let riding = mounted_q.get(actor).ok().filter(|m| m.up()).and_then(|m| pets_q.get(m.horse).ok().map(|p| (p.0, horse_skills_q.get(m.horse).ok())));
+                options.extend(crate::horsejumps::options(t, obs, &otf, obj, actor_sim, riding));
             }
             let usable = if obj.kind == ObjectKind::Car { &[] } else { usable };
             for (i, d) in usable.iter().enumerate() {

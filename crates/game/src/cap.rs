@@ -243,6 +243,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         female: rng.random(),
         saddled: false,
         tricks: None,
+        horse: None,
         accessories: Vec::new(),
         shapes: Vec::new(),
         coat: None,

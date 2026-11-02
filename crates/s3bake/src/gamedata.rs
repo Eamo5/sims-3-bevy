@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 169;
+pub const GAMEDATA_VERSION: u32 = 170;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1642,6 +1642,67 @@ pub struct GameDataBaked {
     /// ratings: `s3formats::object::ObjdRatings`), by OBJD instance, sorted.
     #[serde(default)]
     pub ratings: Vec<(u64, ObjectRatings)>,
+    /// Each horse jump class's tuning (its `kJumpTuning`), by class name.
+    #[serde(default)]
+    pub horse_jumps: Vec<HorseJumpTuning>,
+}
+
+/// How a horse jump goes, as the game tunes each kind of obstacle (`HorseJumpTuning`): the
+/// chances of a clean jump and of a scrape over by the horse's Jumping level (0 to 10, the rest
+/// a refusal), the roll's lift from its rider's Riding (by level) and the two's mood, and its
+/// weight for a horse that hates jumping; Jumping points for a clean jump and a scrape, Riding
+/// points the rider's; how tiring it is by level; whether a scrape over looks clean, and sets
+/// the rider alight (a fire jump).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct HorseJumpTuning {
+    pub class: String,
+    pub high: Vec<f32>,
+    pub low: Vec<f32>,
+    pub ride_skill: Vec<f32>,
+    pub mood: f32,
+    pub hates_jumping: f32,
+    pub high_gain: f32,
+    pub low_gain: f32,
+    pub rider_high_gain: f32,
+    pub rider_low_gain: f32,
+    pub fatigue: Vec<f32>,
+    pub high_anim_always: bool,
+    pub fire_on_low: bool,
+}
+
+/// A horse jump class's tuning from its tuning XML (none where it's not one): its `kJumpTuning`, or
+/// an oxer's or triple bars' as it stands high (`kHighTuning`; `tag` another).
+pub fn horse_jump_tuning(class: &str, xml: &str) -> Option<HorseJumpTuning> {
+    horse_jump_tuning_of(class, xml, "kJumpTuning").or_else(|| horse_jump_tuning_of(class, xml, "kHighTuning"))
+}
+
+pub fn horse_jump_tuning_of(class: &str, xml: &str, tag: &str) -> Option<HorseJumpTuning> {
+    let at = xml.find(&format!("<{tag}>"))?;
+    let xml = &xml[at..];
+    let xml = &xml[..xml.find(&format!("</{tag}>")).unwrap_or(xml.len())];
+    let val = |k: &str| -> Option<&str> {
+        let at = xml.find(&format!("<{k} value=\""))? + k.len() + 9;
+        xml[at..].split('"').next()
+    };
+    let num = |k: &str| val(k).and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0);
+    let list = |k: &str| val(k).map(|v| v.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).unwrap_or_default();
+    let flag = |k: &str| val(k).is_some_and(|v| v.trim().eq_ignore_ascii_case("true"));
+    let high = list("HighSuccessChances");
+    (!high.is_empty()).then(|| HorseJumpTuning {
+        class: class.to_string(),
+        high,
+        low: list("LowSuccessChances"),
+        ride_skill: list("RideSkillModifier"),
+        mood: num("MoodModifier"),
+        hates_jumping: num("HatesJumpingModifier"),
+        high_gain: num("HighSuccessGain"),
+        low_gain: num("LowSuccessGain"),
+        rider_high_gain: num("RiderHighSuccessGain"),
+        rider_low_gain: num("RiderLowSuccessGain"),
+        fatigue: list("FatigueModifiers"),
+        high_anim_always: flag("HighSuccessAnimAlways"),
+        fire_on_low: flag("SimCatchesFireOnLowSuccess"),
+    })
 }
 
 /// An object's catalogue ratings: the moodlet it gives (1 Comfy, 2 Well Rested, 3 Enjoying
@@ -3276,6 +3337,12 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             && !out.appliance_cooking.iter().any(|o| o.class == c.class)
         {
             out.appliance_cooking.push(c);
+        }
+        if (x.contains("<kJumpTuning>") || x.contains("<kHighTuning>"))
+            && let Some(t) = horse_jump_tuning(class, &x)
+            && !out.horse_jumps.iter().any(|o| o.class == t.class)
+        {
+            out.horse_jumps.push(t);
         }
     }
     // The interactions' need changes, each class's (the game's ITUNs).
@@ -5351,6 +5418,16 @@ mod tests {
         assert_eq!((t.min_time, t.max_time, t.min_shock, t.max_shock, t.shock_in_puddle), (25.0, 120.0, 0.0, 7.0, true));
         assert_eq!((t.repair_skill, t.upgrade_skill), (1500.0, 2640.0), "the never-breaks upgrade's, not another's");
         assert!(repair_tuning("Chair", "<base><StartPercentChanceBreak value=\"0\" /></base>").is_none(), "what doesn't break");
+    }
+
+    #[test]
+    fn horse_jump_tuning_is_read_from_its_class_tuning() {
+        let xml = r#"<base><Current_Tuning><kJumpTuning><LowSuccessGain value="75" /><HighSuccessGain value="80" /><HighSuccessChances value="0, 0.3, 0.4" /><LowSuccessChances value="0, 0.2, 0.2" /><FatigueModifiers value="1, 1, 0" /><HatesJumpingModifier value="0.2" /><RiderLowSuccessGain value="20" /><RiderHighSuccessGain value="25" /><RideSkillModifier value="0, 0, 0.05" /><MoodModifier value="0.002" /><HighSuccessAnimAlways value="False" /><SimCatchesFireOnLowSuccess value="True" /></kJumpTuning></Current_Tuning></base>"#;
+        let t = horse_jump_tuning("GateJump", xml).unwrap();
+        assert_eq!((t.high, t.low, t.ride_skill), (vec![0.0, 0.3, 0.4], vec![0.0, 0.2, 0.2], vec![0.0, 0.0, 0.05]));
+        assert_eq!((t.high_gain, t.low_gain, t.rider_high_gain, t.rider_low_gain, t.mood, t.hates_jumping), (80.0, 75.0, 25.0, 20.0, 0.002, 0.2));
+        assert!(!t.high_anim_always && t.fire_on_low);
+        assert!(horse_jump_tuning("Chair", "<base />").is_none());
     }
 
     #[test]

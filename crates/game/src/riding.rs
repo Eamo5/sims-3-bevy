@@ -157,6 +157,8 @@ enum Stage {
     /// Getting on (the way: `MOUNTS`).
     On(usize),
     Up,
+    /// Over a jump (`horsejumps`).
+    Jump,
     /// Getting off (`DISMOUNTS`).
     Off(usize),
 }
@@ -174,11 +176,13 @@ pub struct Mounted {
     started: bool,
     /// Only come to take its saddle off.
     unsaddle: bool,
+    /// On the way to a jump (`horsejumps`): which, its start and the way over it.
+    jump: Option<(Entity, Vec2, Vec2)>,
 }
 
 impl Mounted {
     pub fn new(horse: Entity, unsaddle: bool) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle }
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None }
     }
 
     /// Playing in step with the horse (not saddling it).
@@ -189,6 +193,16 @@ impl Mounted {
     /// Up on it (not getting on or off).
     pub fn up(&self) -> bool {
         self.stage == Stage::Up
+    }
+
+    /// Up on it and standing about: going nowhere, over nothing.
+    pub fn idle(&self) -> bool {
+        self.stage == Stage::Up && self.path.is_empty() && self.jump.is_none()
+    }
+
+    /// Sat on it (up, or over a jump).
+    fn seated(&self) -> bool {
+        matches!(self.stage, Stage::Up | Stage::Jump)
     }
 }
 
@@ -248,7 +262,7 @@ fn idle(rng: &mut impl Rng) -> (&'static str, &'static [&'static str]) {
 /// Riding: getting on, sitting the horse's idles and gaits where it's ridden to, the ride's
 /// benefits, getting off when the ride's over or something else is asked of the rider.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn ride(
+pub(crate) fn ride(
     mut commands: Commands,
     (time, clock, delta): (Res<Time>, Res<GameClock>, Res<crate::clock::SimDelta>),
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
@@ -257,6 +271,10 @@ fn ride(
     mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    (obstacles, jumps): (
+        Query<(&crate::horsejumps::Obstacle, &Transform), (Without<Pet>, Without<Sim>)>,
+        Query<(Has<crate::horsejumps::HorseJumping>, Has<crate::horsejumps::JumpRequest>, Option<&crate::horsejumps::HorseSkills>)>,
+    ),
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();
@@ -329,6 +347,13 @@ fn ride(
                     play(&mut hanim, &mut m, IDLES[0]);
                 }
             }
+            // (Over a jump: `horsejumps` plays it, and it's over when it's done with it.)
+            Stage::Jump => {
+                if jumps.get(m.horse).is_ok_and(|(over, asked, _)| !over && !asked) {
+                    m.stage = Stage::Up;
+                    play(&mut hanim, &mut m, IDLES[0]);
+                }
+            }
             Stage::Off(_) => {
                 if done(&mut lib, &hanim) {
                     // Down again, beside it, where they got on.
@@ -344,11 +369,19 @@ fn ride(
                 // "Ride Here": the last place asked for, from where the horse stands.
                 let mut off = false;
                 let mut to: Option<Vec2> = None;
+                let mut jump_to: Option<Entity> = None;
                 let mut i = 1;
                 while i < queue.0.len() {
                     match queue.0[i].kind {
                         ActionKind::GoHere(p, _) if p.is_finite() => {
                             to = Some(p);
+                            jump_to = None;
+                            queue.0.remove(i);
+                        }
+                        // ("Jump": ridden at it.)
+                        ActionKind::HorseJump { obstacle } => {
+                            jump_to = Some(obstacle);
+                            to = None;
                             queue.0.remove(i);
                         }
                         ActionKind::Dismount => {
@@ -373,7 +406,22 @@ fn ride(
                     continue;
                 }
                 let here = htf.translation.xz();
+                // (At a jump: round to its run-up, the nearer way, and in at a gallop.)
+                if let (Some(o), Some(g)) = (jump_to, grid.as_deref()) {
+                    let tired = jumps.get(m.horse).ok().and_then(|j| j.2).is_some_and(|s| s.worn_out);
+                    match obstacles.get(o).ok().filter(|_| !tired).and_then(|(obs, otf)| crate::horsejumps::plan(g, here, &obs.world_lanes(otf))) {
+                        Some((p, start, face)) => {
+                            let far = p.iter().fold((here, 0.0), |(a, d), b| (*b, d + a.distance(*b))).1;
+                            m.gait = gait_for(level, far);
+                            m.path = p;
+                            m.jump = Some((o, start, face));
+                        }
+                        None if tired => notes.push(format!("{} needs a break from learning new skills!", pet.name)),
+                        None => notes.push(format!("{} can't ride {} at that jump.", sim.first, pet.name)),
+                    }
+                }
                 if let (Some(to), Some(g)) = (to, grid.as_deref()) {
+                    m.jump = None;
                     let indoors = |p: Vec2| building.as_deref().is_some_and(|b| b.is_indoors(Vec3::new(p.x, 0.0, p.y)));
                     let path = g.nearest_free(to).map(|(x, z)| g.center_of(x, z)).filter(|p| !indoors(*p)).and_then(|p| g.find_path(here, p)).filter(|p| !p.iter().any(|q| indoors(*q)));
                     match path {
@@ -385,9 +433,11 @@ fn ride(
                         None => notes.push(format!("{} can't ride {} there.", sim.first, pet.name)),
                     }
                 }
-                // Along the way at its gait, in step with its clip's own pace.
+                // Along the way at its gait, in step with its clip's own pace (the run-in at a
+                // jump at a gallop).
                 if let Some(&next) = m.path.first() {
-                    let (clip, rider) = GAITS[m.gait];
+                    let gait = if m.jump.is_some() && m.path.len() == 1 { 2 } else { m.gait };
+                    let (clip, rider) = GAITS[gait];
                     if hanim.clip != clip {
                         play(&mut hanim, &mut m, (clip, rider));
                     }
@@ -397,7 +447,18 @@ fn ride(
                     if d.length() <= step.max(0.05) {
                         m.path.remove(0);
                         if m.path.is_empty() {
-                            play(&mut hanim, &mut m, IDLES[0]);
+                            match m.jump.take() {
+                                // (At its start, facing over it: over it.)
+                                Some((o, start, face)) => {
+                                    let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, Vec3::new(start.x, htf.translation.y, start.y));
+                                    htf.translation = Vec3::new(start.x, y, start.y);
+                                    htf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                                    commands.entity(m.horse).insert(crate::horsejumps::JumpRequest { obstacle: o, rider: Some(e), kick: false });
+                                    m.stage = Stage::Jump;
+                                    continue;
+                                }
+                                None => play(&mut hanim, &mut m, IDLES[0]),
+                            }
                         }
                     } else {
                         let p = here + d.normalize() * step;
@@ -411,7 +472,7 @@ fn ride(
                 // What a ride does them both.
                 let minutes = delta.0;
                 if minutes > 0.0 {
-                    let fast = !m.path.is_empty() && m.gait > 0;
+                    let fast = !m.path.is_empty() && (m.gait > 0 || m.jump.is_some());
                     let rate = crate::life::skill_rate(&sim.traits, "Riding") * mood.map_or(1.0, |m| m.skill_rate());
                     let points = (POINTS_A_MINUTE + if fast { POINTS_AT_SPEED } else { 0.0 }) * minutes * rate;
                     if let Some(l) = skills.add_points("Riding", points) {
@@ -480,16 +541,23 @@ fn ride_test(
 }
 
 /// The rider's clip played with the horse's, at the same time through it.
-fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&ActionClip>, &mut ClipPlayer)>, horses: Query<&PetAnim>) {
+fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&ActionClip>, &mut ClipPlayer)>, horses: Query<(&PetAnim, Option<&crate::horsejumps::HorseJumping>)>) {
     for (e, m, clip, mut player) in &mut sims {
-        let want = ActionClip::new(None, m.rider);
+        // (Over a jump, the rider's half of the horse's jump.)
+        let rider = match horses.get(m.horse) {
+            Ok((_, Some(j))) if m.stage == Stage::Jump => j.rider_clips(),
+            _ => m.rider,
+        };
+        let want = ActionClip::new(None, rider);
         if clip != Some(&want) {
             commands.entity(e).insert(want);
         }
-        let Some(h) = horses.get(m.horse).ok().filter(|_| m.in_step()) else { continue };
+        let Some((h, jumping)) = horses.get(m.horse).ok().filter(|_| m.in_step()) else { continue };
         let Some(dur) = player.clip.as_ref().map(|c| c.duration).filter(|d| *d > 0.0) else { continue };
-        // (Getting on and off play once, held at their end; the rest go round.)
-        player.time = if m.up() { h.time() % dur } else { h.time().min(dur - 1e-3) };
+        // (Getting on and off, and a jump, play once, held at their end; the rest go round, the
+        // gallop in too till the horse is over the jump.)
+        let round = m.up() || (m.stage == Stage::Jump && jumping.is_none());
+        player.time = if round { h.time() % dur } else { h.time().min(dur - 1e-3) };
     }
 }
 
@@ -498,7 +566,7 @@ fn in_step(mut commands: Commands, mut sims: Query<(Entity, &Mounted, Option<&Ac
 fn seat_riders(mut sims: Query<(&Mounted, &mut Transform), With<Sim>>, horses: Query<&Transform, (With<Pet>, Without<Sim>)>) {
     for (m, mut tf) in &mut sims {
         let Ok(h) = horses.get(m.horse) else { continue };
-        let at = if m.started && m.up() { *h } else { jig(h) };
+        let at = if m.started && m.seated() { *h } else { jig(h) };
         if *tf != at {
             *tf = at;
         }

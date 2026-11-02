@@ -448,7 +448,7 @@ fn greet(
                     let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, Vec3::new(p.x, tf.translation.y, p.y));
                     tf.translation = Vec3::new(p.x, y, p.y);
                     tf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
-                    anim.play(format!("{kind}_trot_x"));
+                    anim.play(crate::pets::hurry_clip(&kind));
                 }
                 continue;
             }

@@ -314,7 +314,7 @@ fn social_partners(
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
-    bathing: Query<(), With<crate::petbath::InBath>>,
+    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>)>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected, player) in &sims {
@@ -373,7 +373,7 @@ fn social_partners(
         }
     }
     for (e, pet, _, mut anim, busy) in &mut pets {
-        // (Ridden, or being bathed: theirs to see to.)
+        // (Ridden, being bathed, at a jump: theirs to see to.)
         if busy && !seen.contains(&e) && !ridden.contains(e) && !bathing.contains(e) {
             commands.entity(e).remove::<PetBusy>();
             anim.play(format!("{}_idle_stand_breathe_x", pet.kind));
@@ -453,6 +453,16 @@ impl PetAnim {
     /// How far into its clip it is (seconds, counting on past its end as it loops).
     pub fn time(&self) -> f32 {
         self.time
+    }
+}
+
+/// A pet's clip for going somewhere in a hurry: a grown cat's or dog's trot, a horse's canter, a
+/// kitten's or puppy's run (the young have no trot, horses none at all).
+pub fn hurry_clip(kind: &str) -> String {
+    match kind {
+        "ac" | "ad" | "al" => format!("{kind}_trot_x"),
+        "ah" | "ch" => format!("{kind}_canter_x"),
+        _ => format!("{kind}_run_x"),
     }
 }
 
@@ -942,6 +952,9 @@ pub struct SavedPet {
     /// A dog's tricks (`dogtricks`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tricks: Option<crate::dogtricks::DogTricks>,
+    /// A horse's Jumping and how fresh it is for it (`horsejumps`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horse: Option<crate::horsejumps::HorseSkills>,
     /// What it wears (Create a Pet's Accessories: its parts' instances).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub accessories: Vec<u64>,
@@ -1059,7 +1072,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -1087,7 +1100,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None })
     }
 }
 
@@ -1135,6 +1148,9 @@ fn spawn_household_pets(
             }
             if let Some(t) = pet.tricks.clone() {
                 commands.entity(e).insert(t);
+            }
+            if let Some(s) = pet.horse.clone() {
+                commands.entity(e).insert(s);
             }
             if !pet.accessories.is_empty() {
                 commands.entity(e).insert(WantsAccessories(pet.accessories.clone()));
@@ -1236,13 +1252,13 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// The household's pets, for the save.
-pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>, Option<&Accessories>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
+pub fn saved(pets: &Query<(&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>, Option<&Accessories>, Option<&crate::horsejumps::HorseSkills>))>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
     let Some(data) = data else { return Vec::new() };
     pets.iter()
-        .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn))| {
+        .filter_map(|(p, h, tf, m, (b, t, saddled, tricks, worn, horse))| {
             let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
             let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, fur_mix: p.look.fur_mix.clone(), layers: p.look.layers.clone() })
+            Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), horse: horse.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, fur_mix: p.look.fur_mix.clone(), layers: p.look.layers.clone() })
         })
         .collect()
 }

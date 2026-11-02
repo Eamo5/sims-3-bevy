@@ -284,6 +284,13 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ad2o_dogBall_",
     "al2o_dogBall_",
     "ah2o_horseBall_",
+    // (Horse jumps: the horse's, the rider's and the obstacle's halves, the bars' down pose, a
+    // horse that hates jumping kicking them down.)
+    "ah2o_jump_",
+    "a2o_jump_",
+    "o_jump_",
+    "ah2o_trait_hatesJumping_",
+    "ah_trait_hatesJumping_",
     // (The pet hygienator, and its own idle pose.)
     "ac2o_hygienator_",
     "ad2o_hygienator_",

@@ -216,6 +216,13 @@ pub fn rider_clip(name: &str) -> Option<Option<&'static str>> {
         "a_rideHorse_walk_y" => return Some(Some("ah_walk_x")),
         "a_rideHorse_canter_y" => return Some(Some("ah_canter_x")),
         "a_rideHorse_run_y" => return Some(Some("ah_run_x")),
+        // (Over a jump: the horse's jump carries it, `horsejumps`.)
+        "a2o_jump_highSuccess_rider_y" => return Some(Some("ah2o_jump_highSuccess_x")),
+        "a2o_jump_lowSuccess_rider_y" => return Some(Some("ah2o_jump_lowSuccess_x")),
+        "a2o_jump_lowSuccess_waterObstacle_rider_y" => return Some(Some("ah2o_jump_lowSuccess_waterObstacle_x")),
+        "a2o_jump_fail_rider_y" => return Some(Some("ah2o_jump_fail_x")),
+        "a2o_jump_cavaletti_rider_y" => return Some(Some("ah2o_jump_cavaletti_x")),
+        "a2o_jump_downObstacle_rider_y" => return Some(Some("ah2o_jump_downObstacle_x")),
         _ => {}
     }
     (name.ends_with("_rider_y") || name.starts_with("a_idleMount_")).then_some(None)
@@ -543,7 +550,8 @@ pub fn drive_skeletons(
             let wo = clip.tracks.get(&WORLD_OFFSET);
             let (p, r) = (wo.and_then(|w| sample_track_vec(&w.translation, t)).unwrap_or(Vec3::ZERO), wo.and_then(|w| sample_track_quat(&w.rotation, t)).unwrap_or(Quat::IDENTITY));
             let travel = horse.and_then(|h| lib.get(&data, h)).and_then(|h| {
-                let ht = if h.duration > 0.0 { t % h.duration } else { 0.0 };
+                // (Held at its end, the horse's travel at its end too, not round again.)
+                let ht = if h.duration <= 0.0 { 0.0 } else if t >= h.duration { h.duration } else { t % h.duration };
                 h.tracks.get(&WORLD_OFFSET).and_then(|w| sample_track_vec(&w.translation, ht))
             });
             (p, r.inverse(), travel.map_or(Vec3::ZERO, |w| Vec3::new(w.x, 0.0, w.z)))

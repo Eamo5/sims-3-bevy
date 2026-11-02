@@ -333,7 +333,7 @@ fn bathe(
                 let step = pet.walk_speed() * 1.6 * dt;
 
                 walk_route(&mut s.route, &mut ptf, step, |l, p| crate::nav::floor_height(&world.data, building.as_deref(), l, p));
-                anim.play(format!("{kind}_trot_x"));
+                anim.play(crate::pets::hurry_clip(&kind));
                 continue;
             }
             // (Lifted in from the Sim's arms, or hopping in from beside them; in the tub's frame.)
@@ -426,7 +426,7 @@ fn walk_back(
             commands.entity(e).remove::<(WalkBack, PetBusy, InBath)>();
             anim.play(crate::pets::idle_clip(&pet.kind, false, &mut rng));
         } else {
-            anim.play(format!("{}_trot_x", pet.kind));
+            anim.play(crate::pets::hurry_clip(&pet.kind));
         }
     }
 }

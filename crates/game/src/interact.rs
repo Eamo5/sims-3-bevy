@@ -267,6 +267,8 @@ pub enum ObjectKind {
     HorseBall,
     /// The pet hygienator: a grungy cat or dog washed in it.
     PetHygienator,
+    /// A horse jump, or the cavaletti trainer (`horsejumps`).
+    HorseJump,
     /// A minor pet's terrarium (`terrarium`).
     Terrarium,
     /// A bird cage (the Pets pack's: a terrarium for a bird, `terrarium`).
@@ -305,6 +307,8 @@ impl ObjectKind {
             Self::HorseBall
         } else if has("objects.pets.pethygienator") {
             Self::PetHygienator
+        } else if has("objects.hobbiesskills.") && (s.ends_with("jump") || s.ends_with("cavaletti")) {
+            Self::HorseJump
         } else if has("objects.pets.watertrough") {
             Self::WaterTrough
         } else if has("objects.minorpets.terrarium") {
@@ -601,7 +605,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator => "Misc",
+            Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -3023,6 +3027,10 @@ pub enum ActionKind {
     /// A pet bathed in a tub (`petbath`): which, the tub, its kind, and where the Sim kneels and
     /// faces (planned from the tub's slots once asked for).
     BathePet { pet: Entity, tub: Entity, kind: &'static str, at: Vec2, face: Vec2, level: u8, planned: bool },
+    /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
+    HorseJump { obstacle: Entity },
+    /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
+    PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3801,6 +3809,8 @@ pub(crate) fn run_actions(
                         ActionKind::Ride { slot, .. } => Some((*slot, 1)),
                         // (At the tub's side, where its slot has them.)
                         ActionKind::BathePet { at, level, .. } => Some((*at, *level)),
+                        // (Before a jump's bars.)
+                        ActionKind::PickUpJump { at, .. } => Some((*at, 1)),
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } | ActionKind::DogTrick { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3879,7 +3889,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4686,9 +4696,9 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } => finished = true,
                             // (At the tub: `petbath` bathes the pet from here.)
-                            ActionKind::BathePet { face, .. } => {
+                            ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6256,7 +6266,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } => {}
                         _ => finished = true,
                     }
                 }

@@ -596,7 +596,7 @@ fn act(
                 let y = crate::nav::floor_height(&world.data, building.as_deref(), 1, Vec3::new(p.x, tf.translation.y, p.y));
                 tf.translation = Vec3::new(p.x, y, p.y);
                 tf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
-                anim.play(format!("{}_trot_x", pet.kind));
+                anim.play(crate::pets::hurry_clip(&pet.kind));
             }
             continue;
         }
@@ -933,7 +933,8 @@ fn thoughts(mut commands: Commands, clock: Res<GameClock>, pets: Query<(Entity, 
 
 /// PET_NEEDS=hungry|bladder|tired|bored|restless|dirty (tests): the household's pets that need, a few
 /// seconds in; PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them (`stall`: a
-/// box stall); PET_TOY=<catalogue name> that toy a couple of metres off it; PET_WHO=<name> the\n/// pet that's for.
+/// box stall); PET_TOY=<catalogue name> that toy a couple of metres off it; PET_WHO=<name> the
+/// pet that's for.
 #[allow(clippy::type_complexity)]
 fn needs_test(
     mut commands: Commands,

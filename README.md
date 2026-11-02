@@ -1016,6 +1016,31 @@ installation is unreachable.
   and company are seen to every five minutes; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
   `RIDE_SKILL=<level>` (tests).
+  Horses go over the pack's jumps (the gate, wall and scary wall, the oxer and triple bars, the
+  water jumps, the fire jumps, the cavaletti trainer), each with its own tuning from the game's
+  data (`kJumpTuning`; an oxer's and triple bars' as they stand high). A rider up on a horse picks
+  "Jump" ("Practice Jumping" over a cavaletti; greyed on foot, "You must be riding a horse to do
+  this", or with the horse in need of a break): the horse is ridden round to a run-up behind the
+  nearer start (the jump's `StartSlots`, every jump but a cavaletti both ways, somewhere to land),
+  gallops in and goes over with the pack's `HorseJumps` clips, the horse's, the rider's and the
+  obstacle's together, carried over by its clip's `world_offset`. How it goes is the game's roll
+  (`DoJump`): a chance of clearing it clean and of scraping over by the horse's Jumping (the
+  obstacle's `HighSuccessChances` and `LowSuccessChances`), lifted by the rider's Riding
+  (`RideSkillModifier`) and the pair's mood (`MoodModifier`), weighed down for a horse that hates
+  jumping (`HatesJumpingModifier`); else it refuses at the bars. A scrape knocks a gate's, wall's
+  or scary wall's bars down (its half, `knockDown`, left lying) or an oxer's or triple bars' rails
+  (`o_jump_down_pose`), till a Sim sets them back up ("Pick Up", "Replace All Rails": the swipe of
+  a hand), and a knocked-down jump is ridden straight through (`RideThrough`); a water jump scraped
+  over soaks its rider. Going over gives the horse Jumping (`HighSuccessGain`, `LowSuccessGain`,
+  more the better its rider rides: `JumpingSkillMultiplier`, up to 1.8) and the rider Riding
+  (`RiderHighSuccessGain`); each jump tires a horse for learning (`PetSkillFatigue`, by its
+  level's `FatigueModifiers`; never after a hundred jumps, Tireless Leaper) till it needs a break,
+  fresh again over four hours; its Jumping is on its tooltip and kept in saves. The household's
+  horses go over the lot's jumps of their own accord when bored or restless (`Jump`: Fun,
+  `HorseExercise`), and one that hates jumping kicks a jump's bars down instead (`KickDown`: the
+  pack's kick, the bars falling with its half). `JUMP_TEST=<horse>[:<jumps>]`, `JUMP_OBSTACLE`,
+  `JUMP_AT`, `JUMP_SKILL`, `JUMP_FORCE`, `JUMP_AUTO`, `JUMP_HATES`, `JUMP_PICKUP`, `JUMP_PIE`
+  (tests).
   The pack's longer socials are played in their parts, start, loops and end, the pet's half of
   each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
   Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and
