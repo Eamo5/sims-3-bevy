@@ -284,6 +284,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ad2o_dogBall_",
     "al2o_dogBall_",
     "ah2o_horseBall_",
+    // (A pet bathed in a tub: the Sim's, the pet's, the tub's and the hair dryer's.)
+    "a2ac_tub_bathe_",
+    "a2ad_tub_bathe_",
+    "a2al_tub_bathe_",
     "ah2o_hayPile_eat_",
     "ah_nap_",
     "ch_nap_",
@@ -783,6 +787,7 @@ pub const CLIP_PREFIXES: &[&str] = &[
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
 pub const PROP_ACTORS: &[&str] = &[
     "hoofPick",
+    "hairDryer",
     "ropeFK",
     "ropeIK",
     "pitchfork",

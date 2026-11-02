@@ -919,7 +919,7 @@ fn thoughts(mut commands: Commands, clock: Res<GameClock>, pets: Query<(Entity, 
     }
 }
 
-/// PET_NEEDS=hungry|bladder|tired|bored|restless (tests): the household's pets that need, a few
+/// PET_NEEDS=hungry|bladder|tired|bored|restless|dirty (tests): the household's pets that need, a few
 /// seconds in; PET_BOWL=1 puts a filled pet bowl and a litter box by the first of them (`stall`: a
 /// box stall); PET_TOY=<catalogue name> that toy a couple of metres off it; PET_WHO=<name> the\n/// pet that's for.
 #[allow(clippy::type_complexity)]
@@ -953,6 +953,7 @@ fn needs_test(
             Some("tired") => m.0[ENERGY] = -70.0,
             Some("bored") => m.0[FUN] = -60.0,
             Some("restless") => m.0[URGE] = -70.0,
+            Some("dirty") => m.0[HYGIENE] = -70.0,
             _ => {}
         }
         info!("pet needs test: {} {:?}", pet.name, m.0);

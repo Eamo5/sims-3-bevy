@@ -958,7 +958,18 @@ installation is unreachable.
   the lot), missing it now and then (`kChanceToFail`, one in ten); a restless horse nudges, bites
   and throws or sits on its Happy Horse Ball (`HorseBall`: HorseExercise 100), the ball rolling off
   nine metres; a dog with no chew toy chews a cat's toy (`CatToy.Chew`). `PET_TOY=<catalogue
-  name>`, `PET_WHO=<pet>`, `PET_NEEDS=bored|restless` (tests). Sims' petting and praise are company
+  name>`, `PET_WHO=<pet>`, `PET_NEEDS=bored|restless|dirty` (tests). A teen or older bathes the
+  household's grown cats and dogs in the house's tub (the pet's menu's Bathe, the game's `BathePet`):
+  kneeling at the side of the tub that can be reached (its `BathePetHumanSlots` for a dog, the dog
+  coming up to its `BathePetDogSlots` beside them and hopping in; a cat or little dog lifted in;
+  a shower over a tub or a corner tub from its one side; a tub against a wall from the room's),
+  the pet coming up the stairs to one upstairs and back down after; then the pack's `BathtubPets`
+  clips for the Sim, the pet and the tub together (the water rising), the pet moved by its clips'
+  `world_offset`: in, washed until clean (Hygiene 200 an hour, the Sim's falling as much, at least
+  `kBatheMinTime`), out and dried off with the hair dryer. A Hyper or Aggressive dog makes a bad bath
+  of it half the time (its own loop, half as fast); a cat scrambles out half the time, liking the Sim
+  the less for it (`kCatFailLTRDecrease`). Grown-ups bathe a grungy dog of their own accord.
+  `PET_BATH=<pet>` (tests). Sims' petting and praise are company
   and fun for them. The household's grown-ups fill a bowl down to three bites of their own
   accord (§25 a bite it's short, as the game's `FillBowl`), or from its menu, and pets let it
   be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.

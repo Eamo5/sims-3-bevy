@@ -1373,6 +1373,19 @@ fn world_click(
                 }
             }
         }
+        // (A grown cat or dog of the household's: bathed in the house's tub by a teen or older,
+        // the game's `BathePet`.)
+        if crate::petbath::bathable(kind) && home && crate::riding::can_ride(actor_sim) {
+            let tub = pickable
+                .iter()
+                .filter(|(e, _, _, o, _)| o.is_some_and(|o| matches!(o.kind, crate::interact::ObjectKind::Bathtub | crate::interact::ObjectKind::ShowerTub)) && lot_objects_q.get(*e).is_err())
+                .min_by(|a, b| a.1.translation().distance(ptf.translation()).total_cmp(&b.1.translation().distance(ptf.translation())))
+                .map(|(e, ..)| e);
+            if let Some(tub) = tub {
+                let a = crate::petbath::bath_action(t, kind, tub, false);
+                options.push((a.label.clone(), a.kind));
+            }
+        }
         pie.submenus.clear();
         // (A dog of the household's: its tricks taught, by a teen or older, and asked for.)
         if crate::dogtricks::trick_dog(kind) && home && crate::riding::can_ride(actor_sim) {

@@ -54,6 +54,12 @@ fn route_objects(
     let slots = slots.get_or_insert_with(|| ui.data.route_slots.iter().cloned().collect());
     for (e, mut o) in &mut objects {
         commands.entity(e).insert(Routed);
+        // (A tub's slots, for bathing pets in it.)
+        if matches!(o.kind, ObjectKind::Bathtub | ObjectKind::ShowerTub)
+            && let Some(s) = slots.get(&o.objd)
+        {
+            commands.entity(e).insert(crate::petbath::TubSlots(s.iter().map(|(n, p, f)| (*n, Vec2::new(p[0], p[2]), Vec2::new(f[0], f[2]).normalize_or(Vec2::Y))).collect(), o.kind == ObjectKind::ShowerTub));
+        }
         let Some(n) = o.kind.route_slot() else { continue };
         if let Some((_, p, f)) = slots.get(&o.objd).and_then(|s| s.iter().find(|s| s.0 == n)) {
             o.route = Some((Vec2::new(p[0], p[2]), Vec2::new(f[0], f[2]).normalize_or(Vec2::Y)));
@@ -3010,6 +3016,9 @@ pub enum ActionKind {
     /// A dog of the household's taught a trick, or asked for one it knows (`dogtricks`): which,
     /// the trick (`dogtricks::TRICKS`), where it was, its kind.
     DogTrick { target: Entity, trick: u8, teach: bool, at: Vec2, kind: &'static str },
+    /// A pet bathed in a tub (`petbath`): which, the tub, its kind, and where the Sim kneels and
+    /// faces (planned from the tub's slots once asked for).
+    BathePet { pet: Entity, tub: Entity, kind: &'static str, at: Vec2, face: Vec2, level: u8, planned: bool },
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3786,6 +3795,8 @@ pub(crate) fn run_actions(
                         }
                         // (Beside a horse to get on it, where the game's jig stands them.)
                         ActionKind::Ride { slot, .. } => Some((*slot, 1)),
+                        // (At the tub's side, where its slot has them.)
+                        ActionKind::BathePet { at, level, .. } => Some((*at, *level)),
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } | ActionKind::DogTrick { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -4672,6 +4683,11 @@ pub(crate) fn run_actions(
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
                             ActionKind::Dismount => finished = true,
+                            // (At the tub: `petbath` bathes the pet from here.)
+                            ActionKind::BathePet { face, .. } => {
+                                tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                                anim.pose = Pose::Use;
+                            }
                             // (Before the dog: `dogtricks` plays it from here.)
                             ActionKind::DogTrick { at, .. } => {
                                 let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
@@ -6236,7 +6252,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } => {}
                         _ => finished = true,
                     }
                 }

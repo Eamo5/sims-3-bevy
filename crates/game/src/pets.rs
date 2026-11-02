@@ -314,6 +314,7 @@ fn social_partners(
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
+    bathing: Query<(), With<crate::petbath::InBath>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected, player) in &sims {
@@ -372,7 +373,8 @@ fn social_partners(
         }
     }
     for (e, pet, _, mut anim, busy) in &mut pets {
-        if busy && !seen.contains(&e) && !ridden.contains(e) {
+        // (Ridden, or being bathed: theirs to see to.)
+        if busy && !seen.contains(&e) && !ridden.contains(e) && !bathing.contains(e) {
             commands.entity(e).remove::<PetBusy>();
             anim.play(format!("{}_idle_stand_breathe_x", pet.kind));
         }
