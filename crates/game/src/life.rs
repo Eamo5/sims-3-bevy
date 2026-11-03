@@ -891,10 +891,13 @@ pub enum MoodletKind {
     BeautifulBistro,
     CreepyGraveyard,
     Hydrophobic,
+    /// Long on a horse's back (`riding`), and thrown off one.
+    SaddleSore,
+    ForciblyDismounted,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 144] = {
+    pub const ALL: [MoodletKind; 146] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -910,6 +913,7 @@ impl MoodletKind {
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
             Technophobia, Hydrophobic, FightThePower, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
+            SaddleSore, ForciblyDismounted,
         ]
     };
 
@@ -1089,6 +1093,8 @@ impl MoodletKind {
             BeautifulBistro => md("Beautiful Bistro", "It's hard not to stop for food at such an exquisite restaurant. Such good taste in décor guarantees a stellar menu.", 30, 0.0),
             CreepyGraveyard => md("Creepy Graveyard", "Graveyards are terrifying places filled with dead bodies, the ghosts of the bodies, and fear.", -5, 0.0),
             Hydrophobic => md("Hydrophobic", "There's just too much water for them to enjoy this moment.", -20, 3.0),
+            SaddleSore => md("Saddle Sore", "Spending a lot of time on the back of a horse tends to leave quite an impression on one's backside. Ouch!", -15, 3.0),
+            ForciblyDismounted => md("Forcibly Dismounted", "Sims do not like having to dismount their steed by surprise, but sometimes their horse knows best.", -35, 12.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1246,6 +1252,8 @@ impl MoodletKind {
             BeautifulPark | LovelyPool | BeautifulGarden | BeautifulBistro => ("BeautifulView", true),
             CreepyGraveyard => ("CreepyGraveyard", true),
             Hydrophobic => ("Hydrophobic", true),
+            SaddleSore => ("SaddleSore", true),
+            ForciblyDismounted => ("ForciblyDismounted", true),
         }
     }
 }

@@ -1023,7 +1023,14 @@ installation is unreachable.
   `BeingRiddenPosture`'s tuning has it, the two grow fonder, the horse's exercise and company and
   the rider's fun and company are seen to, and the rider learns Riding; "Dismount" (or the ride cancelled, or anything
   else asked of the rider) brings them down beside it. `RIDE_TEST=<horse>[:<dx>,<dz>[,<s>]]`,
-  `RIDE_SKILL=<level>`, `HORSE_RACING=<level>` (tests).
+  A horse in a foul mood throws its rider as its mood turns (at -30 or worse, one time in five; a
+  Mean one, ornery, from 25 and two times in five; never a Gentle one: `BeingRiddenPosture`'s
+  tuning), and a starving or exhausted one, the game warning of it as they get up, a quarter of
+  an hour or so after (`kDistressThrowRiderDelay`): it rears, the rider tumbling off behind it
+  with the pack's `throwRider` clips (a teen's own), liking fifty less and Forcibly Dismounted.
+  Long in the saddle (three hours untrained to eighteen a master: `kMinSaddleSoreTime`,
+  `kMaxSaddleSoreTime`) the rider's Saddle Sore, rubbing their backside (the moodlet's idle).
+  `RIDE_SKILL=<level>`, `HORSE_RACING=<level>`, `RIDE_THROW=1` (tests).
   Horses go over the pack's jumps (the gate, wall and scary wall, the oxer and triple bars, the
   water jumps, the fire jumps, the cavaletti trainer), each with its own tuning from the game's
   data (`kJumpTuning`; an oxer's and triple bars' as they stand high). A rider up on a horse picks

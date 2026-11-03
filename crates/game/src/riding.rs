@@ -59,6 +59,37 @@ const BENEFIT_EXERCISE: f32 = 1.0;
 const BENEFIT_HORSE_SOCIAL: f32 = 2.0;
 const BENEFIT_RIDER: f32 = 0.5;
 const BENEFIT_RIDING: f32 = 3.0;
+/// A horse throwing its rider (`BeingRiddenPosture`'s tuning): at this mood or worse, so likely
+/// as its mood changes (an ornery one's sooner and likelier: `kOrneryMoodThresholdToThrowRider`);
+/// a starving or exhausted one so many minutes after they're up (`kDistressThrowRiderDelay`); the
+/// liking it costs (`ThrowRider.kLTRDelta`).
+const THROW_MOOD: f32 = -30.0;
+const THROW_CHANCE: f64 = 0.2;
+const ORNERY_THROW_MOOD: f32 = 25.0;
+const ORNERY_THROW_CHANCE: f64 = 0.4;
+const DISTRESS_THROW: (f64, f64) = (15.0, 20.0);
+const THROW_LIKING: f32 = -50.0;
+/// Where the thrown rider's clips are, behind the horse (their first pose's seat over its saddle).
+const THROWN_AT: Vec3 = Vec3::new(0.0, 0.0, -1.93);
+/// How long up before a rider's saddle sore, untrained to master (`RidingSkill`'s
+/// `kMinSaddleSoreTime`, `kMaxSaddleSoreTime`, minutes).
+const SADDLE_SORE: (f64, f64) = (180.0, 1080.0);
+
+/// When a rider of a Riding level gets saddle sore, so many minutes up.
+pub fn saddle_sore_after(level: u32) -> f64 {
+    SADDLE_SORE.0 + (SADDLE_SORE.1 - SADDLE_SORE.0) * level.min(10) as f64 / 10.0
+}
+
+/// Whether a horse in this mood, with these traits, throws its rider (`r`, 0 to 1, the roll):
+/// never a gentle one, sooner a mean (ornery) one.
+pub fn throws(mood: f32, traits: &[String], r: f64) -> bool {
+    if crate::pettraits::has(traits, "GentlePet") {
+        return false;
+    }
+    let (at, chance) = if crate::pettraits::has(traits, "MeanPet") { (ORNERY_THROW_MOOD, ORNERY_THROW_CHANCE) } else { (THROW_MOOD, THROW_CHANCE) };
+    mood <= at && r < chance
+}
+
 /// How far off a canter's worth going to, and a gallop's (metres).
 const CANTER_FROM: f32 = 12.0;
 const GALLOP_FROM: f32 = 30.0;
@@ -195,6 +226,8 @@ enum Stage {
     Up,
     /// Over a jump (`horsejumps`).
     Jump,
+    /// Thrown off (`ThrowRider`).
+    Thrown,
     /// Getting off (`DISMOUNTS`).
     Off(usize),
 }
@@ -217,11 +250,15 @@ pub struct Mounted {
     /// Off to the Equestrian Center (`equestrian`): the lot and what for, ridden off the lot's
     /// edge.
     compete: Option<(usize, crate::equestrian::CenterTask)>,
+    /// When they'll be saddle sore, and when a starving or exhausted horse throws them (game
+    /// minutes).
+    sore_at: f64,
+    throw_at: Option<f64>,
 }
 
 impl Mounted {
     pub fn new(horse: Entity, unsaddle: bool) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None }
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None, sore_at: f64::INFINITY, throw_at: None }
     }
 
     /// Playing in step with the horse (not saddling it).
@@ -306,8 +343,8 @@ pub(crate) fn ride(
     (time, clock, delta): (Res<Time>, Res<GameClock>, Res<crate::clock::SimDelta>),
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
     (grid, world, building, exit): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::interact::LotExit>>),
-    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>)), Without<crate::rabbitholes::AtRabbitHole>>,
-    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>)), Without<Sim>>,
+    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>, Option<&mut crate::life::Moodlets>)), Without<crate::rabbitholes::AtRabbitHole>>,
+    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>, Option<&crate::pets::PetTraits>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     (obstacles, jumps): (
@@ -317,8 +354,8 @@ pub(crate) fn ride(
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();
-    for (e, sim, mut m, mut queue, mut anim, mut skills, (mood, mut sim_motives)) in &mut sims {
-        let Ok((pet, mut htf, mut hanim, motives, mut bonds, (skel, tack, mut hskills))) = horses.get_mut(m.horse) else {
+    for (e, sim, mut m, mut queue, mut anim, mut skills, (mood, mut sim_motives, mut moodlets)) in &mut sims {
+        let Ok((pet, mut htf, mut hanim, mut motives, mut bonds, (skel, tack, mut hskills, htraits))) = horses.get_mut(m.horse) else {
             // (The horse gone: down where they are.)
             queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
             commands.entity(e).remove::<(Mounted, ActionClip)>();
@@ -384,6 +421,32 @@ pub(crate) fn ride(
                 if done(&mut lib, &hanim) {
                     m.stage = Stage::Up;
                     play(&mut hanim, &mut m, IDLES[0]);
+                    m.sore_at = clock.minutes + saddle_sore_after(level);
+                    // (A starving or exhausted horse: warned, and thrown off before long.)
+                    if let Some(mo) = motives.as_deref()
+                        && (mo.0[crate::petneeds::HUNGER] < -80.0 || mo.0[crate::petneeds::ENERGY] < -99.0)
+                    {
+                        let key = if mo.0[crate::petneeds::HUNGER] < -80.0 { "Starving" } else { "Exhausted" };
+                        notes.push(format!("{} is {}! {} should get off soon before {} bucks them off!", pet.name, key.to_lowercase(), sim.full_name(), pet.name));
+                        m.throw_at = Some(clock.minutes + rng.random_range(DISTRESS_THROW.0..DISTRESS_THROW.1));
+                    }
+                }
+            }
+            // (Thrown: the two's clips, the rider ending up on the ground behind it.)
+            Stage::Thrown => {
+                if done(&mut lib, &hanim) {
+                    queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
+                    commands.entity(e).remove::<(Mounted, ActionClip)>();
+                    commands.entity(m.horse).remove::<Ridden>();
+                    hanim.replay(format!("{}_idle_stand_breathe_x", pet.kind));
+                    anim.pose = Pose::Stand;
+                    if let Some(b) = bonds.as_deref_mut() {
+                        b.add(sim.id, true, THROW_LIKING);
+                    }
+                    if let Some(ml) = moodlets.as_deref_mut() {
+                        ml.add(crate::life::MoodletKind::ForciblyDismounted, clock.minutes);
+                    }
+                    info!("riding: {} threw {}", pet.name, sim.first);
                 }
             }
             // (Over a jump: `horsejumps` plays it, and it's over when it's done with it.)
@@ -443,6 +506,27 @@ pub(crate) fn ride(
                 }
                 if !matches!(queue.0.front(), Some(a) if matches!(a.kind, ActionKind::Ride { .. }) && !a.cancel) {
                     off = true;
+                }
+                // (Thrown off: a horse in a foul mood as its mood turns, a starving or exhausted
+                // one when its patience is out; not over a jump or on the way to one.)
+                let distressed = m.throw_at.is_some_and(|t| clock.minutes >= t);
+                let foul = clock.minutes >= m.benefit_at && motives.as_deref().is_some_and(|mo| throws(crate::petneeds::mood(mo), htraits.map_or(&[][..], |t| &t.0[..]), rng.random()));
+                let forced = std::env::var_os("RIDE_THROW").is_some();
+                if !off && m.jump.is_none() && (distressed || foul || forced) && !(forced && m.throw_at == Some(f64::NEG_INFINITY)) {
+                    let teen = sim.age == crate::sim::Age::Teen;
+                    m.stage = Stage::Thrown;
+                    m.path.clear();
+                    m.compete = None;
+                    m.throw_at = Some(f64::NEG_INFINITY);
+                    play(&mut hanim, &mut m, if teen { ("ah2t_riding_throwRider_x", &["ah2t_riding_throwRider_y"]) } else { ("ah2a_riding_throwRider_x", &["ah2a_riding_throwRider_y"]) });
+                    continue;
+                }
+                // (Saddle sore after so long up, and as long as they stay up.)
+                if clock.minutes >= m.sore_at
+                    && let Some(ml) = moodlets.as_deref_mut()
+                    && !ml.has(crate::life::MoodletKind::SaddleSore)
+                {
+                    ml.add(crate::life::MoodletKind::SaddleSore, clock.minutes);
                 }
                 if off {
                     let way = way_on(level, rng.random());
@@ -560,7 +644,7 @@ pub(crate) fn ride(
                     if let Some(b) = bonds.as_deref_mut() {
                         b.add(sim.id, true, BENEFIT_LIKING);
                     }
-                    if let Some(mut mo) = motives {
+                    if let Some(mo) = motives.as_deref_mut() {
                         mo.add(crate::petneeds::URGE, BENEFIT_EXERCISE);
                         mo.add(crate::petneeds::SOCIAL, BENEFIT_HORSE_SOCIAL);
                     }
@@ -664,7 +748,13 @@ fn in_step(
 fn seat_riders(mut sims: Query<(&Mounted, &mut Transform), With<Sim>>, horses: Query<&Transform, (With<Pet>, Without<Sim>)>) {
     for (m, mut tf) in &mut sims {
         let Ok(h) = horses.get(m.horse) else { continue };
-        let at = if m.started && m.seated() { *h } else { jig(h) };
+        let at = if m.stage == Stage::Thrown {
+            Transform::from_translation(h.translation + h.rotation * THROWN_AT).with_rotation(h.rotation)
+        } else if m.started && m.seated() {
+            *h
+        } else {
+            jig(h)
+        };
         if *tf != at {
             *tf = at;
         }
@@ -674,6 +764,18 @@ fn seat_riders(mut sims: Query<(&Mounted, &mut Transform), With<Sim>>, horses: Q
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foul_tempered_horses_throw_their_riders() {
+        let none: Vec<String> = Vec::new();
+        assert!(throws(-40.0, &none, 0.1));
+        assert!(!throws(-40.0, &none, 0.3), "one time in five");
+        assert!(!throws(-10.0, &none, 0.0), "not in a fair mood");
+        let mean = vec!["MeanPet".to_string()];
+        assert!(throws(20.0, &mean, 0.35), "an ornery one sooner and likelier");
+        assert!(!throws(-90.0, &["GentlePet".to_string()], 0.0), "never a gentle one");
+        assert_eq!((saddle_sore_after(0), saddle_sore_after(10), saddle_sore_after(5)), (180.0, 1080.0, 630.0));
+    }
 
     #[test]
     fn the_jig_is_by_the_horses_left_facing_it() {
