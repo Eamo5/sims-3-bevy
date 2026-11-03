@@ -1081,8 +1081,17 @@ installation is unreachable.
   (`HorseManager.GetHorseCost` with its tuning: six hundred a level of Racing and of Jumping, two
   hundred for each good trait and a hundred off a bad one, four to six hundred besides), and
   sold, the price is the household's with the game's words for it by how much, and the rider
-  comes home on foot. `COMPETE_TEST=<horse>:<kind>:<level>`, `COMPETE_SKILL`, `COMPETE_PACE`,
-  `COMPETE_PIE`, `COMPETE_SELL` (tests).
+  comes home on foot. And horses are bought there ("Buy Horse", greyed where the household has
+  no room for another pet): inside, the game's own Buy Horse dialog (`HUDBuyHorseDialog`) shows
+  the center's horses for sale (its `BuySellHorse` pool, four to eight topped up each day: grown
+  horses of the breeds Create a Pet lists, two to four traits each with the agile, fast and
+  genius ones half as likely again, as `EquestrainHorseCreator` draws them), each its breed's
+  picture and its name (`HudPetAdoptionEntry`) and, pointed at, its breed, traits and price (the
+  game's for a horse bought, a fifth over its worth). Picked (Accept greyed with the game's words
+  where the household can't afford it), the game asks if they're sure at its price, then for its
+  name ("Name Your Horse"), and the horse comes home with them, fonder of its buyer
+  (`kRelationshipBoostOnBuy`). `COMPETE_TEST=<horse>:<kind>:<level>`, `COMPETE_SKILL`,
+  `COMPETE_PACE`, `COMPETE_PIE`, `COMPETE_SELL`, `BUY_HORSE_TEST` (tests).
   The pack's longer socials are played in their parts, start, loops and end, the pet's half of
   each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
   Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and

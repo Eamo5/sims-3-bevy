@@ -4626,7 +4626,11 @@ pub(crate) fn run_actions(
                                         .or_else(|| crate::careerholes::Errand::of(*activity).map(|e| e.activity()))
                                         .or_else(|| crate::realestate::Deal::of(*activity).map(|d| d.activity()))
                                         .or_else(|| crate::careermetrics::Gig::of(*activity).map(|g| g.activity()))
-                                        .or_else(|| crate::careermetrics::review_task(*activity));
+                                        .or_else(|| crate::careermetrics::review_task(*activity))
+                                        .or_else(|| (*activity == crate::horsemarket::BUY_HORSE_TASK).then_some(&crate::horsemarket::BUY_HORSE));
+                                    if *activity == crate::horsemarket::BUY_HORSE_TASK {
+                                        commands.entity(me).insert(crate::horsemarket::BuyingHorse::default());
+                                    }
                                     if let Some(r) = crate::careermetrics::Reviewing::new(*activity, *lot) {
                                         commands.entity(me).insert(r);
                                     }

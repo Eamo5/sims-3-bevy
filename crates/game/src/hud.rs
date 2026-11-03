@@ -1282,7 +1282,7 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q))), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q))), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1304,7 +1304,7 @@ fn world_click(
                 Query<(), With<crate::guests::StayingOver>>,
                 Query<&crate::collecting::FishingSpot>,
                 Query<(), With<crate::swim::Swimming>>,
-                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>),
+                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>),
             ),
         ),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
@@ -2694,6 +2694,8 @@ fn world_click(
                     let menu = crate::equestrian::menu(layout_ui.as_deref(), lot, actor_sim, riding, horse, clock.weekday(), clock.hour_f());
                     equestrian_entries(&mut pie, &mut options, crate::equestrian::enter_label(layout_ui.as_deref()), menu);
                     options.push(crate::equestrian::sell_option(layout_ui.as_deref(), lot, actor_sim, horse.map(|h| h.0)));
+                    let pets = home_pets_q.iter().count();
+                    options.push(crate::horsemarket::option(layout_ui.as_deref(), lot, pets, members_q.iter().count() + pets));
                 }
                 // (Going out with someone: those about with the Sim, as the game's "...With".)
                 let here = on_lot.get(actor).ok().map(|l| l.0);

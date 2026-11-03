@@ -47,6 +47,11 @@ pub enum Question {
     RenameProperty { sim: Entity, lot: usize, suggested: String },
     /// A horse to sell at the Equestrian Center, for its price (`equestrian`): yes or no.
     SellHorse { sim: Entity, horse: Entity, price: i64 },
+    /// A horse for sale at the Equestrian Center bought at its price (`horsemarket`: an index into
+    /// its pool): yes or no.
+    BuyHorse { sim: Entity, horse: usize, price: i64 },
+    /// A horse bought named (typed in; the one it had if not).
+    NameHorse { sim: Entity, horse: usize, suggested: String },
     /// A child's or teen's wish promised that would be their lifetime wish (an index into
     /// `lifetime::LIFETIME_WISHES`; the wish's own number in `dreams`): yes or no.
     ConfirmLifetimeWish { sim: Entity, wish: usize, uid: u64 },
@@ -65,7 +70,7 @@ impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } | Question::SellHorse { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } | Question::SellHorse { sim, .. } | Question::BuyHorse { sim, .. } | Question::NameHorse { sim, .. } => Some(*sim),
             Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } | Question::DeleteCollection { .. } => None,
         }
     }

@@ -991,6 +991,35 @@ pub struct SavedPet {
 }
 
 impl SavedPet {
+    /// A new pet of a kind and breed (its outfit), as its breed is, nothing else about it yet.
+    pub fn new(id: u64, name: String, kind: &str, outfit: u64) -> Self {
+        Self {
+            id,
+            name,
+            kind: kind.to_string(),
+            outfit,
+            position: None,
+            motives: None,
+            bonds: Vec::new(),
+            traits: Vec::new(),
+            female: false,
+            saddled: false,
+            tricks: None,
+            horse: None,
+            accessories: Vec::new(),
+            shapes: Vec::new(),
+            coat: None,
+            tint: None,
+            tail: None,
+            mane: None,
+            hooves: None,
+            sliders: Vec::new(),
+            fur: None,
+            fur_mix: None,
+            layers: None,
+        }
+    }
+
     /// How it looks, beyond its breed.
     pub fn look(&self) -> PetLook {
         PetLook { shapes: self.shapes.clone(), coat: self.coat, tint: self.tint, tail: self.tail.clone(), mane: self.mane.clone(), hooves: self.hooves.clone(), sliders: self.sliders.clone(), fur: self.fur, fur_mix: self.fur_mix.clone(), layers: self.layers.clone() }

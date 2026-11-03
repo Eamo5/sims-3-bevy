@@ -298,6 +298,7 @@ fn type_into_box(
         Some(crate::dialog::Question::RenameProperty { sim, suggested, .. }) => (*sim, suggested, crate::estatedialog::NAME_LENGTH),
         Some(crate::dialog::Question::SaveName { suggested }) => (Entity::PLACEHOLDER, suggested, crate::gamepopup::NAME_LENGTH),
         Some(crate::dialog::Question::NameObject { object, suggested }) => (*object, suggested, crate::fishbowl::NAME_LENGTH),
+        Some(crate::dialog::Question::NameHorse { sim, suggested, .. }) => (*sim, suggested, 20),
         _ => {
             *asking = None;
             keys.clear();
@@ -389,8 +390,10 @@ fn question_dialogs(
             crate::dialog::Question::ConfirmLifetimeWish { .. } => "TwoButtonDialog",
             // (Saving over another save: yes or no.)
             crate::dialog::Question::Overwrite { .. } | crate::dialog::Question::DeleteCollection { .. } => "TwoButtonDialog",
+            // (A horse sold or bought at its price: yes or no.)
+            crate::dialog::Question::SellHorse { .. } | crate::dialog::Question::BuyHorse { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -410,7 +413,13 @@ fn question_dialogs(
         shown.plain = Some(plain);
         shown.dirty = true;
         match &ask.about {
-            crate::dialog::Question::CareerPath { .. } | crate::dialog::Question::CareerEvent { .. } | crate::dialog::Question::PhoneCall { .. } | crate::dialog::Question::Overwrite { .. } | crate::dialog::Question::DeleteCollection { .. } => {
+            crate::dialog::Question::CareerPath { .. }
+            | crate::dialog::Question::CareerEvent { .. }
+            | crate::dialog::Question::PhoneCall { .. }
+            | crate::dialog::Question::Overwrite { .. }
+            | crate::dialog::Question::DeleteCollection { .. }
+            | crate::dialog::Question::SellHorse { .. }
+            | crate::dialog::Question::BuyHorse { .. } => {
                 // The offer's words; a button for each path (or yes and no), in the game's words.
                 let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");
                 if let Some(t) = s.comment("Message").and_then(|w| s.text_of(w)) {
@@ -429,7 +438,8 @@ fn question_dialogs(
             | crate::dialog::Question::NameDiscovery { suggested, .. }
             | crate::dialog::Question::RenameProperty { suggested, .. }
             | crate::dialog::Question::SaveName { suggested }
-            | crate::dialog::Question::NameObject { suggested, .. } => {
+            | crate::dialog::Question::NameObject { suggested, .. }
+            | crate::dialog::Question::NameHorse { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {

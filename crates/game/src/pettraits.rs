@@ -131,6 +131,29 @@ pub fn random_up_to(kind: &str, n: usize, rng: &mut impl Rng) -> Vec<&'static st
     out
 }
 
+/// So many traits for a pet of a kind, drawn as the game's `GetRandomWeighedTraits`: each trait
+/// it can have equally likely but the favoured ones (`weight` times as likely), none twice, no two
+/// opposites.
+pub fn weighted(kind: &str, n: usize, favoured: &[&str], weight: f32, rng: &mut impl Rng) -> Vec<&'static str> {
+    let all = for_kind(kind);
+    let mut out: Vec<&'static str> = Vec::new();
+    while out.len() < n {
+        let pool: Vec<&'static str> = all.iter().copied().filter(|h| !out.contains(h) && compatible(&out, h) && PET_TRAITS.iter().any(|p| p.hex == *h && p.random)).collect();
+        let w = |h: &str| if favoured.contains(&h) { weight } else { 1.0 };
+        let total: f32 = pool.iter().map(|h| w(h)).sum();
+        if pool.is_empty() || total <= 0.0 {
+            break;
+        }
+        let mut r = rng.random_range(0.0..total);
+        let pick = pool.iter().copied().find(|h| {
+            r -= w(h);
+            r < 0.0
+        });
+        out.push(pick.unwrap_or(pool[pool.len() - 1]));
+    }
+    out
+}
+
 /// Whether a pet has a trait.
 pub fn has(traits: &[String], hex: &str) -> bool {
     traits.iter().any(|t| t == hex)
