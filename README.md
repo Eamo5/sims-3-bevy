@@ -602,8 +602,10 @@ installation is unreachable.
   to the nearest home with someone in.
 - **Skill classes**, as the game's: *Attend Cooking Class (§400)* at the bistro, Athletic at
   the stadium, Gardening and Logic at the science lab, Writing at the business office, Guitar
-  at the theatre, Charisma at city hall, Painting at the school, Handiness at the military base
-  and Fishing at the grocery. Each is an hour, from eight in the morning to four in the
+  at the theatre, Charisma at city hall, Painting at the school, Handiness at the military base,
+  Fishing at the grocery, and Riding at the Equestrian Center (two hours for §500, its
+  `kClassRidingCost` and `kClassRidingDuration`, teens and up, not while a competition's on
+  there). Each is an hour, from eight in the morning to four in the
   afternoon, once per skill, from the lot's menu or its map tag. A class gives the skill's
   first level's worth of points, and one class a day is a fifth off. Taken classes are kept in
   saves. `--do "Class Cooking"` attends one.
@@ -1073,8 +1075,14 @@ installation is unreachable.
   Riding for the rider and Racing and Jumping for the horse (`kSkillPointsAdded`, not for one
   needing a break), and a winner's trophy (the NATHCR Championship Trophy, the Lepping Classic
   Trophy, the J. Black Cross-Country Cup) in the rider's inventory; they ride home after. The
-  center's map tag says when its next competition is, or that one's on.
-  `COMPETE_TEST=<horse>:<kind>:<level>`, `COMPETE_SKILL`, `COMPETE_PACE`, `COMPETE_PIE` (tests).
+  center's map tag says when its next competition is, or that one's on. A horse is sold there
+  too ("Sell Horse", greyed on foot as the game's is: "...needs to ride or lead a horse into the
+  Equestrian Center to sell it"): ridden in, the game asks if they're sure at its price
+  (`HorseManager.GetHorseCost` with its tuning: six hundred a level of Racing and of Jumping, two
+  hundred for each good trait and a hundred off a bad one, four to six hundred besides), and
+  sold, the price is the household's with the game's words for it by how much, and the rider
+  comes home on foot. `COMPETE_TEST=<horse>:<kind>:<level>`, `COMPETE_SKILL`, `COMPETE_PACE`,
+  `COMPETE_PIE`, `COMPETE_SELL` (tests).
   The pack's longer socials are played in their parts, start, loops and end, the pet's half of
   each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
   Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and

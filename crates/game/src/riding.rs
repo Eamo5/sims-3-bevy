@@ -214,9 +214,9 @@ pub struct Mounted {
     unsaddle: bool,
     /// On the way to a jump (`horsejumps`): which, its start and the way over it.
     jump: Option<(Entity, Vec2, Vec2)>,
-    /// Off to a competition at the Equestrian Center (`equestrian`): the lot, the competition and
-    /// its level, ridden off the lot's edge.
-    compete: Option<(usize, u8, u8)>,
+    /// Off to the Equestrian Center (`equestrian`): the lot and what for, ridden off the lot's
+    /// edge.
+    compete: Option<(usize, crate::equestrian::CenterTask)>,
 }
 
 impl Mounted {
@@ -409,7 +409,7 @@ pub(crate) fn ride(
                 let mut off = false;
                 let mut to: Option<Vec2> = None;
                 let mut jump_to: Option<Entity> = None;
-                let mut compete: Option<(usize, u8, u8)> = None;
+                let mut compete: Option<(usize, crate::equestrian::CenterTask)> = None;
                 let mut i = 1;
                 while i < queue.0.len() {
                     match queue.0[i].kind {
@@ -428,9 +428,9 @@ pub(crate) fn ride(
                             off = true;
                             queue.0.remove(i);
                         }
-                        // (A competition entered: ridden off to it.)
-                        ActionKind::Compete { lot, kind, level } => {
-                            compete = Some((lot, kind, level));
+                        // (Off to the Equestrian Center: ridden off to it.)
+                        ActionKind::Equestrian { lot, task } => {
+                            compete = Some((lot, task));
                             (to, jump_to) = (None, None);
                             queue.0.remove(i);
                         }
@@ -515,8 +515,8 @@ pub(crate) fn ride(
                                 }
                                 None => play(&mut hanim, &mut m, IDLES[0]),
                             }
-                            if let Some((lot, kind, level)) = m.compete.take() {
-                                commands.entity(e).insert(crate::equestrian::EnterCompetition { lot, kind, level, horse: m.horse });
+                            if let Some((lot, task)) = m.compete.take() {
+                                commands.entity(e).insert(crate::equestrian::ToCenter { lot, task, horse: m.horse });
                             }
                         }
                     } else {
@@ -525,9 +525,9 @@ pub(crate) fn ride(
                         htf.translation = Vec3::new(p.x, y, p.y);
                         htf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
                     }
-                } else if let Some((lot, kind, level)) = m.compete.take() {
+                } else if let Some((lot, task)) = m.compete.take() {
                     // (Nowhere to ride to: off from where they are.)
-                    commands.entity(e).insert(crate::equestrian::EnterCompetition { lot, kind, level, horse: m.horse });
+                    commands.entity(e).insert(crate::equestrian::ToCenter { lot, task, horse: m.horse });
                 } else if done(&mut lib, &hanim) {
                     play(&mut hanim, &mut m, idle(&mut rng));
                 }

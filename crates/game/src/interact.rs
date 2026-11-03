@@ -3031,9 +3031,9 @@ pub enum ActionKind {
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
-    /// An Equestrian Center competition entered, up on a horse (`equestrian`; `riding` rides off
-    /// to it): the lot, the competition (Racing, Jumping, Cross-Country) and its level.
-    Compete { lot: usize, kind: u8, level: u8 },
+    /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
+    /// lot, and what for (a competition, the horse sold).
+    Equestrian { lot: usize, task: crate::equestrian::CenterTask },
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3892,7 +3892,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Compete { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4699,7 +4699,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Compete { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } => finished = true,
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));

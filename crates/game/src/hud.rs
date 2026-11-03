@@ -2693,6 +2693,7 @@ fn world_click(
                     let clock = &opp_q.2;
                     let menu = crate::equestrian::menu(layout_ui.as_deref(), lot, actor_sim, riding, horse, clock.weekday(), clock.hour_f());
                     equestrian_entries(&mut pie, &mut options, crate::equestrian::enter_label(layout_ui.as_deref()), menu);
+                    options.push(crate::equestrian::sell_option(layout_ui.as_deref(), lot, actor_sim, horse.map(|h| h.0)));
                 }
                 // (Going out with someone: those about with the Sim, as the game's "...With".)
                 let here = on_lot.get(actor).ok().map(|l| l.0);

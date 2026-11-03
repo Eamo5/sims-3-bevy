@@ -38,7 +38,7 @@ pub struct EquestrianPlugin;
 
 impl Plugin for EquestrianPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (compete_test, enter, compete, back).chain().after(crate::riding::ride).run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (compete_test, enter, compete, sell, back).chain().after(crate::riding::ride).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, panel.run_if(in_state(PlayMode::Live)));
     }
 }
@@ -88,8 +88,54 @@ const ENTRY_CLOSES_HOURS: f32 = 2.0;
 /// The winner's trophies (`AddCompetitionTrophy`), by competition.
 const TROPHIES: [&str; 3] = ["sculptureRewardHorseRace", "sculptureRewardHorseJumping", "sculptureRewardHorseCrossCountry"];
 
-/// Time at the center: before, the competition, after (the drive there and back on top).
+/// Time at the center: before, the competition, after (the drive there and back on top); a
+/// horse's sale (`kSellHorseInteractionLength`).
 pub static COMPETE: Activity = crate::rabbitholes::act("Compete", (BEFORE_MINUTES + LENGTH_MINUTES + AFTER_MINUTES) as f32, 0, [0.0; 6], None);
+pub static SELL: Activity = crate::rabbitholes::act("Sell Horse", 5.0, 0, [0.0; 6], None);
+
+/// Whether a rabbit-hole visit is one to the center with a horse.
+pub fn with_horse(a: &Activity) -> bool {
+    std::ptr::eq(a, &COMPETE) || std::ptr::eq(a, &SELL)
+}
+
+/// What a Sim rides off to the center for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CenterTask {
+    /// A competition (Racing, Jumping, Cross-Country) at a level (Beginner, Advanced,
+    /// International).
+    Compete { kind: u8, level: u8 },
+    /// The horse sold (`SellHorse`).
+    Sell,
+}
+
+/// What a horse is worth, as the game's `HorseManager.GetHorseCost` with its tuning: an adult's
+/// own worth, two hundred for each good trait and a hundred off for each bad one, six hundred a
+/// level of Racing and of Jumping, four to six hundred besides (`base`, 0 to 1), a fifth more to
+/// buy; fifty at the least.
+pub fn horse_cost(racing: u32, jumping: u32, trait_scores: &[i32], base: f32, buy: bool) -> i64 {
+    let mut n = COST_ADULT;
+    for s in trait_scores {
+        n += if *s > 0 { COST_GOOD_TRAIT } else if *s < 0 { -COST_BAD_TRAIT } else { 0 };
+    }
+    n += (racing.min(10) as f32 * COST_SKILL[0]) as i64 + (jumping.min(10) as f32 * COST_SKILL[1]) as i64;
+    n += (COST_BASE[0] + (COST_BASE[1] - COST_BASE[0]) * base.clamp(0.0, 1.0)) as i64;
+    if buy {
+        n = (n as f32 * COST_BUY) as i64;
+    }
+    n.max(MIN_COST)
+}
+
+/// `HorseManager`'s tuning: an adult's worth, each level of Racing's and Jumping's, the range
+/// besides, a buyer's markup, good and bad traits', the least; and the sale's words by price
+/// (`kHorseSellPriceTNSValue`).
+const COST_ADULT: i64 = 0;
+const COST_SKILL: [f32; 2] = [600.0, 600.0];
+const COST_BASE: [f32; 2] = [400.0, 600.0];
+const COST_BUY: f32 = 1.2;
+const COST_GOOD_TRAIT: i64 = 200;
+const COST_BAD_TRAIT: i64 = 100;
+const MIN_COST: i64 = 50;
+const SELL_WORDS_AT: [i64; 2] = [5000, 10000];
 
 /// Whether a lot is the Equestrian Center.
 pub fn is_center(world: &crate::loading::WorldInfo, lot: usize) -> bool {
@@ -164,7 +210,7 @@ pub fn menu(ui: Option<&UiAssets>, lot: usize, sim: &Sim, riding: u32, horse: Op
                     } else if (k == 1 || k == 2) && jumping < HORSE_LEVEL[l] {
                         ActionKind::Greyed(short("NotEnoughJumpingSkill", "{0.SimFirstName} does not have enough Jumping Skill to qualify for this competition."))
                     } else {
-                        ActionKind::Compete { lot, kind: k as u8, level: l as u8 }
+                        ActionKind::Equestrian { lot, task: CenterTask::Compete { kind: k as u8, level: l as u8 } }
                     };
                     (name, kind)
                 })
@@ -172,6 +218,17 @@ pub fn menu(ui: Option<&UiAssets>, lot: usize, sim: &Sim, riding: u32, horse: Op
             (label, Ok(levels))
         })
         .collect())
+}
+
+/// "Sell Horse" on the center's menu: up on a horse, or greyed with why not.
+pub fn sell_option(ui: Option<&UiAssets>, lot: usize, sim: &Sim, horse: Option<&Pet>) -> (String, ActionKind) {
+    const KEY: &str = "Gameplay/Objects/RabbitHoles/EquestrianCenter/SellHorse:";
+    let label = words(ui, &format!("{KEY}InteractionName"), "Sell Horse");
+    match horse {
+        Some(p) if p.kind == "ah" => (label, ActionKind::Equestrian { lot, task: CenterTask::Sell }),
+        Some(_) => (label, ActionKind::Greyed(words(ui, "Gameplay/Objects/RabbitHoles/EquestrianCenter/OfferStallionAsStud:NeedAdultHorse", "{0.SimName} must bring an adult horse to do that.").replace("{0.SimName}", &sim.full_name()))),
+        None => (label, ActionKind::Greyed(words(ui, &format!("{KEY}SimNeedsToBeRidingAHorse"), "{0.SimName} needs to ride or lead a horse into the Equestrian Center to sell it.").replace("{0.SimName}", &sim.full_name()))),
+    }
 }
 
 /// "Enter Equestrian Competition..."
@@ -259,13 +316,19 @@ pub fn standing(kind: usize, score: i32, legs: u32, mood: i32) -> i32 {
     }
 }
 
-/// Ridden off to a competition (`riding`, at the lot's edge): away to it.
+/// Ridden off to the center (`riding`, at the lot's edge): away to it.
 #[derive(Component)]
-pub struct EnterCompetition {
+pub struct ToCenter {
     pub lot: usize,
-    pub kind: u8,
-    pub level: u8,
+    pub task: CenterTask,
     pub horse: Entity,
+}
+
+/// At the center to sell the horse: whether the price has been asked.
+#[derive(Component)]
+pub struct SellingHorse {
+    pub horse: Entity,
+    asked: bool,
 }
 
 /// A Sim at a competition with their horse: which, its name, the pace, the others (rider, horse),
@@ -299,22 +362,33 @@ pub struct BackFromCompetition;
 #[derive(Component)]
 pub struct AtCompetition;
 
-/// Off to the competition: the rider at the center (`AtRabbitHole`), the horse with them.
+/// Off to the center: the rider there (`AtRabbitHole`), the horse with them.
 #[allow(clippy::type_complexity)]
 fn enter(
     mut commands: Commands,
     (clock, world, ui): (Res<crate::clock::GameClock>, Res<crate::loading::CurrentWorld>, Option<Res<UiAssets>>),
-    sims: Query<(Entity, &Sim, &EnterCompetition)>,
+    sims: Query<(Entity, &Sim, &ToCenter)>,
     pets: Query<&Pet>,
     mut notes: ResMut<Notifications>,
 ) {
     let mut rng = rand::rng();
     for (e, sim, ec) in &sims {
-        commands.entity(e).remove::<EnterCompetition>();
+        commands.entity(e).remove::<ToCenter>();
         let Ok(horse) = pets.get(ec.horse) else { continue };
-        let (kind, level) = (usize::from(ec.kind).min(2), usize::from(ec.level).min(2));
         let place = world.data.lots.get(ec.lot).map_or_else(|| "the Equestrian Center".to_string(), |l| crate::rabbitholes::lot_title(l, world.data.lot_names.get(ec.lot).map_or("", |s| s.as_str())));
         let inside_from = clock.minutes + crate::rabbitholes::DRIVE_MINUTES;
+        let (kind, level) = match ec.task {
+            CenterTask::Compete { kind, level } => (usize::from(kind).min(2), usize::from(level).min(2)),
+            // (A sale: the price asked once they're in.)
+            CenterTask::Sell => {
+                info!("equestrian: {} rides {} off to {place} to sell {}", sim.first, horse.name, horse.name);
+                notes.push(format!("{} rode {} off to {} to sell {}.", sim.first, horse.name, place, horse.name));
+                let until = inside_from + SELL.minutes as f64 + crate::rabbitholes::DRIVE_MINUTES;
+                commands.entity(e).insert((AtRabbitHole { lot: ec.lot, activity: &SELL, inside_from, until, place }, Visibility::Hidden, SellingHorse { horse: ec.horse, asked: false }));
+                commands.entity(ec.horse).insert((Visibility::Hidden, AtCompetition));
+                continue;
+            }
+        };
         let until = inside_from + COMPETE.minutes as f64 + crate::rabbitholes::DRIVE_MINUTES;
         let name = words(ui.as_deref(), &format!("Gameplay/Objects/RabbitHoles/EquestrianCenter:CompetitionName{}{}", KINDS[kind], LEVELS[level]), &format!("{} {}", LEVELS[level], KIND_WORDS[kind]));
         // (The others, none with the same name, nor their horses: `SetCompetitorsNames`.)
@@ -491,11 +565,78 @@ fn ordinal(n: u8) -> String {
     format!("{n}{suffix}")
 }
 
-/// Home again: the horse with them, as it was.
-fn back(mut commands: Commands, sims: Query<(Entity, &Competing), (With<BackFromCompetition>, Without<AtRabbitHole>)>) {
-    for (e, c) in &sims {
-        commands.entity(e).remove::<(BackFromCompetition, Competing)>();
-        commands.entity(c.horse).remove::<AtCompetition>().insert(Visibility::Inherited);
+/// Home again: the horse with them, as it was (unless it's been sold).
+fn back(mut commands: Commands, sims: Query<(Entity, Option<&Competing>, Option<&SellingHorse>), (With<BackFromCompetition>, Without<AtRabbitHole>)>, horses: Query<(), With<Pet>>) {
+    for (e, c, s) in &sims {
+        commands.entity(e).remove::<(BackFromCompetition, Competing, SellingHorse)>();
+        if let Some(h) = c.map(|c| c.horse).or(s.map(|s| s.horse)).filter(|h| horses.contains(*h)) {
+            commands.entity(h).remove::<AtCompetition>().insert(Visibility::Inherited);
+        }
+    }
+}
+
+/// A horse's sale: its price asked once they're in (`SellHorse`'s "Are you sure?"); sold, the
+/// price paid, the game's words for it by how much, and the horse gone (the rider home on foot);
+/// not, home with it.
+#[allow(clippy::type_complexity)]
+fn sell(
+    mut commands: Commands,
+    (clock, ui, gu): (Res<crate::clock::GameClock>, Option<Res<UiAssets>>, Option<Res<crate::icons::GameUi>>),
+    mut sims: Query<(Entity, &Sim, &mut AtRabbitHole, &mut SellingHorse)>,
+    horses: Query<(&Pet, Option<&crate::horsejumps::HorseSkills>, Option<&crate::pets::PetTraits>, Option<&crate::riding::Tack>)>,
+    (mut questions, mut answers): (ResMut<crate::dialog::Questions>, MessageReader<crate::dialog::Answered>),
+    (mut notes, mut household, mut play): (ResMut<Notifications>, Option<ResMut<Household>>, MessageWriter<crate::sound::PlaySound>),
+) {
+    for a in answers.read() {
+        let crate::dialog::Question::SellHorse { sim, horse, price } = a.about else { continue };
+        let Ok((_, s, mut at, _)) = sims.get_mut(sim) else { continue };
+        let Ok((pet, _, _, tack)) = horses.get(horse) else { continue };
+        if a.answer != 0 {
+            // (Not sold: home with it.)
+            at.until = at.until.min(clock.minutes + crate::rabbitholes::DRIVE_MINUTES);
+            continue;
+        }
+        if let Some(h) = household.as_deref_mut() {
+            h.funds += price;
+        }
+        let key = if price > SELL_WORDS_AT[1] {
+            "EquestrianCenterHighPriceSellTNS"
+        } else if price > SELL_WORDS_AT[0] {
+            "EquestrianCenterMediumPriceSellTNS"
+        } else {
+            "EquestrianCenterLowPriceSellTNS"
+        };
+        let or = format!("Thanks! We'll find a buyer for {} soon!", pet.name);
+        let t = ui.as_deref().and_then(|u| u.localize(&format!("Gameplay/Excel/Notifications/Notifications:{key}"))).filter(|t| !t.is_empty()).map_or(or, |t| crate::layout::gendered(&t, pet.female).replace("{0.SimFirstName}", &pet.name));
+        notes.push(format!("{t} (§{price})"));
+        play.write(crate::sound::PlaySound::ui("ui_object_sell"));
+        info!("equestrian: {} sold {} for §{price}", s.first, pet.name);
+        for p in tack.map_or(&[][..], |t| &t.0[..]) {
+            commands.entity(*p).try_despawn();
+        }
+        commands.entity(horse).try_despawn();
+    }
+    for (e, s, at, mut sh) in &mut sims {
+        if sh.asked || clock.minutes < at.inside_from {
+            continue;
+        }
+        sh.asked = true;
+        let Ok((pet, skills, traits, _)) = horses.get(sh.horse) else { continue };
+        let scores: Vec<i32> = traits.map_or(&[][..], |t| &t.0[..]).iter().filter_map(|t| gu.as_deref().and_then(|g| g.data.traits.iter().find(|x| x.hex == *t)).map(|x| x.score)).collect();
+        let price = horse_cost(skills.map_or(0, |s| s.racing_level()), skills.map_or(0, |s| s.level()), &scores, rand::rng().random(), false);
+        const KEY: &str = "Gameplay/Objects/RabbitHoles/EquestrianCenter/SellHorse:";
+        let text = words(ui.as_deref(), &format!("{KEY}SellHorse"), "{1.SimFirstName} will sell for {2.Money}. Are you sure you want to sell {1.SimFirstName}? You might not be able to buy {MA.him}{FA.her} back if you change your mind.");
+        let text = crate::layout::gendered(&text, pet.female).replace("{1.SimFirstName}", &pet.name).replace("{2.Money}", &format!("§{price}"));
+        let (yes, no) = (words(ui.as_deref(), "Ui/Caption/Global:Yes", "Yes"), words(ui.as_deref(), "Ui/Caption/Global:No", "No"));
+        questions.ask(crate::dialog::Ask {
+            about: crate::dialog::Question::SellHorse { sim: e, horse: sh.horse, price },
+            icon: String::new(),
+            heading: String::new(),
+            title: words(ui.as_deref(), &format!("{KEY}InteractionName"), "Sell Horse"),
+            text,
+            answers: vec![crate::dialog::Answer { label: yes, detail: String::new(), icon: String::new() }, crate::dialog::Answer { label: no, detail: String::new(), icon: String::new() }],
+        });
+        info!("equestrian: {} asked to sell {} for §{price}", s.first, pet.name);
     }
 }
 
@@ -702,7 +843,8 @@ pub fn standings(others: &[(String, String)], place: u8, rider: &str, horse: &st
 /// selected Sim rides the household's horse of that name and enters that competition (the clock's
 /// to be at a competition's hours: `--hour 18`); `COMPETE_SKILL=<riding>,<racing>,<jumping>` sets
 /// the two's skills, `COMPETE_PACE=<0..2>` the pace; `COMPETE_PIE=riding|foot` the camera put on
-/// the center instead, up on the horse or not, for its menu to be clicked up (`CLICK_AT`).
+/// the center instead, up on the horse or not, for its menu to be clicked up (`CLICK_AT`);
+/// `COMPETE_SELL=1` the horse ridden off to be sold.
 #[allow(clippy::type_complexity)]
 fn compete_test(
     mut commands: Commands,
@@ -755,7 +897,9 @@ fn compete_test(
                 return;
             };
             info!("compete test: entering {} {}", KINDS[usize::from(num(1)).min(2)], LEVELS[usize::from(num(2)).min(2)]);
-            q.push_player(crate::interact::Action::new("Compete", ActionKind::Compete { lot, kind: num(1), level: num(2) }, false));
+            // (COMPETE_SELL=1: the horse taken to be sold instead.)
+            let task = if std::env::var_os("COMPETE_SELL").is_some() { CenterTask::Sell } else { CenterTask::Compete { kind: num(1), level: num(2) } };
+            q.push_player(crate::interact::Action::new("Compete", ActionKind::Equestrian { lot, task }, false));
             *stage = (2, now);
         }
         2 => {
@@ -819,6 +963,15 @@ mod tests {
         assert_eq!(standing(0, 40, 4, 0), 160);
         assert_eq!(standing(1, 40, 4, 3), 43);
         assert_eq!(mood_bonus(80.0, 60.0), 7);
+    }
+
+    #[test]
+    fn a_horse_is_worth_what_the_game_says() {
+        // (Untrained, no traits that matter, the least besides: four hundred; to buy, a fifth more.)
+        assert_eq!(horse_cost(0, 0, &[], 0.0, false), 400);
+        assert_eq!(horse_cost(0, 0, &[], 0.0, true), 480);
+        // (Racing 5 and Jumping 2, a good trait and a bad: 4200 + 200 - 100 + 600.)
+        assert_eq!(horse_cost(5, 2, &[10, -10, 0], 1.0, false), 4900);
     }
 
     #[test]

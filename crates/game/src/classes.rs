@@ -4,7 +4,9 @@
 //! points (`SkillManager.SetTakenClass`). Cooking at the bistro, Athletic at the stadium,
 //! Gardening and Logic at the science lab, Writing at the business office, Guitar at the theatre,
 //! Charisma at city hall, Painting at the school, Handiness at the military base, Fishing at the
-//! grocery. One class a day is a fifth off (the game's discounted class of the day).
+//! grocery; Riding at the Equestrian Center, two hours for §500 (its `kClassRidingCost` and
+//! `kClassRidingDuration`), for teens and up, and not while a competition's on there
+//! (`ClassesAllowedNow`). One class a day is a fifth off (the game's discounted class of the day).
 
 use bevy::prelude::*;
 
@@ -38,10 +40,14 @@ pub struct Class {
 const IN_CLASS: [f32; 6] = [-6.0, -5.0, -6.0, 8.0, -3.0, 4.0];
 
 const fn class(venue: &'static [&'static str], skill: &'static str, name: &'static str) -> Class {
-    Class { venue, skill, activity: Activity { name, minutes: 60.0, cost: PRICE, per_hour: IN_CLASS, skill: None, open: OPEN, close: CLOSE } }
+    class_at(venue, skill, name, PRICE, 60.0)
 }
 
-pub static CLASSES: [Class; 10] = [
+const fn class_at(venue: &'static [&'static str], skill: &'static str, name: &'static str, cost: i64, minutes: f32) -> Class {
+    Class { venue, skill, activity: Activity { name, minutes, cost, per_hour: IN_CLASS, skill: None, open: OPEN, close: CLOSE } }
+}
+
+pub static CLASSES: [Class; 11] = [
     class(&["bistro", "restaurant"], "Cooking", "Attend Cooking Class"),
     class(&["stadium"], "Athletic", "Attend Athletic Class"),
     class(&["science"], "Gardening", "Attend Gardening Class"),
@@ -52,6 +58,7 @@ pub static CLASSES: [Class; 10] = [
     class(&["school"], "Painting", "Attend Painting Class"),
     class(&["military"], "Handiness", "Attend Handiness Class"),
     class(&["grocery"], "Fishing", "Attend Fishing Class"),
+    class_at(&["equestrian"], "Riding", "Attend Riding Class", 500, 120.0),
 ];
 
 /// The skills whose classes a Sim has taken.
@@ -79,7 +86,8 @@ pub fn discounted(day: u32) -> usize {
 
 /// What a class costs today.
 pub fn price(i: usize, day: u32) -> i64 {
-    if discounted(day) == i { (PRICE as f64 * DISCOUNT).round() as i64 } else { PRICE }
+    let full = CLASSES.get(i).map_or(PRICE, |c| c.activity.cost);
+    if discounted(day) == i { (full as f64 * DISCOUNT).round() as i64 } else { full }
 }
 
 /// The classes a lot offers a Sim now: those of its kind, in class hours, not taken already, for
@@ -95,6 +103,8 @@ pub fn lot_classes(lot: &s3formats::world::LotInfo, hour: f32, day: u32, age: cr
         .enumerate()
         .filter(|(_, c)| c.venue.iter().any(|v| name.contains(v)))
         .filter(|(_, c)| !taken.is_some_and(|t| t.0.iter().any(|s| s == c.skill)))
+        // (Riding for teens and up, and not while the center's competition is on.)
+        .filter(|(_, c)| c.skill != "Riding" || (age != crate::sim::Age::Child && crate::equestrian::doors((day % 7) as usize, hour).is_none()))
         .map(|(i, c)| {
             let words = ui.and_then(|u| u.localize("Gameplay/Abstracts/RabbitHole/AttendClassInRabbitHole:InteractionName")).unwrap_or_else(|| "Attend {0.String} Class ({1.Money})".into());
             (words.replace("{0.String}", c.skill).replace("{1.Money}", &format!("§{}", price(i, day))), CLASS_TASK + i)
@@ -149,8 +159,16 @@ mod tests {
         // (A fifth off the day's class.)
         let d = discounted(4);
         assert_eq!(price(d, 4), 320);
-        assert_eq!(price((d + 1) % CLASSES.len(), 4), 400);
+        assert_eq!(price((d + 1) % CLASSES.len(), 4), CLASSES[(d + 1) % CLASSES.len()].activity.cost);
         assert_eq!(class_task(CLASS_TASK + 1).map(|a| a.name), Some("Attend Athletic Class"));
         assert_eq!(class_of(&CLASSES[6].activity), Some("Charisma"));
+        // (Riding at the Equestrian Center: two hours for §500, teens and up, not in Sunday's
+        // matinee.)
+        let center = lot("46_RH_EquestrianCenter");
+        let riding = lot_classes(&center, 10.0, 0, adult, None, None);
+        assert_eq!(riding.len(), 1);
+        assert_eq!(class_task(riding[0].1).map(|a| (a.minutes, a.cost)), Some((120.0, 500)));
+        assert!(lot_classes(&center, 10.0, 0, crate::sim::Age::Child, None, None).is_empty());
+        assert!(lot_classes(&center, 13.0, 6, adult, None, None).is_empty());
     }
 }

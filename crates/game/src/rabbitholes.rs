@@ -397,7 +397,7 @@ fn outings(
                 commands.entity(e).insert(crate::venues::VenueDone(i));
             } else if let Some(skill) = crate::classes::class_of(at.activity) {
                 commands.entity(e).insert(crate::classes::ClassOver(skill));
-            } else if std::ptr::eq(at.activity, &crate::equestrian::COMPETE) {
+            } else if crate::equestrian::with_horse(at.activity) {
                 commands.entity(e).insert(crate::equestrian::BackFromCompetition);
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
                 commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
