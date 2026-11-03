@@ -229,6 +229,14 @@ impl HorseSkills {
         (self.racing_level() > before).then_some(self.racing_level())
     }
 
+    /// Racing points as they come (a competition's), the level reached if it's a new one.
+    pub fn add_racing(&mut self, points: f32) -> Option<u32> {
+        let table = crate::interact::skill_points("Racing");
+        let before = self.racing_level();
+        self.racing = crate::interact::points_to_level(table, crate::interact::level_to_points(table, self.racing) + points.max(0.0));
+        (self.racing_level() > before).then_some(self.racing_level())
+    }
+
     /// Never tired by jumping (Tireless Leaper).
     pub fn tireless(&self) -> bool {
         self.jumps >= TIRELESS

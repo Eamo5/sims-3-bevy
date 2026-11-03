@@ -178,7 +178,7 @@ pub struct AtRabbitHole {
     pub place: String,
 }
 
-const DRIVE_MINUTES: f64 = 25.0;
+pub const DRIVE_MINUTES: f64 = 25.0;
 
 impl AtRabbitHole {
     /// The overlap of this simulation tick with the visit, excluding both drives.
@@ -397,6 +397,8 @@ fn outings(
                 commands.entity(e).insert(crate::venues::VenueDone(i));
             } else if let Some(skill) = crate::classes::class_of(at.activity) {
                 commands.entity(e).insert(crate::classes::ClassOver(skill));
+            } else if std::ptr::eq(at.activity, &crate::equestrian::COMPETE) {
+                commands.entity(e).insert(crate::equestrian::BackFromCompetition);
             } else if std::ptr::eq(at.activity, &crate::gardening::BUY_SEEDS) {
                 commands.entity(e).insert(crate::gardening::GardenRequest::BoughtSeeds);
                 notes.push(format!("{} is back from the grocery store.", sim.first));

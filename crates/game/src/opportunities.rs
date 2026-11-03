@@ -72,7 +72,7 @@ pub fn task_for(o: &OpportunityInfo) -> &'static Activity {
 
 /// The rabbit-hole types on a lot: from its rabbit-hole objects, else its name.
 pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static str> {
-    const CLASSES: [(&str, &str); 18] = [
+    const CLASSES: [(&str, &str); 19] = [
         ("Bistro", "Restaurant"),
         ("Diner", "Restaurant"),
         ("CityHall", "CityHall"),
@@ -92,6 +92,7 @@ pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static 
         ("GypsyCaravan", "GypsyCaravan"),
         ("StellarObservatory", "StellarObservatory"),
         ("ServoBotArena", "ServoBotArena"),
+        ("EquestrianCenter", "EquestrianCenter"),
     ];
     // (The combined ones: a building of two or three, each worked at and visited as its own.)
     const COMBOS: [(&str, &[&str]); 13] = [
@@ -141,6 +142,7 @@ pub fn lot_types(world: &crate::loading::WorldInfo, lot: usize) -> Vec<&'static 
             ("book", "Bookstore"),
             ("hospital", "Hospital"),
             ("criminal", "Hideout"),
+            ("equestrian", "EquestrianCenter"),
         ] {
             if n.contains(k) && !out.contains(&t) {
                 out.push(t);

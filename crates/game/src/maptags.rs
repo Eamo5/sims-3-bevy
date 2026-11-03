@@ -27,7 +27,7 @@ pub struct MapTagsPlugin;
 
 impl Plugin for MapTagsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_tags, collectible_tags, sim_tags, opportunity_tags, place_tags, tag_clicks, sim_tag_clicks, tag_right_clicks).chain().run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (spawn_tags, show_times, collectible_tags, sim_tags, opportunity_tags, place_tags, tag_clicks, sim_tag_clicks, tag_right_clicks).chain().run_if(in_state(PlayMode::Live)))
             .add_systems(OnExit(PlayMode::Live), |mut c: Commands, q: Query<Entity, With<MapTag>>| {
                 for e in &q {
                     c.entity(e).try_despawn();
@@ -412,6 +412,28 @@ fn venue_glyph(internal: &str) -> &'static str {
     .iter()
     .find(|(k, _)| has(k))
     .map_or("park", |(_, g)| g)
+}
+
+/// The Equestrian Center's tag says when its next competition is, or that one's on (the game's
+/// `RabbitHoleMapTagDescriptionText`).
+fn show_times(
+    mut tags: Query<(&MapTag, &mut crate::icons::Tooltip)>,
+    (world, clock, ui): (Res<CurrentWorld>, Res<crate::clock::GameClock>, Option<Res<crate::layout::UiAssets>>),
+    mut last: Local<Option<i64>>,
+) {
+    let minute = clock.minutes as i64;
+    if *last == Some(minute) && !tags.is_empty() {
+        return;
+    }
+    *last = Some(minute);
+    for (tag, mut tip) in &mut tags {
+        let Some(lot) = world.data.lots.get(tag.lot).filter(|_| crate::equestrian::is_center(&world.data, tag.lot)) else { continue };
+        let name = world.data.lot_names.get(tag.lot).map_or("", |s| s.as_str());
+        let text = format!("{}\n{}", crate::rabbitholes::lot_title(lot, name), crate::equestrian::show_text(ui.as_deref(), clock.weekday(), clock.hour_f()));
+        if tip.0 != text {
+            tip.0 = text;
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

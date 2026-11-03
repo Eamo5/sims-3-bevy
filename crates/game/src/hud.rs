@@ -301,6 +301,28 @@ pub(crate) fn submenu_kind(i: usize) -> ActionKind {
     ActionKind::GoHere(Vec2::new(f32::NAN, f32::INFINITY), i as u8)
 }
 
+/// The Equestrian Center's "Enter Equestrian Competition..." (`equestrian`): its competitions,
+/// each a submenu of its levels, or greyed with why not.
+fn equestrian_entries(pie: &mut PieMenu, options: &mut Vec<(String, ActionKind)>, enter: String, menu: crate::equestrian::Menu) {
+    match menu {
+        Err(why) => options.push((enter, ActionKind::Greyed(why))),
+        Ok(kinds) => {
+            let mut list = Vec::new();
+            for (label, levels) in kinds {
+                match levels {
+                    Err(why) => list.push((label, ActionKind::Greyed(why))),
+                    Ok(levels) => {
+                        list.push((format!("{label}... ›"), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((label, levels));
+                    }
+                }
+            }
+            options.push((format!("{enter} ›"), submenu_kind(pie.submenus.len())));
+            pie.submenus.push((enter, list));
+        }
+    }
+}
+
 fn as_submenu(k: &ActionKind) -> Option<usize> {
     match k {
         ActionKind::GoHere(p, i) if p.x.is_nan() && p.y == f32::INFINITY => Some(*i as usize),
@@ -2569,9 +2591,21 @@ fn world_click(
             pie.swim_to = Some(at);
             return;
         }
-        // (Up on a horse: ridden there, the game's "Ride Here".)
+        // (Up on a horse: ridden there, the game's "Ride Here"; at the Equestrian Center, its
+        // competitions.)
         if queues_q.get(actor).ok().and_then(crate::riding::riding_on).is_some() {
-            open_pie(&mut commands, &mut pie, cursor, "", actor, vec![("Ride Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))]);
+            let mut options = vec![("Ride Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
+            let mut title = String::new();
+            if let Some(lot) = crate::rabbitholes::lot_at(&world.data.lots, p).filter(|l| crate::equestrian::is_center(&world.data, *l)) {
+                title = crate::rabbitholes::lot_title(&world.data.lots[lot], world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
+                pie.submenus.clear();
+                let riding = writers.get(actor).map_or(0, |(_, s, _)| s.level("Riding"));
+                let horse = mounted_q.get(actor).ok().filter(|m| m.up()).and_then(|m| pets_q.get(m.horse).ok().map(|h| (h.0, horse_skills_q.get(m.horse).ok())));
+                let clock = &opp_q.2;
+                let menu = crate::equestrian::menu(layout_ui.as_deref(), lot, actor_sim, riding, horse, clock.weekday(), clock.hour_f());
+                equestrian_entries(&mut pie, &mut options, crate::equestrian::enter_label(layout_ui.as_deref()), menu);
+            }
+            open_pie(&mut commands, &mut pie, cursor, &title, actor, options);
             return;
         }
         let mut options = vec![("Go Here".to_string(), ActionKind::GoHere(Vec2::new(p.x, p.z), level))];
@@ -2641,7 +2675,8 @@ fn world_click(
                 (opp_q.2.day(), opp_q.2.weekday(), opp_q.2.hour_f()),
                 mood_q.get(actor).map_or(0.0, |m| m.0),
             ));
-            if !acts.is_empty() || !opp_tasks.is_empty() || visit || !jobs_here.is_empty() {
+            let equestrian = crate::equestrian::is_center(&world.data, lot);
+            if !acts.is_empty() || !opp_tasks.is_empty() || visit || !jobs_here.is_empty() || equestrian {
                 title = crate::rabbitholes::lot_title(l, world.data.lot_names.get(lot).map_or("", |s| s.as_str()));
                 options.clear();
                 if visit {
@@ -2651,6 +2686,14 @@ fn world_click(
                     options.push((activity_label(a), ActionKind::Visit { lot, activity: i }));
                 }
                 options.extend(jobs_here.into_iter().map(|(label, task)| (label, ActionKind::Visit { lot, activity: task })));
+                // (The Equestrian Center's competitions, up on a horse: each one's levels.)
+                if equestrian {
+                    let riding = writers.get(actor).map_or(0, |(_, s, _)| s.level("Riding"));
+                    let horse = mounted_q.get(actor).ok().filter(|m| m.up()).and_then(|m| pets_q.get(m.horse).ok().map(|p| (p.0, horse_skills_q.get(m.horse).ok())));
+                    let clock = &opp_q.2;
+                    let menu = crate::equestrian::menu(layout_ui.as_deref(), lot, actor_sim, riding, horse, clock.weekday(), clock.hour_f());
+                    equestrian_entries(&mut pie, &mut options, crate::equestrian::enter_label(layout_ui.as_deref()), menu);
+                }
                 // (Going out with someone: those about with the Sim, as the game's "...With".)
                 let here = on_lot.get(actor).ok().map(|l| l.0);
                 let company: Vec<String> = company_q

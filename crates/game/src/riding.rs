@@ -214,11 +214,14 @@ pub struct Mounted {
     unsaddle: bool,
     /// On the way to a jump (`horsejumps`): which, its start and the way over it.
     jump: Option<(Entity, Vec2, Vec2)>,
+    /// Off to a competition at the Equestrian Center (`equestrian`): the lot, the competition and
+    /// its level, ridden off the lot's edge.
+    compete: Option<(usize, u8, u8)>,
 }
 
 impl Mounted {
     pub fn new(horse: Entity, unsaddle: bool) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None }
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None }
     }
 
     /// Playing in step with the horse (not saddling it).
@@ -302,8 +305,8 @@ pub(crate) fn ride(
     mut commands: Commands,
     (time, clock, delta): (Res<Time>, Res<GameClock>, Res<crate::clock::SimDelta>),
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
-    (grid, world, building): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>),
-    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>))>,
+    (grid, world, building, exit): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::interact::LotExit>>),
+    mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>)), Without<crate::rabbitholes::AtRabbitHole>>,
     mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
@@ -406,6 +409,7 @@ pub(crate) fn ride(
                 let mut off = false;
                 let mut to: Option<Vec2> = None;
                 let mut jump_to: Option<Entity> = None;
+                let mut compete: Option<(usize, u8, u8)> = None;
                 let mut i = 1;
                 while i < queue.0.len() {
                     match queue.0[i].kind {
@@ -422,6 +426,12 @@ pub(crate) fn ride(
                         }
                         ActionKind::Dismount => {
                             off = true;
+                            queue.0.remove(i);
+                        }
+                        // (A competition entered: ridden off to it.)
+                        ActionKind::Compete { lot, kind, level } => {
+                            compete = Some((lot, kind, level));
+                            (to, jump_to) = (None, None);
                             queue.0.remove(i);
                         }
                         _ => {
@@ -442,7 +452,15 @@ pub(crate) fn ride(
                     continue;
                 }
                 let here = htf.translation.xz();
-                // (At a jump: round to its run-up, the nearer way, and in at a gallop.)
+                // (Off to the Equestrian Center: off the lot's edge, then away.)
+                if let Some(c) = compete {
+                    m.jump = None;
+                    m.compete = Some(c);
+                    let path = exit.as_deref().and_then(|x| grid.as_deref().and_then(|g| g.nearest_free(x.0).map(|(x, z)| g.center_of(x, z)).and_then(|p| g.find_path(here, p))));
+                    m.path = path.unwrap_or_default();
+                    let far = m.path.iter().fold((here, 0.0), |(a, d), b| (*b, d + a.distance(*b))).1;
+                    m.gait = gait_for(level, far);
+                }
                 if let (Some(o), Some(g)) = (jump_to, grid.as_deref()) {
                     let tired = hskills.as_ref().is_some_and(|s| s.worn_out);
                     match obstacles.get(o).ok().filter(|_| !tired).and_then(|(obs, otf)| crate::horsejumps::plan(g, here, &obs.world_lanes(otf))) {
@@ -458,6 +476,7 @@ pub(crate) fn ride(
                 }
                 if let (Some(to), Some(g)) = (to, grid.as_deref()) {
                     m.jump = None;
+                    m.compete = None;
                     let indoors = |p: Vec2| building.as_deref().is_some_and(|b| b.is_indoors(Vec3::new(p.x, 0.0, p.y)));
                     let path = g.nearest_free(to).map(|(x, z)| g.center_of(x, z)).filter(|p| !indoors(*p)).and_then(|p| g.find_path(here, p)).filter(|p| !p.iter().any(|q| indoors(*q)));
                     match path {
@@ -496,6 +515,9 @@ pub(crate) fn ride(
                                 }
                                 None => play(&mut hanim, &mut m, IDLES[0]),
                             }
+                            if let Some((lot, kind, level)) = m.compete.take() {
+                                commands.entity(e).insert(crate::equestrian::EnterCompetition { lot, kind, level, horse: m.horse });
+                            }
                         }
                     } else {
                         let p = here + d.normalize() * step;
@@ -503,6 +525,9 @@ pub(crate) fn ride(
                         htf.translation = Vec3::new(p.x, y, p.y);
                         htf.rotation = Quat::from_rotation_y(d.x.atan2(d.y));
                     }
+                } else if let Some((lot, kind, level)) = m.compete.take() {
+                    // (Nowhere to ride to: off from where they are.)
+                    commands.entity(e).insert(crate::equestrian::EnterCompetition { lot, kind, level, horse: m.horse });
                 } else if done(&mut lib, &hanim) {
                     play(&mut hanim, &mut m, idle(&mut rng));
                 }

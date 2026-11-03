@@ -1047,6 +1047,34 @@ installation is unreachable.
   pack's kick, the bars falling with its half). `JUMP_TEST=<horse>[:<jumps>]`, `JUMP_OBSTACLE`,
   `JUMP_AT`, `JUMP_SKILL`, `JUMP_FORCE`, `JUMP_AUTO`, `JUMP_HATES`, `JUMP_PICKUP`, `JUMP_PIE`
   (tests).
+  The Equestrian Center holds competitions as the game's `EnterEquestrianCompetition` has them:
+  a Sim up on a horse picks "Enter Equestrian Competition..." on the center's menu (clicking it
+  on foot or ridden up to), then Racing, Show Jumping or Cross-Country and its level (Beginner,
+  Advanced, International), each greyed with the game's words for why not: no horse ("You need
+  to bring a horse to compete!"), no competition on (every evening from six, Sunday's matinee
+  from noon) or entries closed (two hours before the end), the rider's Riding below the
+  competition's (`kLevelForEnter…Competition`: 2, 3, 6) or the horse's Racing or Jumping below
+  the level's (`kLevelFor…Comps`: 0, 3, 7). The rider rides off the lot's edge to it, the two
+  away a hundred minutes inside (ten to start, its eighty, ten after), announced in the game's
+  words for it under one of its names (the Southland Stakes, the Moore Horse Show...). Through
+  it the game's own competition panel (`HudCompetitionPanel`) shows its name and level, how far
+  along it is, the rider's picture, the pace to pick ("Steady Pace", "Take Risks", "Go for
+  Broke", each with its words) and the standings of its twelve, the rider's row lit, the others
+  shuffling past in a race (`RaceShuffle`). A leg every five minutes scores as the game's does
+  from the center's data (`EquestrianCenter`'s `SkillValues`): the rider's Riding's bonus, the
+  horse's Racing's and Jumping's for the competition (half each at Cross-Country), the pace's
+  chance at a bonus or a penalty (`kToneSuccessChance`, lifted by the rider's Riding:
+  `RidingSkillToneMultiplier`), the horse's traits (Fast and Lazy at racing, Agile and Hates
+  Jumping at jumping: `kPetTraitBonus`, the horse's own rather than, as the game's code slips,
+  the rider's), and the two's mood (`kMoodScoreMultiplier`); the place is the best whose score
+  it reaches on the center's `Scoring` table (a racer's projected over the race as it goes),
+  with its prize. The rider's hunger, bladder, fun and company and the horse's needs hold
+  meanwhile. At the end, the game's words for a poor finish, a placing or a victory, the prize,
+  Riding for the rider and Racing and Jumping for the horse (`kSkillPointsAdded`, not for one
+  needing a break), and a winner's trophy (the NATHCR Championship Trophy, the Lepping Classic
+  Trophy, the J. Black Cross-Country Cup) in the rider's inventory; they ride home after. The
+  center's map tag says when its next competition is, or that one's on.
+  `COMPETE_TEST=<horse>:<kind>:<level>`, `COMPETE_SKILL`, `COMPETE_PACE`, `COMPETE_PIE` (tests).
   The pack's longer socials are played in their parts, start, loops and end, the pet's half of
   each in step with the Sim's: Rub Belly (a dog liking them from 40, rolling over between them),
   Play (dogs), Brush (cats and dogs; Brush Horse), the Sim with the pack's pet brush in hand and

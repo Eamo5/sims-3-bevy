@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 170;
+pub const GAMEDATA_VERSION: u32 = 171;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1645,6 +1645,72 @@ pub struct GameDataBaked {
     /// Each horse jump class's tuning (its `kJumpTuning`), by class name.
     #[serde(default)]
     pub horse_jumps: Vec<HorseJumpTuning>,
+    /// The Equestrian Center's competitions (`EquestrianCenter`'s data: its `Scoring` and
+    /// `SkillValues` tables).
+    #[serde(default)]
+    pub equestrian: EquestrianTables,
+}
+
+/// The Equestrian Center's competition tables, as its data sheet has them: each place's score
+/// needed and prize, by competition (`Racing`, `Jumping`, `CrossCountry`: 0, 1, 2) and level
+/// (`Beginner`, `Advanced`, `International`: 0, 1, 2); and each skill level's bonus to a leg's
+/// score for the rider's Riding and the horse's Racing and Jumping, and the rider's Riding's lift
+/// to a pace's chance (`RidingSkillToneMultiplier`).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct EquestrianTables {
+    pub scoring: Vec<EquestrianPlace>,
+    pub skills: Vec<EquestrianSkillRow>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct EquestrianPlace {
+    pub kind: u8,
+    pub level: u8,
+    pub place: u8,
+    pub score: i32,
+    pub money: i32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct EquestrianSkillRow {
+    pub level: u8,
+    pub riding: i32,
+    pub racing: i32,
+    pub jumping: i32,
+    pub tone: f32,
+}
+
+/// The Equestrian Center's tables from its data sheet (rows left blank, the sheet's defaults,
+/// skipped).
+pub fn equestrian_tables(xml: &str) -> EquestrianTables {
+    let kind = |s: &str| ["Racing", "Jumping", "CrossCountry"].iter().position(|k| k.eq_ignore_ascii_case(s.trim())).map(|i| i as u8);
+    let level = |s: &str| ["Beginner", "Advanced", "International"].iter().position(|k| k.eq_ignore_ascii_case(s.trim())).map(|i| i as u8);
+    let int = |r: &HashMap<String, String>, k: &str| r.get(k).and_then(|v| v.trim().parse::<i32>().ok());
+    let scoring = records(xml, "Scoring")
+        .iter()
+        .filter_map(|r| {
+            Some(EquestrianPlace {
+                kind: kind(r.get("CompetitionType")?)?,
+                level: level(r.get("CompetitionLevel")?)?,
+                place: int(r, "Place")? as u8,
+                score: int(r, "ScoreRequired")?,
+                money: int(r, "MoneyReward").unwrap_or(0),
+            })
+        })
+        .collect();
+    let skills = records(xml, "SkillValues")
+        .iter()
+        .filter_map(|r| {
+            Some(EquestrianSkillRow {
+                level: int(r, "Level")? as u8,
+                riding: int(r, "RidingSkill").unwrap_or(0),
+                racing: int(r, "RacingSkill").unwrap_or(0),
+                jumping: int(r, "JumpingSkill").unwrap_or(0),
+                tone: r.get("RidingSkillToneMultiplier").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(1.0),
+            })
+        })
+        .collect();
+    EquestrianTables { scoring, skills }
 }
 
 /// How a horse jump goes, as the game tunes each kind of obstacle (`HorseJumpTuning`): the
@@ -3493,6 +3559,12 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             drink: ["DrinkInteractionName", "DrinkInteractionName_Evil", "DrinkInteractionName_Good", "DrinkInteractionName_Daredevil"].map(make),
             serve: ["InteractionName", "EvilInteractionName", "GoodInteractionName", "ExtremeInteractionName"].map(serve),
         };
+    }
+    // The Equestrian Center's competition tables (its data sheet, not its tuning).
+    if let Some(e) = pkg.of_type(T_XML).find(|e| names.get(&e.key.i).is_some_and(|n| n == "EquestrianCenter"))
+        && let Ok(d) = pkg.read(e)
+    {
+        out.equestrian = equestrian_tables(&String::from_utf8_lossy(&d));
     }
     if let Some(skills) = xml("Skills") {
         let rows = records(&skills, "SkillList");
@@ -5418,6 +5490,14 @@ mod tests {
         assert_eq!((t.min_time, t.max_time, t.min_shock, t.max_shock, t.shock_in_puddle), (25.0, 120.0, 0.0, 7.0, true));
         assert_eq!((t.repair_skill, t.upgrade_skill), (1500.0, 2640.0), "the never-breaks upgrade's, not another's");
         assert!(repair_tuning("Chair", "<base><StartPercentChanceBreak value=\"0\" /></base>").is_none(), "what doesn't break");
+    }
+
+    #[test]
+    fn equestrian_tables_are_read_from_the_centers_data_sheet() {
+        let xml = r#"<EquestrianCenter><Scoring><CompetitionType></CompetitionType><Place></Place></Scoring><Scoring><CompetitionType>CrossCountry</CompetitionType><CompetitionLevel>Advanced</CompetitionLevel><ScoreRequired>370</ScoreRequired><MoneyReward>1200</MoneyReward><Place>1</Place></Scoring><SkillValues><Level></Level></SkillValues><SkillValues><Level>2</Level><RidingSkill>1</RidingSkill><RacingSkill>4</RacingSkill><JumpingSkill>4</JumpingSkill><RidingSkillToneMultiplier>1.1</RidingSkillToneMultiplier></SkillValues></EquestrianCenter>"#;
+        let t = equestrian_tables(xml);
+        assert_eq!(t.scoring, vec![EquestrianPlace { kind: 2, level: 1, place: 1, score: 370, money: 1200 }]);
+        assert_eq!(t.skills, vec![EquestrianSkillRow { level: 2, riding: 1, racing: 4, jumping: 4, tone: 1.1 }]);
     }
 
     #[test]
