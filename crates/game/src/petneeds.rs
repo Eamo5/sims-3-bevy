@@ -263,6 +263,8 @@ pub enum PetDo {
     StallPee(Entity),
     /// At a toy (`pettoys`).
     Play(Entity, crate::pettoys::Toy),
+    /// Off somewhere it's sent (`petcontrol`: the player's "Go Here").
+    Go,
 }
 
 impl PetDo {
@@ -276,10 +278,11 @@ impl PetDo {
             PetDo::Play(_, t) => t.need(),
             PetDo::Drink(_) => THIRST,
             PetDo::Groom => HYGIENE,
+            PetDo::Go => FUN,
         }
     }
 
-    fn object(self) -> Option<Entity> {
+    pub fn object(self) -> Option<Entity> {
         match self {
             PetDo::Eat(e) | PetDo::Litter(e) | PetDo::Scratch(e) | PetDo::Chew(e) | PetDo::Drink(e) | PetDo::Sleep(Some(e)) | PetDo::Hay(e) | PetDo::StallPee(e) | PetDo::Play(e, _) => Some(e),
             _ => None,
@@ -450,34 +453,49 @@ fn choose(
                 break;
             }
         }
-        let Some((what, mut to)) = pick else { continue };
-        // (A toy: to its jig's slot, a ball from the side it can roll off from.)
-        let mut play = None;
-        if let PetDo::Play(s, toy) = what {
-            let Ok((_, _, otf, ..)) = objects.get(s) else { continue };
-            let at = otf.translation.xz();
-            let side = toy.rolls().then(|| crate::pettoys::push_side(at, here, toy.roll(), |a, b| crate::pettoys::room_to_roll(&grid, |p| on_lot(building.as_deref(), p), a, b))).flatten();
-            if toy.rolls() && side.is_none() {
-                continue;
-            }
-            to = Some(crate::pettoys::stand_at(toy, &pet.kind, at, otf.rotation, here, side).0);
-            play = Some(crate::pettoys::Playing { side, ..Default::default() });
+        let Some((what, to)) = pick else { continue };
+        let otf = what.object().and_then(|o| objects.get(o).ok()).map(|o| *o.2);
+        let Some(task) = plan(pet, here, what, to, otf, &grid, building.as_deref(), &mut rng) else { continue };
+        info!("pet {} sets off to {what:?} ({:.0} m)", pet.name, path_len(here, &task.path));
+        commands.entity(e).insert(task);
+    }
+}
+
+/// A pet's way to what it's to do (to a spot, if any: by the walk grid, then the last step in);
+/// a toy from its jig's slot, a ball from the side it can roll off from (none: not to be had).
+#[allow(clippy::too_many_arguments)]
+pub fn plan(pet: &Pet, here: Vec2, what: PetDo, mut to: Option<Vec2>, otf: Option<Transform>, grid: &crate::nav::NavGrid, building: Option<&crate::building::ActiveBuilding>, rng: &mut impl Rng) -> Option<PetTask> {
+    let mut play = None;
+    if let PetDo::Play(_, toy) = what {
+        let otf = otf?;
+        let at = otf.translation.xz();
+        let side = toy.rolls().then(|| crate::pettoys::push_side(at, here, toy.roll(), |a, b| crate::pettoys::room_to_roll(grid, |p| on_lot(building, p), a, b))).flatten();
+        if toy.rolls() && side.is_none() {
+            return None;
         }
-        // (Into a box or a bed: to beside it on the grid, then in, as the game's slots step in.)
-        let path = match to {
-            Some(to) => match grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z)))) {
-                Some(mut p) => {
-                    if p.last().is_none_or(|l| l.distance(to) > 0.05) {
-                        p.push(to);
-                    }
-                    p
-                }
-                None => continue,
-            },
-            None => Vec::new(),
-        };
-        info!("pet {} sets off to {what:?} ({:.0} m)", pet.name, path_len(here, &path));
-        commands.entity(e).insert(PetTask { what, path, since: None, next_bite: 0.0, roll: rng.random(), play });
+        to = Some(crate::pettoys::stand_at(toy, &pet.kind, at, otf.rotation, here, side).0);
+        play = Some(crate::pettoys::Playing { side, ..Default::default() });
+    }
+    // (Into a box or a bed: to beside it on the grid, then in, as the game's slots step in.)
+    let path = match to {
+        Some(to) => {
+            let mut p = grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z))))?;
+            if p.last().is_none_or(|l| l.distance(to) > 0.05) {
+                p.push(to);
+            }
+            p
+        }
+        None => Vec::new(),
+    };
+    Some(PetTask { what, path, since: None, next_bite: 0.0, roll: rng.random(), play })
+}
+
+/// Where a pet goes to do something at an object (a bowl, a bed, a toy, a stall's hay...).
+pub fn spot_for(what: PetDo, o: &GameObject, otf: &Transform, from: Vec2, kind: &str) -> Option<Vec2> {
+    match what {
+        PetDo::Hay(_) => Some(hay_spot(otf).0),
+        PetDo::Play(..) => None,
+        _ => Some(approach(o, otf, from, kind)),
     }
 }
 
@@ -559,6 +577,7 @@ fn clip_for(kind: &str, what: PetDo, step: u32, traits: &[String], roll: f64) ->
         PetDo::StallPee(_) => format!("{k}_pee_breathe_x"),
         PetDo::Groom => format!("{k}_idle_sit_groomSelf_loop{}_x", 1 + step % 2),
         PetDo::Play(_, t) => t.parts(k).1.first().cloned().unwrap_or_default(),
+        PetDo::Go => format!("{k}_idle_stand_breathe_x"),
     }
 }
 
@@ -601,6 +620,11 @@ fn act(
             continue;
         }
         let what = task.what;
+        // (Sent somewhere: there.)
+        if what == PetDo::Go {
+            finish(&mut commands, e, &mut anim, pet, &mut rng);
+            continue;
+        }
         // There: turned to what it's at, and at it.
         let since = *task.since.get_or_insert_with(|| {
             if let Some(o) = what.object().and_then(|o| objects.get(o).ok()) {
@@ -710,6 +734,7 @@ fn act(
                 done |= now - since >= PEE_MINUTES;
             }
             PetDo::Groom => m.add(HYGIENE, GROOM_RATE * hours),
+            PetDo::Go => done = true,
             PetDo::Play(toy_e, toy) => {
                 use crate::pettoys::Toy;
                 let names = &data.0.clip_names;

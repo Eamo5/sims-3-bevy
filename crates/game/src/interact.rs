@@ -3060,6 +3060,8 @@ pub enum ActionKind {
     /// A bike (or car) made the Sim's own to go out on (the game's `SetOwner`: "Make Preferred
     /// Vehicle"): done at once.
     PreferVehicle { vehicle: Entity },
+    /// A selected pet told to do something (`petcontrol`): done at once (it sets off).
+    PetCommand(crate::petcontrol::PetCommand),
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3945,7 +3947,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4765,7 +4767,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));

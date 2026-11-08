@@ -75,6 +75,8 @@ const NAV_BACKGROUND: u32 = 0x1ba4_8c20;
 const NAV_TAB: u32 = 0x1ba4_8c00;
 const MOTIVE_TOP: u32 = 0x06fd_de00;
 const MOTIVE_REFERENCE: u32 = 0x06fd_df02;
+/// A bar's name over it (MotiveText).
+const MOTIVE_TEXT: u32 = 0x06fe_0000;
 const MOTIVE_SIZE: u32 = 0x06fd_df03;
 const MOTIVE_FILL: u32 = 0x06fd_df04;
 const MOTIVE_BACK: u32 = 0x06fd_df05;
@@ -629,30 +631,49 @@ const MOTIVE_KEYS: [&str; 6] = ["Hunger", "Bladder", "Energy", "Social", "Hygien
 /// The motives panel's bars: each filled to its need, in the game's colours; each with the
 /// game's tooltip, the need and what it's about (`MotiveTooltip`).
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn motives_panel(
     mut commands: Commands,
     hud: Res<LiveHud>,
-    sel: Query<&Motives, With<Selected>>,
+    (sel, pet_sel): (Query<&Motives, With<Selected>>, Query<(&crate::pets::Pet, &crate::petneeds::PetMotives), With<Selected>>),
     mut nodes: Query<&mut Node>,
     mut images: Query<&mut ImageNode>,
     pictures: Query<&UiPicture>,
-    (ui, mut tips): (Option<Res<UiAssets>>, Query<&mut crate::icons::Tooltip>),
-    mut tipped: Local<bool>,
+    (ui, mut tips, mut texts): (Option<Res<UiAssets>>, Query<&mut crate::icons::Tooltip>, Query<&mut Text>),
+    mut tipped: Local<Option<String>>,
 ) {
-    let Ok(m) = sel.single() else { return };
+    // (A pet's needs as its species' panel has them: `SimOccultInfo`, Hygiene's place its urge's
+    // and a horse's Fun its Thirst.)
+    let (values, species): ([f32; 6], &str) = match (sel.single(), pet_sel.single()) {
+        (Ok(m), _) => ([m.0[0], m.0[1], m.0[2], m.0[3], m.0[4], m.0[5]], ""),
+        (_, Ok((p, m))) => {
+            use crate::petneeds::{BLADDER, ENERGY, FUN, HUNGER, SOCIAL, THIRST, URGE};
+            let horse = p.kind.ends_with('h');
+            ([m.0[HUNGER], m.0[BLADDER], m.0[ENERGY], m.0[SOCIAL], m.0[URGE], if horse { m.0[THIRST] } else { m.0[FUN] }], pet_species(&p.kind))
+        }
+        _ => return,
+    };
     let s = &hud.motives;
-    if !*tipped && let Some(ui) = ui.as_deref() {
-        *tipped = true;
+    if tipped.as_deref() != Some(species) && let Some(ui) = ui.as_deref() {
+        *tipped = Some(species.to_string());
         for (i, k) in MOTIVE_KEYS.iter().enumerate() {
-            let name = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:Motive{k}")).unwrap_or_else(|| k.to_string());
-            let about = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:MotiveDescription{k}")).unwrap_or_default();
-            let bar = s.id(MOTIVE_TOP + i as u32).and_then(|t| s.within(t, MOTIVE_REFERENCE));
+            let k = pet_motive_key(species, i).unwrap_or(k);
+            let name = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:Motive{k}{species}")).filter(|n| !n.is_empty()).unwrap_or_else(|| k.to_string());
+            let about = ui.localize(&format!("Ui/Caption/HUD/MotivesPanel:MotiveDescription{k}{species}")).unwrap_or_default();
+            let top = s.id(MOTIVE_TOP + i as u32);
+            let bar = top.and_then(|t| s.within(t, MOTIVE_REFERENCE));
             set_tooltip(&mut commands, &mut tips, bar, format!("{name}\n{about}"));
+            // (Its name over the bar.)
+            if let Some(t) = top.and_then(|t| s.within(t, MOTIVE_TEXT)).and_then(|w| s.text_of(w))
+                && let Ok(mut text) = texts.get_mut(t)
+            {
+                text.0 = name;
+            }
         }
     }
     for i in 0..6 {
         let Some(top) = s.id(MOTIVE_TOP + i as u32) else { continue };
-        let v = m.0[i].clamp(-100.0, 100.0);
+        let v = values[i].clamp(-100.0, 100.0);
         if let Some(e) = s.within(top, MOTIVE_SIZE)
             && let Ok(mut n) = nodes.get_mut(e)
         {
@@ -665,6 +686,28 @@ fn motives_panel(
         let back = ranged(v, &MOTIVE_BACK_COLORS, &MOTIVE_BACK_RANGES[i], &MOTIVE_BACK_ALPHA_RANGES, &MOTIVE_BACK_ALPHAS);
         set_shade(&mut images, &pictures, s.within(top, MOTIVE_FILL), fill);
         set_shade(&mut images, &pictures, s.within(top, MOTIVE_BACK), back);
+    }
+}
+
+/// A pet's species as the motives panel's words name it (`Cat`, `Dog`, `LittleDog`, `Horse`).
+fn pet_species(kind: &str) -> &'static str {
+    match kind.chars().nth(1) {
+        Some('c') => "Cat",
+        Some('l') => "LittleDog",
+        Some('h') => "Horse",
+        _ => "Dog",
+    }
+}
+
+/// A pet's motive in a bar's place, where it's not the Sims' (`SimOccultInfo`).
+fn pet_motive_key(species: &str, i: usize) -> Option<&'static str> {
+    match (species, i) {
+        ("", _) => None,
+        ("Cat", 4) => Some("Scratch"),
+        ("Horse", 4) => Some("Exercise"),
+        (_, 4) => Some("Destruction"),
+        ("Horse", 5) => Some("Thirst"),
+        _ => None,
     }
 }
 
@@ -868,7 +911,7 @@ fn skewer(
     }
     // The household's pets on their own skewer beside it (the game's `PopulatePetSkewer`: 46 a
     // face), each ringed in its mood (how its needs stand), its name and what it needs on hover;
-    // clicked, the camera goes to it.
+    // clicked, selected as a Sim is (`petcontrol`: played), and clicked again the camera goes to it.
     let mut pet_list: Vec<_> = pets.iter().collect();
     pet_list.sort_by_key(|p| p.0);
     set_visible(&mut vis, s.id(SKEWER_PETS), !pet_list.is_empty());
@@ -880,6 +923,13 @@ fn skewer(
         set_visible(&mut vis, container, who.is_some());
         let (Some(c), Some((e, pet, m, tf, (traits, tricks, horse)))) = (container, who) else { continue };
         let button = s.within(c, SLOT_BUTTON);
+        let sel = selected.contains(e);
+        if let Some(b) = button
+            && let Ok(mut b) = buttons.get_mut(b)
+            && b.selected != sel
+        {
+            b.selected = sel;
+        }
         set_visible(&mut vis, s.within(c, SLOT_GO_HOME), false);
         set_visible(&mut vis, s.within(c, SLOT_FOLLOW), false);
         set_shade(&mut images, &pictures, s.within(c, SLOT_MOOD), mood_single(crate::petneeds::mood(m)));
@@ -894,11 +944,16 @@ fn skewer(
             pet_faces[slot] = Some(e);
         }
         set_tooltip(&mut commands, &mut tips, button, crate::petneeds::tooltip(pet, m, traits.map_or(&[][..], |t| &t.0[..]), gu.as_deref()) + &tricks.map_or(String::new(), crate::dogtricks::summary) + &horse.map_or(String::new(), crate::horsejumps::summary));
-        if pressed(&clicks, button)
-            && let Ok(mut cm) = cam.single_mut()
-        {
-            cm.look_at(tf.translation);
-            cm.follow(e);
+        if pressed(&clicks, button) {
+            if !sel {
+                for o in &selected {
+                    commands.entity(o).remove::<Selected>();
+                }
+                commands.entity(e).insert(Selected);
+            } else if let Ok(mut cm) = cam.single_mut() {
+                cm.look_at(tf.translation);
+                cm.follow(e);
+            }
         }
     }
 }
@@ -2491,6 +2546,17 @@ fn wish_tip(x: &crate::wishes::Wish, traits: &[crate::life::Trait]) -> String {
 mod note_tests {
     use super::*;
 
+    #[test]
+    fn a_pets_needs_are_named_for_its_species() {
+        assert_eq!(pet_species("cc"), "Cat");
+        assert_eq!(pet_species("al"), "LittleDog");
+        assert_eq!(pet_motive_key("Cat", 4), Some("Scratch"));
+        assert_eq!(pet_motive_key("LittleDog", 4), Some("Destruction"));
+        assert_eq!(pet_motive_key("Horse", 4), Some("Exercise"));
+        assert_eq!(pet_motive_key("Horse", 5), Some("Thirst"));
+        assert_eq!(pet_motive_key("Dog", 5), None, "a dog's Fun is Fun");
+        assert_eq!(pet_motive_key("", 4), None, "a Sim's Hygiene");
+    }
     #[test]
     fn notices_take_the_games_styles() {
         assert_eq!(note_style("Game saved: the Goth household in Sunset Valley.", false), NoteStyle::System);

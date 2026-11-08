@@ -1012,8 +1012,15 @@ installation is unreachable.
   be known what they need in thought balloons. Pets' needs and bowls' food are kept in saves.
   The household's pets have the game's own skewer beside the Sims' (photographed by the
   portrait studio, a face each, ringed in how they feel), their name and the pack's names for
-  what they need on hover ("Muffin (Cat) · Hungry, Itching To Scratch"), a click taking the
-  camera to them; each skewer's rod is as long as its faces, as the game's `PopulateSkewer`.
+  what they need on hover ("Muffin (Cat) · Hungry, Itching To Scratch"); each skewer's rod is
+  as long as its faces, as the game's `PopulateSkewer`. A pet's face clicked selects it, to be
+  played as the pack lets you (a second click takes the camera to it): its picture on the bust,
+  its needs on the motives panel in its species' own words (the game's `SimOccultInfo`: a cat's
+  Scratch, a dog's Destruction, a horse's Exercise and Thirst), and the world's clicks its own:
+  the ground "Go Here", its bowl "Eat" (greyed while it's empty), its bed or a horse's stall
+  "Sleep" (and "Eat Hay"), a litter box, scratching post, chew toy or water trough what it does
+  there, a toy of its kind's "Play"; off it goes and does it with the pack's animations, the
+  need filling as when it sees to itself. `PET_CONTROL_TEST=<name>:<x>,<z>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

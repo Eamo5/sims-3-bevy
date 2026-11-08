@@ -1229,7 +1229,11 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    selected: Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
+    (selected, pet_sel, bowl_food_q): (
+        Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
+        Query<(Entity, &crate::pets::Pet), (With<Selected>, With<crate::pets::HomePet>)>,
+        Query<&crate::petneeds::BowlFood>,
+    ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
         Query<(), With<HouseholdMember>>,
         Res<crate::laundry::Laundry>,
@@ -1341,7 +1345,23 @@ fn world_click(
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     close_pie(&mut commands, &mut pie);
     pie.vehicle = None;
-    let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else { return };
+    let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else {
+        // (A pet selected: the world's clicks are its, `petcontrol`.)
+        if let Ok((pe, pet)) = pet_sel.single() {
+            let is_object = |e: Entity| objects.contains(e);
+            let filter = |e: Entity| ancestor_with(e, &parents, is_object).is_some();
+            let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
+            let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_object)).or_else(|| pick_by_box(ray, &pickable)).filter(|t| objects.contains(*t));
+            let (title, options) = match target.and_then(|t| objects.get(t).ok().map(|o| (t, o))) {
+                Some((t, o)) => (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok())),
+                None => (String::new(), floor_hit(ray, &world, building.as_deref()).map(|(p, _)| crate::petcontrol::ground_options(p.xz())).unwrap_or_default()),
+            };
+            if !options.is_empty() {
+                open_object_pie(&mut commands, &mut pie, cursor, &title, pe, options);
+            }
+        }
+        return;
+    };
     // (Chores, skills and work greyed while they're in no state for them: `stress`.)
     let front_exit = queues_q.get(actor).ok().and_then(|q| q.0.front()).is_some_and(|a| crate::stress::exit_of(&a.kind, &objects).is_some());
     let mood = mood_q.get(actor).map_or(0.0, |m| m.0);
@@ -2845,6 +2865,11 @@ fn pie_buttons(
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
+    // (A pet told what to do: off it goes, `petcontrol`.)
+    if let (ActionKind::PetCommand(c), Some(a)) = (&kind, actor) {
+        commands.entity(a).insert(crate::petcontrol::PetOrder(*c));
+        return;
+    }
     // (A bike made a Sim's own there and then; a trip off a car's or bike's menu taken on it.)
     if let (ActionKind::PreferVehicle { vehicle }, Some(a)) = (&kind, actor) {
         commands.entity(a).insert(crate::bicycles::PreferredVehicle(*vehicle));
