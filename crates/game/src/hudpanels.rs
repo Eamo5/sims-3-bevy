@@ -41,6 +41,28 @@ const TRAIT_NAME: u32 = 2;
 const TRAIT_ICON: u32 = 3;
 /// A favourite's (`HUDSimologyPanelFavsEntry`) picture.
 const FAVORITE_ICON: u32 = 2;
+/// The favourites' title, and a pet's sex (`WindowPetGenderMaleIcon`, `...FemaleIcon`).
+const FAVORITES_TITLE: u32 = 0xef98_4424;
+const PET_MALE: u32 = 0xef98_4422;
+const PET_FEMALE: u32 = 0xef98_4423;
+
+/// A pet's age icon (`SimologyPanel`'s `mAgeIcons`: young, adult, elder of its species; an old
+/// little dog a grown dog's).
+fn pet_age_icon(kind: &str, elder: bool) -> String {
+    let species = match kind.chars().nth(1) {
+        Some('c') => "cat",
+        Some('h') => "horse",
+        _ => "dog",
+    };
+    let stage = if kind.starts_with('c') {
+        "young"
+    } else if elder && kind != "al" {
+        "elder"
+    } else {
+        "adult"
+    };
+    format!("cas_basics_i_age_{stage}_{species}")
+}
 
 fn age_icon(age: Age) -> &'static str {
     match age {
@@ -146,6 +168,7 @@ fn simology_panel(
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     sel: Query<(Entity, &Sim, Option<&crate::aging::Aging>, Option<&crate::celebrity::Famous>), With<Selected>>,
+    pet_sel: Query<(Entity, &crate::pets::Pet, Option<&crate::petaging::PetAge>, Option<&crate::pets::PetTraits>), With<Selected>>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut nodes, mut texts): (Query<&mut Visibility>, Query<&mut Node>, Query<&mut Text>),
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -156,7 +179,16 @@ fn simology_panel(
     mut journal: ResMut<crate::celebrity::Journal>,
 ) {
     let s: &Spawned = &hud.simology;
-    let (Some(mut ui), Ok((e, sim, aging, famous))) = (ui, sel.single()) else { return };
+    let Some(mut ui) = ui else { return };
+    let Ok((e, sim, aging, famous)) = sel.single() else {
+        // (A pet played: its own, `SimologyPanel`'s for a pet.)
+        if let Ok(p) = pet_sel.single()
+            && *panel == InfoPanel::Simology
+        {
+            pet_simology(&mut commands, s, &mut ui, (&mut assets, &mut fonts), p, game_ui.as_deref_mut(), (&mut vis, &mut nodes, &mut texts), &mut state, &settings);
+        }
+        return;
+    };
     // (A celebrity's journal: the game's dialog, `celebrity`.)
     if pressed(&clicks, s.id(CELEBRITY)) {
         journal.sim = Some(e);
@@ -193,8 +225,11 @@ fn simology_panel(
     let baby = sim.age == Age::Baby;
     set_visible(&mut vis, s.id(MALE), baby && !sim.female);
     set_visible(&mut vis, s.id(FEMALE), baby && sim.female);
-    for id in [ZODIAC, ZODIAC_GENDER, BIO, TRAVEL_TIME, CELEBRITY_GLOW] {
+    for id in [ZODIAC, ZODIAC_GENDER, BIO, TRAVEL_TIME, CELEBRITY_GLOW, PET_MALE, PET_FEMALE] {
         set_visible(&mut vis, s.id(id), false);
+    }
+    for id in [FAMILY_TREE, FAVORITES, FAVORITES_TITLE] {
+        set_visible(&mut vis, s.id(id), true);
     }
     // (The Celebrity button, for a celebrity: `LowestVisibleCelebrityLevel`.)
     set_visible(&mut vis, s.id(CELEBRITY), famous.is_some_and(|f| f.0 >= 1));
@@ -262,6 +297,95 @@ fn simology_panel(
             if let (Some(w), Some(h)) = (c.id(FAVORITE_ICON), gu.icon(&mut assets, &icon)) {
                 picture(&mut commands, w, h, Color::WHITE);
                 tip(&mut commands, w, name);
+            }
+        }
+    }
+}
+
+/// The Simology panel for a pet: its name, its age (its species' icons, the days of its stage),
+/// its sex, its traits; no favourites, zodiac or family tree.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn pet_simology(
+    commands: &mut Commands,
+    s: &Spawned,
+    ui: &mut UiAssets,
+    (assets, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    (e, pet, age, traits): (Entity, &crate::pets::Pet, Option<&crate::petaging::PetAge>, Option<&crate::pets::PetTraits>),
+    gu: Option<&mut crate::icons::GameUi>,
+    (vis, nodes, texts): (&mut Query<&mut Visibility>, &mut Query<&mut Node>, &mut Query<&mut Text>),
+    state: &mut (Option<Entity>, Option<Entity>, String),
+    settings: &crate::options::Settings,
+) {
+    set_text(texts, s.text(SIM_NAME), &pet.name);
+    let elder = age.is_some_and(|a| a.elder);
+    let factor = settings.lifespan.factor().max(0.01);
+    let span = crate::petaging::stage_days(&pet.kind, elder) * factor;
+    let lived = age.map_or(0.0, |a| a.days) * factor;
+    let f = if elder { 1.0 } else { (lived / span.max(0.01)).clamp(0.0, 1.0) };
+    let full = ui.layout("HUDSimologyPanel").and_then(|l| l.find(AGE_BAR)).map_or(90.0, |w| w.area[2] - w.area[0]);
+    if let Some(c) = s.within(s.id(AGE_BAR).unwrap_or(Entity::PLACEHOLDER), AGE_BAR_CLIP)
+        && let Ok(mut n) = nodes.get_mut(c)
+    {
+        let w = Val::Px((f * full).round());
+        if n.width != w {
+            n.width = w;
+        }
+    }
+    for id in [MALE, FEMALE, ZODIAC, ZODIAC_GENDER, BIO, TRAVEL_TIME, CELEBRITY_GLOW, CELEBRITY, FAMILY_TREE, FAVORITES, FAVORITES_TITLE] {
+        set_visible(vis, s.id(id), false);
+    }
+    set_visible(vis, s.id(PET_MALE), !pet.female);
+    set_visible(vis, s.id(PET_FEMALE), pet.female);
+    let next = (!elder).then(|| if pet.kind.starts_with('c') { (crate::petaging::grown_kind(&pet.kind), false) } else { (pet.kind.clone(), true) });
+    set_visible(vis, s.id(AGE_NEXT), next.is_some());
+    let traits: Vec<String> = traits.map(|t| t.0.clone()).unwrap_or_default();
+    let key = format!("pet {e:?} {} {traits:?} {} {elder} {} {:?}", pet.name, (lived * 10.0) as i32, gu.is_some(), settings.lifespan);
+    if state.2 == key && state.0.is_some_and(|h| vis.contains(h)) {
+        return;
+    }
+    state.2 = key;
+    let stage_name = |kind: &str, elder: bool| if elder { format!("Elder {}", crate::pets::kind_name(kind)) } else { crate::pets::kind_name(kind).to_string() };
+    for (id, a) in [(AGE_CURRENT, Some((pet.kind.clone(), elder))), (AGE_NEXT, next.clone())] {
+        let (Some(win), Some((kind, old))) = (s.id(id), a) else { continue };
+        let t = ui.layout("HUDSimologyPanel").and_then(|l| l.find(id)).map_or(Color::WHITE, |w| crate::layout::color(w.shade));
+        if let Some((h, _)) = ui.image(assets, s3pkg::fnv64(&pet_age_icon(&kind, old))) {
+            picture(commands, win, h, t);
+        }
+        tip(commands, win, stage_name(&kind, old));
+    }
+    if let Some(bar) = s.id(AGE_BAR) {
+        let words = if !settings.aging {
+            "Aging is disabled.".to_string()
+        } else if elder {
+            "Elder: the age bar does not predict the end of a pet's life.".to_string()
+        } else {
+            let left = (span - lived).max(0.0).ceil() as u32;
+            let (kind, old) = next.clone().unwrap_or_default();
+            format!("{left} day{} until {}", if left == 1 { "" } else { "s" }, stage_name(&kind, old))
+        };
+        tip(commands, bar, words);
+    }
+    let Some(gu) = gu else { return };
+    if let (Some(grid), Some(g), Some(template)) = (s.id(TRAITS), ui.layout("HUDSimologyPanel").and_then(|l| l.find(TRAITS)).and_then(|w| w.grid), ui.layout("HUDSimologyPanelEntry").cloned()) {
+        let holder = grid_holder(commands, grid, &mut state.0, vis);
+        for (i, hex) in traits.iter().enumerate() {
+            let mut entry = template.clone();
+            entry.area = cell_area(&g, i, Vec2::new(entry.area[2] - entry.area[0], entry.area[3] - entry.area[1]));
+            let c = ui.spawn_under(commands, assets, fonts, &entry, holder);
+            let info = gu.data.traits.iter().find(|t| t.hex == *hex).cloned();
+            let (name, desc) = match info.as_ref() {
+                Some(i) => (i.name.clone(), i.desc.replace("{0.SimFirstName}", &pet.name)),
+                None => (crate::pettraits::name(hex, Some(gu)), String::new()),
+            };
+            if let Some(txt) = c.text(TRAIT_NAME) {
+                commands.entity(txt).insert(Text::new(name.clone()));
+            }
+            let icon = info.as_ref().and_then(|i| gu.icon(assets, &i.icon_small).or_else(|| gu.icon(assets, &i.icon)));
+            if let (Some(b), Some(h)) = (c.id(TRAIT_ICON), icon) {
+                commands.entity(b).insert(crate::layout::SetIcon(h));
+            }
+            if let Some(r) = c.root {
+                tip(commands, r, if desc.is_empty() { name } else { format!("{name}\n{desc}") });
             }
         }
     }
@@ -557,7 +681,7 @@ fn inventory_panel(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
-    sel: Query<(Entity, &Sim, Option<&crate::inventory::Inventory>), With<Selected>>,
+    sel: Query<(Entity, Option<&Sim>, Option<&crate::inventory::Inventory>), (With<Selected>, Or<(With<Sim>, With<crate::pets::Pet>)>)>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     (mut vis, mut nodes): (Query<&mut Visibility>, Query<&mut Node>),
     (clicks, cells, hovered): (Query<(Entity, &Interaction), Changed<Interaction>>, Query<(&Interaction, &InventoryCell), Changed<Interaction>>, Query<&Interaction>),
@@ -574,15 +698,16 @@ fn inventory_panel(
     panel: Res<InfoPanel>,
 ) {
     let s: &Spawned = &hud.inventory;
+    // (A Sim's, or a pet's: what it's caught or found, only to give to the family.)
     let (Some(mut ui), Ok((me, sim, inv))) = (ui, sel.single()) else { return };
-    if pressed(&clicks, s.id(INV_PHONE)) {
+    if pressed(&clicks, s.id(INV_PHONE)) && sim.is_some() {
         commands.insert_resource(crate::hud::OpenPhone);
     }
     for id in [INV_ALMANAC, INV_DRAG_HERE] {
         set_visible(&mut vis, s.id(id), false);
     }
-    // (Toddlers and babies have no phone.)
-    set_visible(&mut vis, s.id(INV_PHONE), !sim.age.is_little());
+    // (Toddlers and babies have no phone; nor have pets.)
+    set_visible(&mut vis, s.id(INV_PHONE), sim.is_some_and(|s| !s.age.is_little()));
     let stacks: Vec<crate::inventory::Stack> = inv.map(|i| i.0.clone()).unwrap_or_default();
     // A stack clicked: its pie menu.
     for (i, c) in &cells {
@@ -590,7 +715,9 @@ fn inventory_panel(
             && let Some(st) = stacks.get(c.0)
         {
             chosen.select(c.0, st);
-            let mut options = crate::inventory::stack_actions(sim, st)
+            let mut options = sim
+                .map(|sim| crate::inventory::stack_actions(sim, st))
+                .unwrap_or_default()
                 .into_iter()
                 .map(|(label, b)| {
                     let kind = match b {
@@ -602,7 +729,7 @@ fn inventory_panel(
                 .collect::<Vec<_>>();
             pie.submenus.clear();
             // (A gem or metal mailed off to be cut or smelted: `rgmmail`.)
-            if let Some(g) = game_ui.as_deref() {
+            if let Some(g) = game_ui.as_deref().filter(|_| sim.is_some()) {
                 use crate::inventory::ItemButton;
                 let cut = journals.get(me).map_or(0, |j| j.get(crate::journal::Stat::GemsCut) as u32);
                 let (flat, cuts) = crate::rgmmail::options(&g.data, st, cut);

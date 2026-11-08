@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 173;
+pub const GAMEDATA_VERSION: u32 = 174;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -602,6 +602,13 @@ pub struct MinorPetInfo {
     pub max_value: i32,
     pub stockable: bool,
     pub catch_chance: f32,
+    /// As a cat's prey (its `PreyData`): the Hunting levels it's caught at, and its weight among
+    /// the prey at the least and most of them (none: not hunted, as large birds aren't).
+    #[serde(default)]
+    pub hunt: Option<(u8, u8, f32, f32)>,
+    /// Its catalogue object's instance name (`ModelName`).
+    #[serde(default)]
+    pub model: String,
 }
 
 /// A blueprint: a ready-made room (Blueprint mode's), its name (its tokens filled in), its room
@@ -4008,6 +4015,11 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     max_value: field("MaxValue").parse().unwrap_or(100),
                     stockable: field("Stockable").eq_ignore_ascii_case("true"),
                     catch_chance: field("CatchChance").parse().unwrap_or(0.5),
+                    hunt: (!field("MinHuntSkillLevel").is_empty()).then(|| {
+                        let n = |k: &str, or: f32| field(k).parse::<f32>().unwrap_or(or);
+                        (n("MinHuntSkillLevel", 0.0) as u8, n("MaxHuntSkillLevel", 10.0) as u8, n("MinHuntWeight", 1.0), n("MaxHuntWeight", 10.0))
+                    }),
+                    model: field("ModelName"),
                     species,
                 });
             }

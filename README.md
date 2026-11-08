@@ -1020,7 +1020,11 @@ installation is unreachable.
   the ground "Go Here", its bowl "Eat" (greyed while it's empty), its bed or a horse's stall
   "Sleep" (and "Eat Hay"), a litter box, scratching post, chew toy or water trough what it does
   there, a toy of its kind's "Play"; off it goes and does it with the pack's animations, the
-  need filling as when it sees to itself. A Sim or another pet clicked offers the pack's socials
+  need filling as when it sees to itself. The HUD's panels are the pet's while it's played, as
+  the game's are: Simology its name, sex, age (its species' icons, the days of its stage) and
+  traits (no favourites or zodiac); Skills its own (a dog's Tricks, a horse's Jumping and
+  Racing, Hunting); Relationships the Sims and pets it knows and how fond of each it is;
+  Inventory what it's caught or found, to give to the family. A Sim or another pet clicked offers the pack's socials
   for its kind (`SocialData_EP5`'s, by who gives them and to whom, and as fond of a Sim as each
   asks: Sniff and Nuzzle for all; a dog's Lick, Bark At, Growl At, Pee On; a cat's Mark, Attack,
   Hiss At; a horse's Kick and Bite At; a young one's Tackle of a child; with pets, Goof Around,
@@ -1044,6 +1048,21 @@ installation is unreachable.
   ("Congratulations on a new foal!"); kittens and puppies are "Kitten 1", "Puppy 2"... till a Sim
   names them ("Name Pet" on their menu). Pregnancies and the unnamed are kept in saves.
   `PET_LITTER_TEST=<pet>@<other>` or `<pet>:due` (tests).
+  Cats and dogs hunt, the pack's Hunting skill (`CatHuntingSkill`, `DogHuntingSkill`). A cat
+  goes out ("Locate Prey..." on the ground's menu, or of its own accord when bored, a Hunter
+  sooner), sniffs the air about a quarter of an hour (`ac_hunting_locatePrey_sniffAir`) and finds
+  one of the pack's minor pets its Hunting reaches, weighted as the `MinorPets` table weighs them
+  by level (`MinHuntSkillLevel`, `MinHuntWeight`...), more likely the better it is (30% to 80%;
+  else a feather or a maple leaf it takes for prey); stalks up (`ac_startStalk`, `ac_stalk`),
+  pounces (`ac2o_hunting_catch`) and catches it as often as its Hunting says (30% to 80%):
+  hungry it eats it, else it's in its inventory; or it's scared off (a Skittish cat more often,
+  an Adventurous never), the prey gets away (a Clueless one more often) or all it catches is a
+  colorful feather, a bit of snake skin, a maple leaf or an empty chip bag, each with the game's
+  words. A dog sniffs out collectables ("Sniff Out Collectable": the ground sniffed,
+  `ad_huntingSkill_sniffingGround`) and digs one up (`ad_digStart`, `ad_digLoop`, `ad_digStop`,
+  the pack's dug hole left a while): a gem, some metal or a rock, the rarer the better its
+  Hunting, or something...interesting. Both learn Hunting as they go; kept in saves.
+  `PET_HUNT_TEST=<pet>[:<level>]` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

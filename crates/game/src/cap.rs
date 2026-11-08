@@ -258,6 +258,8 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         age: None,
         pregnancy: None,
         unnamed: false,
+        hunting: None,
+        inventory: Vec::new(),
     })
 }
 

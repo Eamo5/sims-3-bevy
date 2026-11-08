@@ -37,6 +37,8 @@ pub enum PetCommand {
     Mate(Entity),
     /// A pet to be named (a Sim's "Name Pet").
     Name(Entity),
+    /// Off hunting (`pethunting`): a cat's "Locate Prey...", a dog's "Sniff Out Collectable".
+    Hunt,
 }
 
 /// An order for a pet, to be seen to.
@@ -92,9 +94,15 @@ pub fn pet_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, kind: 
     out
 }
 
-/// Ground clicked with a pet selected: there.
-pub fn ground_options(at: Vec2) -> Vec<(String, ActionKind)> {
-    vec![("Go Here".to_string(), ActionKind::PetCommand(PetCommand::Go(at)))]
+/// Ground clicked with a pet selected: there; a cat or dog off hunting from there (the game's
+/// `StalkForPrey`, `SniffOut`).
+pub fn ground_options(pet: &Pet, at: Vec2) -> Vec<(String, ActionKind)> {
+    let mut out = vec![("Go Here".to_string(), ActionKind::PetCommand(PetCommand::Go(at)))];
+    if crate::pethunting::hunts(&pet.kind) {
+        let label = if pet.kind.ends_with('c') { "Locate Prey..." } else { "Sniff Out Collectable" };
+        out.push((label.to_string(), ActionKind::PetCommand(PetCommand::Hunt)));
+    }
+    out
 }
 
 /// A pet's orders seen to (once it's free of a Sim seeing to it): what it was at left, off to
@@ -116,7 +124,7 @@ fn obey(
         if matches!(order.0, PetCommand::Mate(_)) {
             continue;
         }
-        commands.entity(e).remove::<(PetOrder, crate::petcompany::Greeting, crate::petneeds::PetTask, crate::petlitters::Mating, crate::petlitters::Held)>();
+        commands.entity(e).remove::<(PetOrder, crate::petcompany::Greeting, crate::petneeds::PetTask, crate::petlitters::Mating, crate::petlitters::Held, crate::pethunting::Hunt)>();
         let here = tf.translation.xz();
         let (what, to, otf) = match order.0 {
             PetCommand::Greet(other, how) => {
@@ -130,6 +138,10 @@ fn obey(
             }
             PetCommand::Go(at) => (PetDo::Go, Some(at), None),
             PetCommand::Mate(_) | PetCommand::Name(_) => continue,
+            PetCommand::Hunt => {
+                commands.entity(e).insert(crate::pethunting::GoHunt);
+                continue;
+            }
             PetCommand::Do(what) => {
                 let Some((o, otf)) = what.object().and_then(|t| objects.get(t).ok()) else { continue };
                 (what, crate::petneeds::spot_for(what, o, otf, here, &pet.kind), Some(*otf))
@@ -225,6 +237,8 @@ mod tests {
         assert_eq!(labels(&object_options(&pet("ac"), t, &object(ObjectKind::ScratchingPost), None)), ["Scratch"]);
         assert!(object_options(&pet("ad"), t, &object(ObjectKind::ScratchingPost), None).is_empty(), "posts are cats'");
         assert_eq!(labels(&object_options(&pet("al"), t, &object(ObjectKind::DogBall), None)), ["Play"]);
-        assert_eq!(labels(&ground_options(Vec2::ZERO)), ["Go Here"]);
+        assert_eq!(labels(&ground_options(&pet("ac"), Vec2::ZERO)), ["Go Here", "Locate Prey..."]);
+        assert_eq!(labels(&ground_options(&pet("al"), Vec2::ZERO)), ["Go Here", "Sniff Out Collectable"]);
+        assert_eq!(labels(&ground_options(&pet("ah"), Vec2::ZERO)), ["Go Here"]);
     }
 }

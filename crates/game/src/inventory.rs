@@ -371,6 +371,7 @@ fn inventory_buttons(
     asked: Option<Res<DoItem>>,
     (mut fridge, away): (ResMut<crate::ingredients::Fridge>, Query<(), With<crate::visit::OnLot>>),
     mailboxes: Query<(Entity, &crate::interact::GameObject), Without<crate::visit::LotObject>>,
+    mut pets: Query<(&crate::pets::Pet, &mut Inventory), Without<Sim>>,
 ) {
     // (A different Sim: nothing picked.)
     if !selected.is_empty() {
@@ -400,6 +401,24 @@ fn inventory_buttons(
         .chain(from_pie)
         .collect();
     for (b, target) in &pressed {
+        // (A pet's catch handed to one of the family: all a pet's things are for.)
+        if let (ItemButton::GiveTo(to), Some((owner, stack))) = (b, target)
+            && let Ok((pet, mut inv)) = pets.get_mut(*owner)
+        {
+            let Some(k) = inv.0.iter().position(|s| s.kind == stack.kind && s.key == stack.key && s.quality == stack.quality) else { continue };
+            let s = inv.0.remove(k);
+            notes.push(format!("{} gave {}.", pet.name, if s.count > 1 { format!("{} × {}", s.count, s.name) } else { s.name.clone() }));
+            let to = *to;
+            commands.entity(to).queue_silenced(move |mut w: EntityWorldMut| {
+                if w.get::<Inventory>().is_none() {
+                    w.insert(Inventory::default());
+                }
+                if let Some(mut theirs) = w.get_mut::<Inventory>() {
+                    theirs.put(s);
+                }
+            });
+            continue;
+        }
         let Ok((me, sim, mut inv, mut queue)) = sel.single_mut() else { continue };
         let k = match target {
             Some((owner, stack)) if *owner == me => inv.0.iter().position(|s| s.kind == stack.kind && s.key == stack.key && s.quality == stack.quality),

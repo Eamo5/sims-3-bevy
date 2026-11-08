@@ -1379,7 +1379,7 @@ fn world_click(
                         (other.name.clone(), crate::petcontrol::pet_options(&baked, pet, t, &other.kind, can))
                     })
                     .unwrap_or_default(),
-                None => (String::new(), floor_hit(ray, &world, building.as_deref()).map(|(p, _)| crate::petcontrol::ground_options(p.xz())).unwrap_or_default()),
+                None => (String::new(), floor_hit(ray, &world, building.as_deref()).map(|(p, _)| crate::petcontrol::ground_options(pet, p.xz())).unwrap_or_default()),
             };
             if !options.is_empty() {
                 open_object_pie(&mut commands, &mut pie, cursor, &title, pe, options);

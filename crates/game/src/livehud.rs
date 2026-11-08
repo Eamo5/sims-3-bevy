@@ -1351,6 +1351,23 @@ fn wishes(
     }
 }
 
+/// A pet's skills as the skills panel shows them (the game's skill names, the level with the way
+/// to the next its fraction).
+pub fn pet_skills(tricks: Option<&crate::dogtricks::DogTricks>, horse: Option<&crate::horsejumps::HorseSkills>, hunting: Option<&crate::pethunting::Hunting>) -> Vec<(&'static str, f32)> {
+    let mut out = Vec::new();
+    if let Some(t) = tricks {
+        out.push(("Trick", crate::interact::points_to_level(crate::interact::skill_points("Trick"), t.skill)));
+    }
+    if let Some(h) = horse {
+        out.push(("Jumping", h.jumping));
+        out.push(("Racing", h.racing));
+    }
+    if let Some(h) = hunting {
+        out.push((h.skill_name(), h.level));
+    }
+    out
+}
+
 /// A skill's journal button in the skills panel.
 #[derive(Component)]
 struct SkillJournalButton(&'static str);
@@ -1365,6 +1382,7 @@ fn skills_panel(
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
     sel: Query<(&Sim, &crate::interact::Skills), With<Selected>>,
+    pet_sel: Query<(&crate::pets::Pet, Option<&crate::dogtricks::DogTricks>, Option<&crate::horsejumps::HorseSkills>, Option<&crate::pethunting::Hunting>), With<Selected>>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     mut vis: Query<&mut Visibility>,
     mut nodes: Query<&mut Node>,
@@ -1373,14 +1391,20 @@ fn skills_panel(
     panel: Res<InfoPanel>,
 ) {
     let (Some(mut ui), Some(scroll)) = (ui, hud.skills.id(SKILLS_SCROLLING)) else { return };
-    let Ok((sim, skills)) = sel.single() else { return };
-    let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
+    // (A Sim's skills; a pet's its own: a dog's Tricks, a horse's Jumping and Racing, a cat's or
+    // dog's Hunting, as the game's panel lists them for a pet.)
+    let (mut list, first, female, age): (Vec<(&'static str, f32)>, String, bool, Option<crate::sim::Age>) = match (sel.single(), pet_sel.single()) {
+        (Ok((sim, skills)), _) => (skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect(), sim.first.clone(), sim.female, Some(sim.age)),
+        (_, Ok((pet, tricks, horse, hunting))) => (pet_skills(tricks, horse, hunting).into_iter().filter(|(_, v)| *v > 0.01).collect(), pet.name.clone(), pet.female, None),
+        _ => return,
+    };
+    let pet = age.is_none();
     list.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
     // (The words for having none, by age.)
-    let little = matches!(sim.age, crate::sim::Age::Baby | crate::sim::Age::Toddler);
+    let little = matches!(age, Some(crate::sim::Age::Baby | crate::sim::Age::Toddler));
     set_visible(&mut vis, hud.skills.id(SKILLS_NONE), list.is_empty() && !little);
-    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_TODDLER), list.is_empty() && sim.age == crate::sim::Age::Toddler);
-    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_BABY), list.is_empty() && sim.age == crate::sim::Age::Baby);
+    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_TODDLER), list.is_empty() && age == Some(crate::sim::Age::Toddler));
+    set_visible(&mut vis, hud.skills.id(SKILLS_NONE_BABY), list.is_empty() && age == Some(crate::sim::Age::Baby));
     // Scrolling with the wheel over the panel, an entry at a time.
     let over = hud.skills.id(SKILLS_SCROLL).is_some_and(|e| hovered.get(e).is_ok_and(|i| *i != Interaction::None));
     let rows = list.len() as f32;
@@ -1397,7 +1421,8 @@ fn skills_panel(
             n.top = top;
         }
     }
-    let key: Vec<(&'static str, i32)> = list.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect();
+    let mut key: Vec<(&'static str, i32)> = list.iter().map(|(k, v)| (*k, (*v * 20.0) as i32)).collect();
+    key.push(("", pet as i32));
     let holder_ok = state.0.is_some_and(|h| vis.contains(h));
     if holder_ok && state.1 == key && state.2 == game_ui.is_some() {
         return;
@@ -1446,11 +1471,16 @@ fn skills_panel(
                 }
             }
         }
+        // (A pet keeps no journal.)
         if let Some(j) = s.id(SKILL_JOURNAL) {
-            commands.entity(j).insert(SkillJournalButton(name));
+            if pet {
+                commands.entity(j).insert(Visibility::Hidden);
+            } else {
+                commands.entity(j).insert(SkillJournalButton(name));
+            }
         }
         let into = if level >= max { String::from("Mastered!") } else { format!("{:.0}% of the way to level {}", v.fract() * 100.0, level + 1) };
-        let desc = info.as_ref().map(|i| i.desc_for(sim.female).replace("{0.SimFirstName}", &sim.first)).unwrap_or_default();
+        let desc = info.as_ref().map(|i| i.desc_for(female).replace("{0.SimFirstName}", &first)).unwrap_or_default();
         let tip = format!("{} — level {level} of {max}\n{into}\n{desc}", info.as_ref().map_or(*name, |i| i.name.as_str()));
         if let Some(m) = s.id(SKILL_TOOLTIP_MASK) {
             commands.entity(m).remove::<Pickable>().insert((Interaction::default(), crate::icons::Tooltip(tip)));

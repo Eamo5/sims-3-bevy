@@ -291,9 +291,50 @@ fn relationships_panel(
     (mut wheel, mut events): (MessageReader<MouseWheel>, MessageReader<crate::life::LifeEvent>),
     (mut pie, world, windows): (ResMut<crate::hud::PieMenu>, Res<crate::loading::CurrentWorld>, Query<&Window, With<bevy::window::PrimaryWindow>>),
     pets: Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::pets::HomePet>, &GlobalTransform)>,
+    (pet_sel, pet_ids, sim_ids): (
+        Query<(Entity, Option<&crate::pets::PetBonds>), (With<Selected>, With<crate::pets::HomePet>)>,
+        Query<&crate::pets::HomePet>,
+        Query<(Entity, &Sim, Has<HouseholdMember>)>,
+    ),
 ) {
     let scrolled: f32 = wheel.read().map(|w| w.y.signum()).sum();
-    let Ok((me, my_sim, rels, my_job)) = selected.single() else { return };
+    let Ok((me, my_sim, rels, my_job)) = selected.single() else {
+        // (A pet played: those it knows, Sims and pets, and how fond of each it is.)
+        if *panel == InfoPanel::Relationships
+            && let (Ok((pe, bonds)), Some(mut ui)) = (pet_sel.single(), ui)
+        {
+            let liking = |id: u64, home: bool| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(id, home));
+            let known = |id: u64, home: bool| home || bonds.is_some_and(|b| b.0.contains_key(&id));
+            let mut list: Vec<(Entity, String, String, f32, bool)> = Vec::new();
+            for (e, sim, member) in &sim_ids {
+                if known(sim.id, member) {
+                    let l = liking(sim.id, member);
+                    let rel = crate::social::Relationship { friendship: l, ..default() };
+                    list.push((e, sim.full_name(), rel.friendship_label().to_string(), l, member));
+                }
+            }
+            for (e, other, _, home, _) in &pets {
+                let Ok(id) = pet_ids.get(e).map(|h| h.id) else { continue };
+                if e != pe && known(id, home) {
+                    let l = liking(id, home);
+                    let rel = crate::social::Relationship { friendship: l, ..default() };
+                    list.push((e, other.name.clone(), format!("{} · {}", other.age_name(), rel.friendship_label()), l, home));
+                }
+            }
+            list.sort_by(|a, b| b.3.total_cmp(&a.3));
+            // (A card clicked: the camera to them.)
+            for (i, c) in &cards {
+                if *i == Interaction::Pressed
+                    && let Some(at) = people.get(c.0).map(|p| p.5.translation()).ok().or_else(|| pets.get(c.0).map(|p| p.4.translation()).ok())
+                    && let Ok(mut cm) = cam.single_mut()
+                {
+                    cm.look_at(at);
+                }
+            }
+            pet_cards(&mut commands, &mut p, &mut ui, (&mut images, &mut fonts), &vis, &mut portraits, pe, &list, (scrolled, &hovered));
+        }
+        return;
+    };
     for ev in events.read() {
         if ev.sim == me
             && let crate::life::LifeEventKind::Socialized { other, .. } = ev.kind
@@ -517,6 +558,81 @@ fn relationships_panel(
 }
 
 /// A window's node as designed (to change one property of it).
+/// The relationships panel for a pet played: a card for each it knows (their face, how fond of
+/// them it is, the household's marked so), fondest first, scrolled with the wheel.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn pet_cards(
+    commands: &mut Commands,
+    p: &mut InfoPanels,
+    ui: &mut UiAssets,
+    (images, fonts): (&mut Assets<Image>, &mut Assets<Font>),
+    vis: &Query<&mut Visibility>,
+    portraits: &mut crate::portraits::Portraits,
+    me: Entity,
+    list: &[(Entity, String, String, f32, bool)],
+    (scrolled, hovered): (f32, &Query<&Interaction>),
+) {
+    let Some(grid) = p.rel.id(REL_GRID) else { return };
+    let Some(g) = ui.find("HUDRelationshipsPanel", REL_GRID).and_then(|w| w.grid) else { return };
+    let columns = g.columns.max(1) as usize;
+    let over = hovered.get(grid).is_ok_and(|i| *i != Interaction::None);
+    if over && scrolled != 0.0 {
+        let most = list.len().saturating_sub(columns);
+        p.scroll = if scrolled > 0.0 { p.scroll.saturating_sub(1) } else { (p.scroll + 1).min(most) };
+    }
+    p.scroll = p.scroll.min(list.len().saturating_sub(columns));
+    let mut shown: Vec<(Entity, i32, u8, u8)> = list.iter().skip(p.scroll).take(columns).map(|c| (c.0, c.3.round() as i32, 0, c.4 as u8 | 16)).collect();
+    shown.push((me, p.scroll as i32, 255, 0));
+    if shown == p.shown {
+        return;
+    }
+    p.shown = shown;
+    let Some(template) = ui.layout("HudRelationshipsPanelEntry").cloned() else { return };
+    let h = holder(commands, grid, &mut p.cards, vis);
+    commands.entity(grid).insert(Node { overflow: Overflow::clip(), ..ui_node(ui, "HUDRelationshipsPanel", REL_GRID) });
+    let step = g.cell[0] + g.cell_padding[0] + g.cell_padding[2];
+    for (n, (e, name, label, liking, home)) in list.iter().skip(p.scroll).take(columns).enumerate() {
+        let x = g.padding[0] + n as f32 * step + g.cell_padding[0];
+        let mut w = template.clone();
+        let (cw, ch) = (w.area[2] - w.area[0], w.area[3] - w.area[1]);
+        w.area = [x, g.padding[1] + g.cell_padding[1], x + cw, g.padding[1] + g.cell_padding[1] + ch];
+        let c = ui.spawn_under(commands, images, fonts, &w, h);
+        let rel = crate::social::Relationship { friendship: *liking, ..default() };
+        if let Some(t) = c.id(ENTRY_THUMB) {
+            commands.entity(t).despawn_children();
+            let pic = portraits.portrait(images, *e);
+            commands.entity(t).with_children(|c| {
+                c.spawn((ImageNode::new(pic), crate::portraits::PortraitOf(*e), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+            });
+            commands.entity(t).remove::<Pickable>().insert((Card(*e), Interaction::default(), crate::hud::BlocksWorld, crate::icons::Tooltip(format!("{name}\n{label}"))));
+        }
+        if let Some(t) = c.text(ENTRY_TEXT) {
+            commands.entity(t).insert(Text::new(label.clone()));
+        }
+        if let Some(b) = c.id(ENTRY_BAR) {
+            let v = (liking.clamp(-100.0, 100.0) + 100.0) / 200.0;
+            commands.entity(b).queue(move |mut e: EntityWorldMut| {
+                if let Some(mut f) = e.get_mut::<UiFillBar>() {
+                    f.value = v;
+                }
+            });
+        }
+        if let (Some(win), Some((icon, _))) = (c.id(ENTRY_LTR), ui.image(images, s3pkg::fnv64(ltr_icon(&rel)))) {
+            crate::hudpanels::picture(commands, win, icon, Color::WHITE);
+            commands.entity(win).insert(Visibility::Inherited);
+            crate::hudpanels::tip(commands, win, rel.friendship_label().to_string());
+        }
+        for (id, on) in [(ENTRY_RELATIVE, *home), (ENTRY_COWORKER, false), (ENTRY_VISITOR, false)] {
+            if let Some(win) = c.id(id) {
+                commands.entity(win).insert(if on { Visibility::Inherited } else { Visibility::Hidden });
+                if on {
+                    crate::hudpanels::tip(commands, win, "Household".to_string());
+                }
+            }
+        }
+    }
+}
+
 fn ui_node(ui: &UiAssets, layout: &str, id: u32) -> Node {
     let a = ui.find(layout, id).map(|w| w.area).unwrap_or_default();
     Node { position_type: PositionType::Absolute, left: Val::Px(a[0]), top: Val::Px(a[1]), width: Val::Px(a[2] - a[0]), height: Val::Px(a[3] - a[1]), ..default() }

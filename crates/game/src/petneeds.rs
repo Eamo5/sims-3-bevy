@@ -305,7 +305,14 @@ pub struct PetTask {
 
 /// When each pet thinks again about what it needs (game minutes).
 #[derive(Component)]
-struct PetThink(f64);
+pub struct PetThink(f64);
+
+impl PetThink {
+    /// Not to think of what it needs till then (game minutes).
+    pub fn until(t: f64) -> Self {
+        Self(t)
+    }
+}
 
 /// Needs fall as the game's tuning has them; a pet asleep (curled up on the floor at night)
 /// rests.
