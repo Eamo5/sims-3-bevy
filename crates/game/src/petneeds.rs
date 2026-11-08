@@ -375,7 +375,7 @@ fn choose(
     clock: Res<GameClock>,
     grid: Option<Res<crate::nav::NavGrid>>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetThink>, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::petlitters::Held>)>,
     objects: Query<(Entity, &GameObject, &Transform, Option<&BowlFood>, Option<&crate::grime::Grime>), Without<crate::visit::LotObject>>,
     taken: Query<&PetTask>,
 ) {
@@ -429,7 +429,7 @@ fn choose(
                 },
                 (BLADDER, _) => Some((PetDo::Pee, outdoors(&grid, building.as_deref(), here, pet, traits, &mut rng))),
                 (ENERGY, 'h') => Some(nearest(&|o, _, _| o.kind == ObjectKind::BoxStall).map_or((PetDo::Sleep(None), None), |(s, at)| (PetDo::Sleep(Some(s)), Some(at)))),
-                (ENERGY, _) => match nearest(&|o, _, _| o.kind == ObjectKind::PetBed) {
+                (ENERGY, _) => match nearest(&|o, _, _| matches!(o.kind, ObjectKind::PetBed | ObjectKind::PetHouse)) {
                     Some((b, at)) => Some((PetDo::Sleep(Some(b)), Some(at))),
                     None => Some((PetDo::Sleep(None), None)),
                 },
@@ -504,7 +504,7 @@ pub fn spot_for(what: PetDo, o: &GameObject, otf: &Transform, from: Vec2, kind: 
 fn approach(o: &GameObject, tf: &Transform, from: Vec2, kind: &str) -> Vec2 {
     let c = o.world_center(tf).xz();
     let reach = match (o.kind, species(kind)) {
-        (ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::BoxStall, _) => return c,
+        (ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::PetHouse | ObjectKind::BoxStall, _) => return c,
         (ObjectKind::WaterTrough, _) => o.half.max_element() + 0.9,
         (_, 'd') => o.half.max_element() + 0.45,
         _ => o.half.max_element() + 0.25,
@@ -634,7 +634,7 @@ fn act(
                     let (at, turn) = hay_spot(o.1);
                     tf.translation = Vec3::new(at.x, tf.translation.y, at.y);
                     tf.rotation = turn;
-                } else if matches!(o.0.kind, ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::BoxStall) {
+                } else if matches!(o.0.kind, ObjectKind::LitterBox | ObjectKind::PetBed | ObjectKind::PetHouse | ObjectKind::BoxStall) {
                     tf.rotation = o.1.rotation;
                 } else {
                     let to = o.0.world_center(o.1).xz() - here;

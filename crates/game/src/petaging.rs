@@ -192,7 +192,7 @@ fn daily(
     clock: Res<crate::clock::GameClock>,
     settings: Res<crate::options::Settings>,
     mut last: Local<Option<u32>>,
-    mut pets: Query<(Entity, &Pet, &mut PetAge), (With<HomePet>, Without<PetDying>, Without<AgeDue>, Without<AgingUp>)>,
+    mut pets: Query<(Entity, &Pet, &mut PetAge), (With<HomePet>, Without<PetDying>, Without<AgeDue>, Without<AgingUp>, Without<crate::petlitters::PetPregnant>)>,
     mut notes: ResMut<Notifications>,
 ) {
     let day = clock.day();

@@ -1229,11 +1229,16 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q)): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
-        Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>), (With<Selected>, With<crate::pets::HomePet>)>,
+        Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
         Res<crate::baked::Baked>,
+        (
+            Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
+            Query<&GameObject, Without<crate::visit::LotObject>>,
+            Query<(), With<crate::petlitters::Unnamed>>,
+        ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
         Query<(), With<HouseholdMember>>,
@@ -1348,7 +1353,7 @@ fn world_click(
     pie.vehicle = None;
     let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else {
         // (A pet selected: the world's clicks are its, `petcontrol`.)
-        if let Ok((pe, pet, bonds)) = pet_sel.single() {
+        if let Ok((pe, pet, bonds, pregnant, age)) = pet_sel.single() {
             // (An object, a Sim or another pet; else the ground.)
             let is_target = |e: Entity| e != pe && (objects.contains(e) || sims.contains(e) || pets_q.contains(e));
             let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
@@ -1361,7 +1366,19 @@ fn world_click(
                     let liking = bonds.map_or(if member { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(sim.id, member));
                     (sim.full_name(), crate::petcontrol::sim_options(&baked, pet, t, sim.age, liking))
                 }
-                Some(t) => pets_q.get(t).map(|(other, ..)| (other.name.clone(), crate::petcontrol::pet_options(&baked, pet, t, &other.kind))).unwrap_or_default(),
+                Some(t) => pets_q
+                    .get(t)
+                    .map(|(other, ..)| {
+                        // (Trying for young: of a kind and both sexes, fond enough, a place for it.)
+                        use crate::petlitters::{LIKING_TO_TRY, Mate, can_try, place_kind};
+                        let can = pet_info_q.get(t).is_ok_and(|(h, their_preg, their_age)| {
+                            let me = Mate { kind: &pet.kind, female: pet.female, elder: age.is_some_and(|a| a.elder), pregnant };
+                            let them = Mate { kind: &other.kind, female: other.female, elder: their_age.is_some_and(|a| a.elder), pregnant: their_preg };
+                            can_try(me, them) && bonds.map_or(crate::pets::FAMILY_LIKING, |b| b.liking(h.id, true)) >= LIKING_TO_TRY && home_objects_q.iter().any(|o| o.kind == place_kind(&pet.kind))
+                        });
+                        (other.name.clone(), crate::petcontrol::pet_options(&baked, pet, t, &other.kind, can))
+                    })
+                    .unwrap_or_default(),
                 None => (String::new(), floor_hit(ray, &world, building.as_deref()).map(|(p, _)| crate::petcontrol::ground_options(p.xz())).unwrap_or_default()),
             };
             if !options.is_empty() {
@@ -1415,6 +1432,10 @@ fn world_click(
             .filter(|(_, s)| s.min_liking.is_none_or(|m| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home)) >= m))
             .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
             .collect();
+        // (A young one of the household's not yet named: "Name Pet", the game's `NamePet`.)
+        if home && unnamed_q.contains(t) {
+            options.insert(0, ("Name Pet".to_string(), ActionKind::PetCommand(crate::petcontrol::PetCommand::Name(t))));
+        }
         // (A horse of the household's: ridden, by a teen or older it likes well enough, none up on
         // it already; its rider's to get down from it: `riding`.)
         if kind == "ah" {
@@ -2873,9 +2894,16 @@ fn pie_buttons(
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
-    // (A pet told what to do: off it goes, `petcontrol`.)
+    // (A pet told what to do: off it goes, `petcontrol`; one to be named, its name asked for.)
     if let (ActionKind::PetCommand(c), Some(a)) = (&kind, actor) {
-        commands.entity(a).insert(crate::petcontrol::PetOrder(*c));
+        match c {
+            crate::petcontrol::PetCommand::Name(t) => {
+                commands.entity(*t).insert(crate::petlitters::WantsName);
+            }
+            _ => {
+                commands.entity(a).insert(crate::petcontrol::PetOrder(*c));
+            }
+        }
         return;
     }
     // (A bike made a Sim's own there and then; a trip off a car's or bike's menu taken on it.)

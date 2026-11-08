@@ -896,10 +896,14 @@ pub enum MoodletKind {
     ForciblyDismounted,
     /// Off on a bike (`bicycles`).
     SavingTheEnvironment,
+    /// A pet of the household's had young (`petlitters`).
+    NewKittens,
+    NewPuppies,
+    NewFoal,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 147] = {
+    pub const ALL: [MoodletKind; 150] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -915,7 +919,7 @@ impl MoodletKind {
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
             Technophobia, Hydrophobic, FightThePower, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
-            SaddleSore, ForciblyDismounted, SavingTheEnvironment,
+            SaddleSore, ForciblyDismounted, SavingTheEnvironment, NewKittens, NewPuppies, NewFoal,
         ]
     };
 
@@ -1098,6 +1102,9 @@ impl MoodletKind {
             SaddleSore => md("Saddle Sore", "Spending a lot of time on the back of a horse tends to leave quite an impression on one's backside. Ouch!", -15, 3.0),
             ForciblyDismounted => md("Forcibly Dismounted", "Sims do not like having to dismount their steed by surprise, but sometimes their horse knows best.", -35, 12.0),
             SavingTheEnvironment => md("Saving the Environment", "Why commute in a gas guzzling automobile when a bike has zero emissions and is so stylish?", 10, 3.0),
+            NewKittens => md("New Kittens", "A cat in the family just had kittens!", 80, 24.0),
+            NewPuppies => md("New Puppies", "A dog in the family just had puppies!", 80, 24.0),
+            NewFoal => md("New Foal", "A horse in the family just had a foal. What a delightful addition to the family!", 80, 24.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1258,6 +1265,9 @@ impl MoodletKind {
             SaddleSore => ("SaddleSore", true),
             ForciblyDismounted => ("ForciblyDismounted", true),
             SavingTheEnvironment => ("SavingTheEnvironment", true),
+            NewKittens => ("NewKittensHuman", true),
+            NewPuppies => ("NewPuppiesHuman", true),
+            NewFoal => ("NewFoalHuman", true),
         }
     }
 }

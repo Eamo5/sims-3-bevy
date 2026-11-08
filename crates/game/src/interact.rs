@@ -261,6 +261,8 @@ pub enum ObjectKind {
     PetBowl,
     LitterBox,
     PetBed,
+    /// A pet house (the pack's `PetHouse`): slept in, and where cats and dogs try for a litter.
+    PetHouse,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -296,7 +298,9 @@ impl ObjectKind {
             Self::PetBowl
         } else if has("objects.pets.litterbox") {
             Self::LitterBox
-        } else if has("objects.beds.petbed") || has("objects.pets.pethouse") {
+        } else if has("objects.pets.pethouse") {
+            Self::PetHouse
+        } else if has("objects.beds.petbed") {
             Self::PetBed
         } else if has("objects.pets.scratchingpost") || has("objects.pets.catcondo") {
             Self::ScratchingPost
@@ -615,7 +619,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
-            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
             Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
         }

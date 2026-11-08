@@ -1027,6 +1027,23 @@ installation is unreachable.
   Groom, Pounce), given as it gives them of its own accord, the Sim leaving what they were at of
   their own accord for it (a horse turning its rump to kick). `PET_CONTROL_TEST=<name>:<x>,<z>`
   or `<name>@<whom>[:<social>]` (tests).
+  Pets come to like each other as they nuzzle, groom and play (the household's starting where
+  family does), and a grown cat or dog fond enough of one of the other sex of its kind (a dog
+  and a little dog together: the pack's `Pet Woohoo`, its liking of 40) can "Try for Kittens" or
+  "Try for Puppies" with it when there's a pet house on the lot (a horse "Try For Foal" at a box
+  stall). If the other's fonder still (60) the two go to the pet house and back into it, the
+  pack's `soc_woohoo` clips for both and the house's own; if not, it just sniffs them. Then the
+  game's chance of a pregnancy (`kPregnancyChance` 60, the conception sting): it lasts the game's
+  two days (`kHoursOfPetPregnancy` 48), known twelve hours in ("Looks like Pickles is pregnant!
+  Prepare for kittens!"), her company, fun and hygiene kept full from then and her aging waiting.
+  Her time come, she lies down whining (a mare stamps) and the young come: one to four (the
+  game's .8, .3 and .1 chances; a foal alone), as many as the household has room for (six pets,
+  ten in all), each a kitten, puppy or foal of its mother's or father's kind and breed, its coat
+  theirs, some of their traits, fond of her; they lie by her a while. The family's delighted (New
+  Kittens, New Puppies or New Foal, +80 for a day) and cheers. A foal's named there and then
+  ("Congratulations on a new foal!"); kittens and puppies are "Kitten 1", "Puppy 2"... till a Sim
+  names them ("Name Pet" on their menu). Pregnancies and the unnamed are kept in saves.
+  `PET_LITTER_TEST=<pet>@<other>` or `<pet>:due` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

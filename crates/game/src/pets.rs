@@ -326,7 +326,7 @@ fn social_partners(
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
-    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>)>>,
+    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>, With<crate::petlitters::Held>)>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected, player) in &sims {
@@ -1004,6 +1004,12 @@ pub struct SavedPet {
     /// How far through its life stage it is, and whether it's old (`petaging`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub age: Option<crate::petaging::PetAge>,
+    /// Expecting (`petlitters`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pregnancy: Option<crate::petlitters::PetPregnant>,
+    /// Born and not yet named ("Kitten 1").
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unnamed: bool,
 }
 
 impl SavedPet {
@@ -1034,6 +1040,8 @@ impl SavedPet {
             fur_mix: None,
             layers: None,
             age: None,
+            pregnancy: None,
+            unnamed: false,
         }
     }
 
@@ -1118,7 +1126,7 @@ fn adopted_pets(mut commands: Commands, order: Option<Res<AdoptPetOrder>>, pets:
         breeds = data.breeds.iter().filter(|b| b.kind == wears).collect();
     }
     let Some(b) = breeds.choose(&mut rng) else { return };
-    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None, age: None });
+    pending.0.push(SavedPet { id: rng.random(), name: o.name.clone(), kind: o.kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: crate::pettraits::random(o.kind, &mut rng), female: rng.random(), saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None, age: None, pregnancy: None, unnamed: false });
 }
 
 /// The kind of pet a premade one is: its species and whether it's young.
@@ -1146,7 +1154,7 @@ impl SavedPet {
         let wears = if kind == "cl" && !data.breeds.iter().any(|b| b.kind == "cl") { "cd" } else { kind };
         let breeds: Vec<&s3bake::pets::PetBreed> = data.breeds.iter().filter(|b| b.kind == wears).collect();
         let b = breeds.get((p.id % breeds.len().max(1) as u64) as usize)?;
-        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None, age: (p.age & 0x40 != 0).then(|| crate::petaging::PetAge::start(kind, true, &mut rand::rng())) })
+        Some(SavedPet { id: p.id, name: p.first_name.clone(), kind: kind.to_string(), outfit: b.outfit, position: None, motives: None, bonds: Vec::new(), traits: p.traits.clone(), female: p.female, saddled: false, tricks: None, horse: None, accessories: Vec::new(), shapes: Vec::new(), coat: None, tint: None, tail: None, mane: None, hooves: None, sliders: Vec::new(), fur: None, fur_mix: None, layers: None, age: (p.age & 0x40 != 0).then(|| crate::petaging::PetAge::start(kind, true, &mut rand::rng())), pregnancy: None, unnamed: false })
     }
 }
 
@@ -1192,6 +1200,12 @@ fn spawn_household_pets(
             if let Some(a) = pet.age {
                 commands.entity(e).insert(a);
             }
+            if let Some(p) = pet.pregnancy.clone() {
+                commands.entity(e).insert(p);
+            }
+            if pet.unnamed {
+                commands.entity(e).insert(crate::petlitters::Unnamed);
+            }
             if pet.saddled {
                 commands.entity(e).insert(crate::riding::WantsTack);
             }
@@ -1219,7 +1233,7 @@ fn home_pets(
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     household: Option<Res<crate::interact::Household>>,
-    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>)>,
+    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::petlitters::Held>)>,
 ) {
     let Some(grid) = grid else { return };
     let lot = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index));
@@ -1301,7 +1315,7 @@ pub fn idle_clip(kind: &str, night: bool, rng: &mut impl Rng) -> String {
 }
 
 /// What's kept of a household pet (in saves, and as it grows up).
-pub type SavedPetQuery<'a> = (&'a Pet, &'a HomePet, &'a Transform, Option<&'a crate::petneeds::PetMotives>, (Option<&'a PetBonds>, Option<&'a PetTraits>, Has<crate::riding::Tack>, Option<&'a crate::dogtricks::DogTricks>, Option<&'a Accessories>, Option<&'a crate::horsejumps::HorseSkills>, Option<&'a crate::petaging::PetAge>));
+pub type SavedPetQuery<'a> = (&'a Pet, &'a HomePet, &'a Transform, Option<&'a crate::petneeds::PetMotives>, (Option<&'a PetBonds>, Option<&'a PetTraits>, Has<crate::riding::Tack>, Option<&'a crate::dogtricks::DogTricks>, Option<&'a Accessories>, Option<&'a crate::horsejumps::HorseSkills>, Option<&'a crate::petaging::PetAge>, (Option<&'a crate::petlitters::PetPregnant>, Has<crate::petlitters::Unnamed>)));
 
 /// The household's pets, for the save.
 pub fn saved(pets: &Query<SavedPetQuery>, data: Option<&PetsBaked>) -> Vec<SavedPet> {
@@ -1312,12 +1326,12 @@ pub fn saved(pets: &Query<SavedPetQuery>, data: Option<&PetsBaked>) -> Vec<Saved
 /// One household pet, as it's kept.
 #[allow(clippy::type_complexity)]
 pub fn save_one(
-    (p, h, tf, m, (b, t, saddled, tricks, worn, horse, age)): (&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, bool, Option<&crate::dogtricks::DogTricks>, Option<&Accessories>, Option<&crate::horsejumps::HorseSkills>, Option<&crate::petaging::PetAge>)),
+    (p, h, tf, m, (b, t, saddled, tricks, worn, horse, age, (pregnancy, unnamed))): (&Pet, &HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&PetBonds>, Option<&PetTraits>, bool, Option<&crate::dogtricks::DogTricks>, Option<&Accessories>, Option<&crate::horsejumps::HorseSkills>, Option<&crate::petaging::PetAge>, (Option<&crate::petlitters::PetPregnant>, bool))),
     data: &PetsBaked,
 ) -> Option<SavedPet> {
     let bonds = b.map(|b| b.0.iter().map(|(k, v)| (*k, *v)).collect()).unwrap_or_default();
     let traits = t.map(|t| t.0.clone()).unwrap_or_default();
-    Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), horse: horse.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, fur_mix: p.look.fur_mix.clone(), layers: p.look.layers.clone(), age: age.copied() })
+    Some(SavedPet { id: h.id, name: p.name.clone(), kind: p.kind.clone(), outfit: data.breeds.get(p.breed)?.outfit, position: Some(tf.translation.to_array()), motives: m.map(|m| m.0), bonds, traits, female: p.female, saddled, tricks: tricks.cloned(), horse: horse.cloned(), accessories: worn.map(|w| w.worn.clone()).unwrap_or_default(), shapes: p.look.shapes.clone(), coat: p.look.coat, tint: p.look.tint, tail: p.look.tail.clone(), mane: p.look.mane.clone(), hooves: p.look.hooves.clone(), sliders: p.look.sliders.clone(), fur: p.look.fur, fur_mix: p.look.fur_mix.clone(), layers: p.look.layers.clone(), age: age.copied(), pregnancy: pregnancy.cloned(), unnamed })
 }
 
 /// A stray: wandering about near where it turned up.

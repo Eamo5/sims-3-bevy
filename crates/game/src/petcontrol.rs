@@ -33,6 +33,10 @@ pub enum PetCommand {
     Go(Vec2),
     Do(PetDo),
     Greet(crate::petcompany::Other, crate::petcompany::Greet),
+    /// Trying for young with another pet (`petlitters`).
+    Mate(Entity),
+    /// A pet to be named (a Sim's "Name Pet").
+    Name(Entity),
 }
 
 /// An order for a pet, to be seen to.
@@ -53,7 +57,7 @@ pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&B
                 out.push(("Eat".to_string(), ActionKind::Greyed("The bowl is empty.".into())));
             }
         }
-        ObjectKind::PetBed if !horse => out.push(order("Sleep", PetDo::Sleep(Some(target)))),
+        ObjectKind::PetBed | ObjectKind::PetHouse if !horse => out.push(order("Sleep", PetDo::Sleep(Some(target)))),
         ObjectKind::BoxStall if horse => {
             out.push(order("Eat Hay", PetDo::Hay(target)));
             out.push(order("Sleep", PetDo::Sleep(Some(target))));
@@ -77,10 +81,15 @@ pub fn sim_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, age: c
     offered(data, &pet.kind, Them::Sim(age), liking).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Sim(target), g)))).collect()
 }
 
-/// Another pet clicked: what the one gives the other.
-pub fn pet_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, kind: &str) -> Vec<(String, ActionKind)> {
+/// Another pet clicked: what the one gives the other, and trying for young with it where they
+/// can (`petlitters`: of a kind and both sexes, fond enough, a place for it).
+pub fn pet_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, kind: &str, can_try: bool) -> Vec<(String, ActionKind)> {
     use crate::petcompany::{Other, Them, offered};
-    offered(data, &pet.kind, Them::Pet(kind), 0.0).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Pet(target), g)))).collect()
+    let mut out: Vec<(String, ActionKind)> = offered(data, &pet.kind, Them::Pet(kind), 0.0).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Pet(target), g)))).collect();
+    if can_try {
+        out.push((crate::petlitters::try_label(&pet.kind).to_string(), ActionKind::PetCommand(PetCommand::Mate(target))));
+    }
+    out
 }
 
 /// Ground clicked with a pet selected: there.
@@ -103,7 +112,11 @@ fn obey(
     let Some(grid) = grid else { return };
     let mut rng = rand::rng();
     for (e, pet, order, tf) in &pets {
-        commands.entity(e).remove::<(PetOrder, crate::petcompany::Greeting, crate::petneeds::PetTask)>();
+        // (Trying for young: `petlitters`'.)
+        if matches!(order.0, PetCommand::Mate(_)) {
+            continue;
+        }
+        commands.entity(e).remove::<(PetOrder, crate::petcompany::Greeting, crate::petneeds::PetTask, crate::petlitters::Mating, crate::petlitters::Held)>();
         let here = tf.translation.xz();
         let (what, to, otf) = match order.0 {
             PetCommand::Greet(other, how) => {
@@ -116,6 +129,7 @@ fn obey(
                 continue;
             }
             PetCommand::Go(at) => (PetDo::Go, Some(at), None),
+            PetCommand::Mate(_) | PetCommand::Name(_) => continue,
             PetCommand::Do(what) => {
                 let Some((o, otf)) = what.object().and_then(|t| objects.get(t).ok()) else { continue };
                 (what, crate::petneeds::spot_for(what, o, otf, here, &pet.kind), Some(*otf))

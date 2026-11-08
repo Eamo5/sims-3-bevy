@@ -402,7 +402,7 @@ fn seek_company(
     time: Res<Time>,
     data: Res<Baked>,
     grid: Option<Res<crate::nav::NavGrid>>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetBonds>, Option<&PetAnim>), (With<HomePet>, Without<crate::petneeds::PetTask>, Without<PetBusy>, Without<Greeting>, Without<Greeted>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetBonds>, Option<&PetAnim>), (With<HomePet>, Without<crate::petneeds::PetTask>, Without<PetBusy>, Without<Greeting>, Without<Greeted>, Without<crate::petlitters::Held>)>,
     sims: Query<(Entity, &Sim, &Transform, &ActionQueue, Option<&crate::nav::PathFollow>, Option<&crate::interact::OffLot>, &InheritedVisibility), With<HouseholdMember>>,
     mut next: Local<HashMap<Entity, f64>>,
     mut tested: Local<bool>,
@@ -510,6 +510,7 @@ fn greet(
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Option<&mut Greeting>, Option<&mut PetMotives>, Option<&mut PetBonds>), Without<Sim>>,
     mut sims: Query<(&Sim, &Transform, &mut ActionQueue, Option<&crate::nav::PathFollow>, &mut crate::sim::Motives), Without<Pet>>,
     greeted: Query<(Entity, &Greeted)>,
+    ids: Query<&HomePet>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let now = clock.minutes;
@@ -676,9 +677,11 @@ fn greet(
         }
         // Over: what came of it.
         let (pet_social, pet_fun, their_social, liking) = g.how.effects();
+        // (Pets come to like each other as Sims do them: by their ids, the household's starting
+        // where family does, `petlitters`' trying asking for more.)
         let sim_id = match g.other {
             Other::Sim(s) => sims.get(s).ok().map(|(sim, ..)| sim.id),
-            Other::Pet(_) => None,
+            Other::Pet(p) => ids.get(p).ok().map(|h| h.id),
         };
         if let Ok((_, _, _, _, _, m, bonds)) = pets.get_mut(e) {
             if let Some(mut m) = m {
@@ -696,10 +699,16 @@ fn greet(
                 }
             }
             Other::Pet(p) => {
-                if let Ok((.., Some(mut m), _)) = pets.get_mut(p) {
-                    m.add(SOCIAL, their_social);
-                    if g.how.game() {
-                        m.add(FUN, pet_fun);
+                let me = ids.get(e).ok().map(|h| h.id);
+                if let Ok((.., m, bonds)) = pets.get_mut(p) {
+                    if let Some(mut m) = m {
+                        m.add(SOCIAL, their_social);
+                        if g.how.game() {
+                            m.add(FUN, pet_fun);
+                        }
+                    }
+                    if let (Some(mut b), Some(id)) = (bonds, me) {
+                        b.add(id, true, liking);
                     }
                 }
             }

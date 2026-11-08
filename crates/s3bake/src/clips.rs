@@ -231,6 +231,17 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ah2a_riding_throwRider_",
     // (A horse kicking a Sim: the pack's `Horse Kick`.)
     "ah2a_kick_",
+    // (Pets trying for young: in a pet house, the house's own; horses; a birth.)
+    "ac2ac_soc_woohoo_",
+    "ad2ad_soc_woohoo_",
+    "ad2al_soc_woohoo_",
+    "al2ad_soc_woohoo_",
+    "al2al_soc_woohoo_",
+    "ah2ah_woohoo_",
+    "ac_react_layDown_whine_",
+    "ad_react_layDown_whine_",
+    "al_react_layDown_whine_",
+    "ah_react_snortStompFeet_x",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",
