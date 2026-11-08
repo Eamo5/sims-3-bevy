@@ -495,11 +495,26 @@ pub fn bake_missing_bled(root: &BakeRoot, pkgs: &PackageSet) -> usize {
     let Ok(catalog) = read_value::<Vec<CatalogEntry>>(&root.global_dir().join("catalog.bin")) else { return 0 };
     let Ok(models) = PackReader::open(&root.global_dir().join("models.pack")) else { return 0 };
     let mut jobs: HashSet<Key> = HashSet::new();
-    for k in catalog.iter().flat_map(|c| c.models.iter()) {
-        let Some(m) = models.get::<BakedModel>(k) else { continue };
-        for t in m.parts.iter().filter_map(|p| p.texture).filter(|t| t.1 == BLED_GROUP) {
+    let mut add = |m: &BakedModel| {
+        // (Not the worlds' lot imposters' atlases: those are the world bake's own to draw.)
+        for t in m.parts.iter().filter_map(|p| p.texture).filter(|t| t.1 == BLED_GROUP && matches!(t.0, types::DDS | types::TXTC)) {
             if !root.tex_path(t).exists() {
                 jobs.insert((t.0, 0, t.2));
+            }
+        }
+    };
+    for k in catalog.iter().flat_map(|c| c.models.iter()) {
+        if let Some(m) = models.get::<BakedModel>(k) {
+            add(&m);
+        }
+    }
+    // (And the worlds' own: their lots' objects and fences.)
+    if let Ok(worlds) = std::fs::read_dir(root.dir.join("worlds")) {
+        for w in worlds.flatten() {
+            if let Ok(p) = PackReader::open(&w.path().join("models.pack")) {
+                for (_, m) in p.all::<BakedModel>() {
+                    add(&m);
+                }
             }
         }
     }
