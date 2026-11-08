@@ -260,6 +260,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         unnamed: false,
         hunting: None,
         inventory: Vec::new(),
+        moodlets: Vec::new(),
     })
 }
 

@@ -1063,6 +1063,22 @@ installation is unreachable.
   the pack's dug hole left a while): a gem, some metal or a rock, the rarer the better its
   Hunting, or something...interesting. Both learn Hunting as they go; kept in saves.
   `PET_HUNT_TEST=<pet>[:<level>]` (tests).
+  Pets have moodlets and a mood as Sims do, the pack's own buffs: their needs' by the game's
+  `Motives` triggers for each species (Hungry from -36, Very Hungry -40 from -61, Starving -80
+  from -81; Has To Pee, Sleepy, Tired, Exhausted, Lonely, Desolate; Grungy and Smelly for the
+  grown; a cat's or dog's Strained and Stressed, and Entertained (+25) and Having a Blast (+40)
+  as its fun runs high; a cat's Itching To Scratch and Claws Out, a dog's Pent Up and Going
+  Nuts, a horse's Restless, Frustrated, Thirsty and Dehydrated), Squeaky Clean once washed till
+  it's grubby again, Purrfectly Manicured, Well Rested at full energy; what's done to them
+  (Loved, +25 for an hour, petted, hugged, smooched, its belly rubbed or brushed; Brushed;
+  Praised; Scolded; Hygenic Hooves; Good Dog for a trick done on command; Nothing But Air for a
+  clean jump from Jumping 5; Tastes Like Chicken for a bird caught and eaten; Pregnant while it
+  shows; New Kittens, New Puppies or New Foal for mother and father; Training Fatigue while it's
+  worn out). What pets do leaves Sims feeling it too: Kicked by a horse (-15 for a day), Marked by
+  a cat (+10), Shredded Dignity from a cat's attack. A pet's moodlets show on the moodlet panel
+  with it played (the game's names, icons and words, in its sex), its mood on the meter and
+  round its face on the skewer, and a horse throws its rider as its mood (the game's
+  `MoodValue`) turns foul. Timed ones are kept in saves. `PET_MOODS=<pet>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

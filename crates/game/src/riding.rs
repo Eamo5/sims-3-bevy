@@ -344,7 +344,7 @@ pub(crate) fn ride(
     (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
     (grid, world, building, exit): (Option<Res<crate::nav::NavGrid>>, Res<crate::loading::CurrentWorld>, Option<Res<crate::building::ActiveBuilding>>, Option<Res<crate::interact::LotExit>>),
     mut sims: Query<(Entity, &Sim, &mut Mounted, &mut ActionQueue, &mut SimAnim, &mut Skills, (Option<&crate::life::Mood>, Option<&mut crate::sim::Motives>, Option<&mut crate::life::Moodlets>)), Without<crate::rabbitholes::AtRabbitHole>>,
-    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>, Option<&crate::pets::PetTraits>)), Without<Sim>>,
+    mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>, Option<&crate::pets::PetTraits>, Option<&crate::life::Mood>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     (obstacles, jumps): (
@@ -355,7 +355,7 @@ pub(crate) fn ride(
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
     let mut rng = rand::rng();
     for (e, sim, mut m, mut queue, mut anim, mut skills, (mood, mut sim_motives, mut moodlets)) in &mut sims {
-        let Ok((pet, mut htf, mut hanim, mut motives, mut bonds, (skel, tack, mut hskills, htraits))) = horses.get_mut(m.horse) else {
+        let Ok((pet, mut htf, mut hanim, mut motives, mut bonds, (skel, tack, mut hskills, htraits, hmood))) = horses.get_mut(m.horse) else {
             // (The horse gone: down where they are.)
             queue.0.retain(|a| !matches!(a.kind, ActionKind::Ride { .. }));
             commands.entity(e).remove::<(Mounted, ActionClip)>();
@@ -510,7 +510,7 @@ pub(crate) fn ride(
                 // (Thrown off: a horse in a foul mood as its mood turns, a starving or exhausted
                 // one when its patience is out; not over a jump or on the way to one.)
                 let distressed = m.throw_at.is_some_and(|t| clock.minutes >= t);
-                let foul = clock.minutes >= m.benefit_at && motives.as_deref().is_some_and(|mo| throws(crate::petneeds::mood(mo), htraits.map_or(&[][..], |t| &t.0[..]), rng.random()));
+                let foul = clock.minutes >= m.benefit_at && motives.as_deref().is_some_and(|mo| throws(hmood.map_or_else(|| crate::petneeds::mood(mo), |x| x.0), htraits.map_or(&[][..], |t| &t.0[..]), rng.random()));
                 let forced = std::env::var_os("RIDE_THROW").is_some();
                 if !off && m.jump.is_none() && (distressed || foul || forced) && !(forced && m.throw_at == Some(f64::NEG_INFINITY)) {
                     let teen = sim.age == crate::sim::Age::Teen;

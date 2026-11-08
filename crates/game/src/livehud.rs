@@ -569,7 +569,7 @@ fn puck_one(
 fn mood_meter(
     mut commands: Commands,
     hud: Res<LiveHud>,
-    sel: Query<(&crate::life::Mood, &crate::life::Moodlets, &Sim), With<Selected>>,
+    sel: Query<(&crate::life::Mood, &crate::life::Moodlets, Option<&Sim>, Option<&crate::pets::Pet>), With<Selected>>,
     mut nodes: Query<&mut Node>,
     mut images: Query<&mut ImageNode>,
     pictures: Query<&UiPicture>,
@@ -578,7 +578,9 @@ fn mood_meter(
     time: Res<Time>,
     (ui, mut tips): (Option<Res<UiAssets>>, Query<&mut crate::icons::Tooltip>),
 ) {
-    let Ok((mood, moodlets, sim)) = sel.single() else { return };
+    // (A Sim's, or a pet's played: `petmoods`.)
+    let Ok((mood, moodlets, sim, pet)) = sel.single() else { return };
+    let name = sim.map(|s| s.full_name()).or_else(|| pet.map(|p| p.name.clone())).unwrap_or_default();
     // (Its tooltip, the game's `MoodMeterTooltip`: how they feel, and what the meter is.)
     if let Some(ui) = ui.as_deref() {
         let word = |key: String, or: &str| ui.localize(&key).unwrap_or_else(|| or.to_string());
@@ -594,7 +596,7 @@ fn mood_meter(
         .join("\n\n");
         set_tooltip(&mut commands, &mut tips, hud.display.id(MOOD_REFERENCE), tip);
         // (The Sim's name over their picture.)
-        set_tooltip(&mut commands, &mut tips, hud.display.id(BUST), sim.full_name());
+        set_tooltip(&mut commands, &mut tips, hud.display.id(BUST), name);
     }
     // (The bar eases towards the mood, as the game's.)
     let want = mood.0.clamp(MOOD_MIN, MOOD_MAX);
@@ -830,7 +832,7 @@ fn skewer(
     (selected, positions, mut cam): (Query<Entity, With<Selected>>, Query<(&Transform, &Sim, Has<crate::nav::PathFollow>)>, Query<&mut crate::camera::SimsCamera>),
     mut faces: Local<Vec<Option<Entity>>>,
     (mouse, hovered, mut tips, mut queues, ui): (Res<ButtonInput<MouseButton>>, Query<&Interaction>, Query<&mut crate::icons::Tooltip>, Query<&mut crate::interact::ActionQueue>, Option<Res<UiAssets>>),
-    (pets, mut nodes, mut pet_faces, gu): (Query<(Entity, &crate::pets::Pet, &crate::petneeds::PetMotives, &Transform, (Option<&crate::pets::PetTraits>, Option<&crate::dogtricks::DogTricks>, Option<&crate::horsejumps::HorseSkills>)), With<crate::pets::HomePet>>, Query<&mut Node>, Local<Vec<Option<Entity>>>, Option<Res<crate::icons::GameUi>>),
+    (pets, mut nodes, mut pet_faces, gu): (Query<(Entity, &crate::pets::Pet, &crate::petneeds::PetMotives, &Transform, (Option<&crate::pets::PetTraits>, Option<&crate::dogtricks::DogTricks>, Option<&crate::horsejumps::HorseSkills>, Option<&crate::life::Mood>)), With<crate::pets::HomePet>>, Query<&mut Node>, Local<Vec<Option<Entity>>>, Option<Res<crate::icons::GameUi>>),
 ) {
     let s = &hud.skewer;
     let out: Vec<Entity> = members.iter().filter(|m| m.3).map(|m| m.0).collect();
@@ -921,7 +923,7 @@ fn skewer(
         let container = s.id(SKEWER_PET_SLOT + slot as u32);
         let who = pet_list.get(slot).copied();
         set_visible(&mut vis, container, who.is_some());
-        let (Some(c), Some((e, pet, m, tf, (traits, tricks, horse)))) = (container, who) else { continue };
+        let (Some(c), Some((e, pet, m, tf, (traits, tricks, horse, pet_mood)))) = (container, who) else { continue };
         let button = s.within(c, SLOT_BUTTON);
         let sel = selected.contains(e);
         if let Some(b) = button
@@ -932,7 +934,8 @@ fn skewer(
         }
         set_visible(&mut vis, s.within(c, SLOT_GO_HOME), false);
         set_visible(&mut vis, s.within(c, SLOT_FOLLOW), false);
-        set_shade(&mut images, &pictures, s.within(c, SLOT_MOOD), mood_single(crate::petneeds::mood(m)));
+        // (Ringed in its mood, `petmoods`; its needs' till it has one.)
+        set_shade(&mut images, &pictures, s.within(c, SLOT_MOOD), mood_single(pet_mood.map_or_else(|| crate::petneeds::mood(m), |x| x.0)));
         if pet_faces[slot] != Some(e)
             && let Some(t) = s.within(c, SLOT_THUMB)
             && let Ok(p) = pictures.get(t)
@@ -1101,7 +1104,7 @@ fn moodlets(
     hud: Res<LiveHud>,
     ui: Option<ResMut<UiAssets>>,
     (mut assets, mut fonts): (ResMut<Assets<Image>>, ResMut<Assets<Font>>),
-    sel: Query<(&crate::life::Moodlets, Option<&crate::sim::Sim>), With<Selected>>,
+    sel: Query<(&crate::life::Moodlets, Option<&crate::sim::Sim>, Option<&crate::pets::Pet>), With<Selected>>,
     clock: Res<crate::clock::GameClock>,
     mut game_ui: Option<ResMut<crate::icons::GameUi>>,
     clicks: Query<(Entity, &Interaction), Changed<Interaction>>,
@@ -1110,8 +1113,16 @@ fn moodlets(
 ) {
     let (Some(mut ui), Some(grid)) = (ui, hud.display.id(MOODLET_GRID)) else { return };
     let Some(g) = ui.layout("HUDSimDisplay").and_then(|w| w.find(MOODLET_GRID)).and_then(|w| w.grid) else { return };
-    // (Theirs, with their name for the descriptions that have it: "Today is Bella's lucky day.")
-    let (mut list, who): (Vec<crate::life::Moodlet>, String) = sel.single().map(|(m, s)| (m.0.clone(), s.map(|s| s.first.clone()).unwrap_or_default())).unwrap_or_default();
+    // (Theirs, with their name and sex for the descriptions that have them: "Today is Bella's
+    // lucky day."; a pet's its own.)
+    let (mut list, who, female): (Vec<crate::life::Moodlet>, String, bool) = sel
+        .single()
+        .map(|(m, s, p)| match (s, p) {
+            (Some(s), _) => (m.0.clone(), s.first.clone(), s.female),
+            (_, Some(p)) => (m.0.clone(), p.name.clone(), p.female),
+            _ => (m.0.clone(), String::new(), false),
+        })
+        .unwrap_or_default();
     list.sort_by_key(|x| -x.value.abs());
     let (cols, rows) = (g.columns.max(1) as usize, g.rows.max(1) as usize);
     let total_rows = list.len().div_ceil(cols);
@@ -1166,7 +1177,7 @@ fn moodlets(
             Some(gu) => gu.moodlet_info(m.kind),
             None => (m.kind.def().name.to_string(), m.kind.def().desc.to_string(), String::new()),
         };
-        let desc = crate::icons::with_name(&desc, &who);
+        let desc = crate::layout::gendered(&crate::icons::with_name(&desc, &who), female);
         let icon = game_ui.as_deref_mut().and_then(|gu| gu.icon(&mut assets, &icon));
         // (Its picture: the icon placement's own image swapped for the moodlet's.)
         if let (Some(win), Some(h)) = (s.id(MOODLET_ICON), icon) {

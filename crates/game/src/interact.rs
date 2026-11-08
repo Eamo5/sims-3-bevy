@@ -5936,6 +5936,8 @@ pub(crate) fn run_actions(
                                 // (How the pet takes to them for it: the social's liking, warmer for
                                 // pet people; turned down, a little less.)
                                 let (id, liking) = (sim.id, s.liking * keen);
+                                // (And how it feels for it: Loved, Brushed, Praised...: `petmoods`.)
+                                let (felt, now) = (crate::petmoods::from_social(s.name), clock.minutes);
                                 // (A Friendly pet warms to them faster: the game's
                                 // `kFriendlyPetTraitWithHumansLtrGainMultiplier`.)
                                 if let ActionKind::PetSocial { target, .. } = action.kind {
@@ -5947,6 +5949,11 @@ pub(crate) fn run_actions(
                                             let mut b = e.take::<crate::pets::PetBonds>().unwrap_or_default();
                                             b.add(id, home, if rejected { -1.0 } else if liking > 0.0 { liking * warmth } else { liking });
                                             e.insert(b);
+                                            if !rejected && let Some(mut ml) = e.get_mut::<crate::life::Moodlets>() {
+                                                for k in felt {
+                                                    ml.add(*k, now);
+                                                }
+                                            }
                                         }
                                     });
                                 }

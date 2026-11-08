@@ -315,6 +315,8 @@ fn train(
                 }
                 if !s.teach {
                     tricks.performed[s.trick] += 1;
+                    // (Good Dog: `petmoods`.)
+                    crate::petmoods::give(&mut commands, s.dog, crate::life::MoodletKind::GoodDog, clock.minutes);
                 } else if tricks.worn_out && !tricks.learned[s.trick] {
                     notes.push(format!("{} needs a break from learning new skills!", pet.name));
                 }

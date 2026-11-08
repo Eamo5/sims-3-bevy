@@ -495,7 +495,7 @@ fn birth(
     (time, clock): (Res<Time>, Res<crate::clock::GameClock>),
     (data, mut lib): (Res<crate::baked::Baked>, ResMut<crate::anim::ClipLibrary>),
     mut mothers: Query<(Entity, &Pet, &mut Birthing, &PetPregnant, &Transform, &mut PetAnim, &HomePet, Option<&PetTraits>)>,
-    all_pets: Query<(), With<HomePet>>,
+    all_pets: Query<(Entity, &HomePet)>,
     mut household: Query<(Entity, &mut crate::life::Moodlets), (With<crate::sim::HouseholdMember>, Without<Pet>)>,
     pet_data: Res<crate::pets::PetData>,
     (mut pending, mut newborns): (ResMut<crate::pets::PendingPets>, ResMut<Newborns>),
@@ -550,6 +550,11 @@ fn birth(
                 m.add(moodlet, clock.minutes);
                 let kind = *[react, "Cheer", "WeddingClap", "Surprise"].choose(&mut rng).unwrap_or(&react);
                 commands.entity(s).insert(crate::reactions::Pending::new(&[kind], Some(tf.translation), clock.minutes + 30.0));
+            }
+            // (Mother and father: New Kittens, New Puppies or New Foal, `petmoods`.)
+            let sire = preg.sire.as_ref().and_then(|s| all_pets.iter().find(|p| p.1.id == s.id)).map(|p| p.0);
+            for parent in std::iter::once(e).chain(sire) {
+                crate::petmoods::give(&mut commands, parent, crate::petmoods::new_young(&pet.kind), clock.minutes);
             }
             info!("pet litters: {} had {n}", pet.name);
         }

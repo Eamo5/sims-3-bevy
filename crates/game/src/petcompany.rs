@@ -697,6 +697,10 @@ fn greet(
                 if let Ok((.., mut motives)) = sims.get_mut(s) {
                     motives.add(crate::sim::SOCIAL, their_social);
                 }
+                // (Kicked, marked or shredded: `petmoods`.)
+                if let Some(k) = crate::petmoods::from_greeting(g.how) {
+                    crate::petmoods::give(&mut commands, s, k, now);
+                }
             }
             Other::Pet(p) => {
                 let me = ids.get(e).ok().map(|h| h.id);

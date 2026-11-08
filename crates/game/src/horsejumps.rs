@@ -622,6 +622,10 @@ fn jumping(
             if matches!(hj.outcome, Outcome::Clean | Outcome::Scrape | Outcome::Refuse) && obs.build != Build::Cavaletti {
                 s.jumps += 1;
                 s.clean += u32::from(hj.outcome == Outcome::Clean);
+                // (Cleared clean, a good jumper: Nothing But Air, `petmoods`.)
+                if hj.outcome == Outcome::Clean && s.level() >= crate::petmoods::NOTHING_BUT_AIR_LEVEL {
+                    crate::petmoods::give(&mut commands, e, crate::life::MoodletKind::NothingButAir, clock.minutes);
+                }
             }
             if let Some(r) = hj.rider
                 && let Ok((sim, mut rs, moodlets)) = riders.get_mut(r)

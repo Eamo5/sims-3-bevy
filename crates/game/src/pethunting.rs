@@ -367,6 +367,11 @@ fn hunt(
                             if let Some(mut m) = motives {
                                 m.add(HUNGER, EAT_GAIN);
                             }
+                            // (A bird: Tastes Like Chicken, `petmoods`.)
+                            let key = h.prey.as_ref().map(|p| p.1.as_str()).unwrap_or("");
+                            if ui.data.minor_pets.iter().any(|p| p.species == key && p.kind.contains("Birds")) {
+                                crate::petmoods::give(&mut commands, e, crate::life::MoodletKind::TastesLikeChicken, now);
+                            }
                             "ac2o_hunting_catch_stopSuccess_eat_x"
                         }
                         Some(true) => {
