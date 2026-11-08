@@ -472,11 +472,39 @@ fn bake_bled(root: &BakeRoot, pkgs: &PackageSet, jobs: &[Key]) -> usize {
         if out.exists() {
             return true;
         }
-        let Some(mut img) = pkgs.read(&rkey(*base)).or_else(|| pkgs.read_ti(base.0, base.2)).and_then(|d| s3formats::dds::decode(&d, OBJECT_TEX_MAX as usize)) else { return false };
+        // (Its own picture, or one composited from its patterns: a bike's, its spokes cut out.)
+        let picture = |d: Vec<u8>| s3formats::dds::decode(&d, OBJECT_TEX_MAX as usize);
+        let Some(mut img) = pkgs
+            .read(&rkey(*base))
+            .or_else(|| pkgs.read_ti(base.0, base.2))
+            .filter(|_| base.0 != types::TXTC)
+            .and_then(picture)
+            .or_else(|| bake_texture(pkgs, *base, OBJECT_TEX_MAX, false).and_then(picture))
+        else {
+            return false;
+        };
         bleed(&mut img);
         std::fs::write(out, encode_dds(&img)).is_ok()
     });
     done.into_iter().filter(|d| *d).count()
+}
+
+/// Cut-outs' bled copies not yet drawn (a model baked before its picture could be: one
+/// composited from patterns): drawn now. Cheap when there are none.
+pub fn bake_missing_bled(root: &BakeRoot, pkgs: &PackageSet) -> usize {
+    let Ok(catalog) = read_value::<Vec<CatalogEntry>>(&root.global_dir().join("catalog.bin")) else { return 0 };
+    let Ok(models) = PackReader::open(&root.global_dir().join("models.pack")) else { return 0 };
+    let mut jobs: HashSet<Key> = HashSet::new();
+    for k in catalog.iter().flat_map(|c| c.models.iter()) {
+        let Some(m) = models.get::<BakedModel>(k) else { continue };
+        for t in m.parts.iter().filter_map(|p| p.texture).filter(|t| t.1 == BLED_GROUP) {
+            if !root.tex_path(t).exists() {
+                jobs.insert((t.0, 0, t.2));
+            }
+        }
+    }
+    let jobs: Vec<Key> = jobs.into_iter().collect();
+    bake_bled(root, pkgs, &jobs)
 }
 
 /// Draws dirty looks: each object texture with a dirt overlay over it (alpha over), into the
@@ -681,7 +709,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 134;
+pub const CLIPS_VERSION: u32 = 135;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

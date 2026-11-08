@@ -55,7 +55,8 @@ installation is unreachable.
   lots, further round as the camera draws back) with it; the imposters' ground on a sloping
   lot stays ground (whatever follows the ground picture's plan of the lot, however high: not
   shards of it over the terrain), and every cut-out (the imposters' fences and
-  railings, real ones, leaves) is drawn from a copy of its texture with the colour bled under
+  railings, real ones, leaves; a bike's spokes, composited from its patterns as any object's
+  designed texture is) is drawn from a copy of its texture with the colour bled under
   the cut-away part and fresh mipmaps, so far off they thin out instead of turning to thick
   black lines; leaves and imposters are cut out with alpha to coverage, soft-edged up close.
 - **Sims**: Create-a-Sim from real CAS parts (browsed as the game's own style pictures), with
@@ -1366,6 +1367,16 @@ installation is unreachable.
   "Go to Work" when it's nearly time, "Go to Community Lot...", "Visit Lot..." (the town's
   families' homes, nearest first), each "...with..." the household's Sims about (Everyone, or
   one of them; they drive over too), and "Go Shopping" to the grocery's Shop while it's open.
+- **Bicycles**, as the game's (`Bicycle`): the NostalgiCycle for teens and up and the Bi-Trike
+  for Kids, greyed for the wrong age with the game's words ("...is too young to ride
+  adult-sized bikes"). A bike offers its car's trips and "Make Preferred Vehicle" (`SetOwner`);
+  going out, a Sim takes the vehicle they prefer (or the one whose menu they picked a trip
+  from), else the car, else a bike their size (children's own). They go to its side, get on and
+  push off with the pack's `bicycle_getOn` (the bike rolling forward as the clip rolls it), and
+  ride off the lot to the street, wheels and pedals turning at the riding cycle's pace, Saving
+  the Environment as they go (the game's moodlet, +10); the bike's gone till they're back, and
+  then they ride in from the street, roll up to where it stood and get off (`getOff`).
+  `BIKE_TEST=1`, `BIKE_DIST` (tests).
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the

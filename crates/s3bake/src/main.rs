@@ -1461,6 +1461,11 @@ cover {:?}", g.seasons.temperature, g.seasons.freeze_melt, g.seasons.cover);
             }
         }
     }
+    // (Cut-outs' pictures drawn since their models were baked.)
+    let bled = s3bake::bake_missing_bled(&root, &pkgs);
+    if bled > 0 {
+        println!("cut-outs drawn: {bled}");
+    }
     println!("music tracks: {}", s3bake::bake_music(&root, &data));
     if !s3bake::clips_ready(&root) {
         match s3bake::bake_clips(&root, &pkgs, &progress) {

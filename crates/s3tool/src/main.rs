@@ -922,7 +922,7 @@ fn main() {
                     Some((n, b)) => {
                         println!("  model {:08X}:{:08X}:{:016X} in {n}: {} parts, rig bones {skinned:?}", m.0, m.1, m.2, b.parts.len());
                         for p in &b.parts {
-                            println!("    {} verts {} tris tex {:?} mode {} bounds {:?}..{:?}", p.positions.len(), p.indices.len() / 3, p.texture.map(|t| format!("{:016X}", t.2)), p.mode, p.bmin, p.bmax);
+                            println!("    {} verts {} tris tex {:?} mode {} bounds {:?}..{:?}", p.positions.len(), p.indices.len() / 3, p.texture.map(|t| format!("{:08X}_{:08X}_{:016X}", t.0, t.1, t.2)), p.mode, p.bmin, p.bmax);
                         }
                     }
                     None => println!("  model {:08X}:{:08X}:{:016X}: not in the cache", m.0, m.1, m.2),

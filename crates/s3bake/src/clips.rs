@@ -718,6 +718,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "p2o_toyPegBox_play_",
     // (The activity table's blocks: a toddler's, a child's building, knocking down, reacting.)
     "p2o_toyBlocks_",
+    // (Bicycles: getting on and off, riding; the bike's own halves.)
+    "a2o_bicycle_",
+    "c2o_bicycle_",
     "c2o_toyBlocks_",
     "p2o_toybox_playIn_",
     "p2o_highChair_",

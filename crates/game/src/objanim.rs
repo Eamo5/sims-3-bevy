@@ -30,6 +30,15 @@ impl Plugin for ObjectAnimPlugin {
 #[derive(Component, Clone, Copy)]
 pub struct HeldPose(pub &'static str);
 
+/// An object playing a clip of its own, not a Sim's (a bicycle's wheels going round as it's
+/// ridden: `bicycles`): its name, and how far in (seconds; looped past its end).
+#[derive(Component, Clone)]
+pub struct PlayingClip {
+    pub name: &'static str,
+    pub time: f32,
+    pub looping: bool,
+}
+
 /// A mesh part skinned to its model's rig (the model's key): given its bones once spawned.
 #[derive(Component, Clone, Copy)]
 pub struct SkinPart(pub Key);
@@ -45,6 +54,13 @@ struct RigInst {
     model: Key,
     bones: Vec<Entity>,
     rig: RigData,
+}
+
+impl ObjectRig {
+    /// A bone by its name's hash: its entity and its rest pose.
+    pub fn bone(&self, hash: u32) -> Option<(Entity, Transform)> {
+        self.rigs.iter().find_map(|inst| inst.rig.hashes.iter().position(|h| *h == hash).and_then(|i| Some((*inst.bones.get(i)?, *inst.rig.bind.get(i)?))))
+    }
 }
 
 /// A model's rig: its bones' name hashes, parents and rest poses, and inverse bind poses.
@@ -467,11 +483,12 @@ fn held_pose(data: &Baked, name: &str) -> Option<String> {
 /// While a Sim plays a clip at an object with moving parts, the object plays its half of it
 /// (in step); once nobody's using it, it's back at rest.
 #[allow(clippy::type_complexity)]
-fn animate_objects(
+pub(crate) fn animate_objects(
     data: Option<Res<Baked>>,
     mut lib: ResMut<ClipLibrary>,
     sims: Query<(&ClipPlayer, &ActionQueue, Option<&crate::anim::ActionClip>, &GlobalTransform)>,
     mut objects: Query<(Entity, &mut ObjectRig, Option<&UsedBy>, &GlobalTransform, Has<crate::interact::Unmade>, Option<&HeldPose>), Without<DoorSwing>>,
+    playing: Query<(Entity, &PlayingClip)>,
     mut bones: Query<&mut Transform, Without<ObjectRig>>,
     mut companions: Local<HashMap<String, Option<String>>>,
     mut animated: Local<Vec<Entity>>,
@@ -537,6 +554,28 @@ fn animate_objects(
         }
         rig.posed = true;
         animated.push(target);
+    }
+    // Playing a clip of its own.
+    for (e, p) in &playing {
+        let (Ok((_, mut rig, ..)), Some(clip)) = (objects.get_mut(e), lib.get(&data, p.name)) else { continue };
+        let t = if !p.looping { p.time.clamp(0.0, clip.duration.max(0.0)) } else if clip.duration > 0.0 { p.time.rem_euclid(clip.duration) } else { 0.0 };
+        for inst in &rig.rigs {
+            for (i, h) in inst.rig.hashes.iter().enumerate() {
+                let Ok(mut tf) = bones.get_mut(inst.bones[i]) else { continue };
+                let mut pose = inst.rig.bind[i];
+                if let Some(track) = clip.tracks.get(h) {
+                    if let Some(v) = sample_track_vec(&track.translation, t) {
+                        pose.translation = v;
+                    }
+                    if let Some(r) = sample_track_quat(&track.rotation, t) {
+                        pose.rotation = r;
+                    }
+                }
+                *tf = pose;
+            }
+        }
+        rig.posed = true;
+        animated.push(e);
     }
     // At rest again once nobody's using it.
     // (An unmade bed's covers stay as they were left.)

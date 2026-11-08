@@ -18,7 +18,7 @@ pub mod sounds;
 pub mod types;
 pub mod ui;
 
-pub use bake::{BakeRoot, bake_clips, bake_global, bake_music, bake_world, clips_ready};
+pub use bake::{BakeRoot, bake_clips, bake_global, bake_missing_bled, bake_music, bake_world, clips_ready};
 pub use pack::{PackReader, read_value};
 pub use gamedata::{GameDataBaked, Icons, bake_gamedata, gamedata_ready, load_gamedata};
 pub use premades::{HouseholdBaked, PremadesBaked, ensure_premades, load_premades};

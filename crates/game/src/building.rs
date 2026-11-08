@@ -3727,7 +3727,7 @@ fn building_visibility(
     (building, walls, mut trees_shown): (Option<ResMut<ActiveBuilding>>, Res<WallMode>, Local<Option<bool>>),
     cams: Query<(&SimsCamera, &GlobalTransform)>,
     mut pieces: Query<
-        (&BuildingPiece, Option<&WallObject>, &mut Visibility, (Has<crate::traffic::CarOut>, Has<crate::props::InHand>)),
+        (&BuildingPiece, Option<&WallObject>, &mut Visibility, (Has<crate::traffic::CarOut>, Has<crate::props::InHand>, Has<crate::bicycles::BikeAway>)),
         (Without<LotImposter>, Without<crate::world::Tree>, Without<crate::buy::HeldObject>),
     >,
     mut imposters: Query<(&LotImposter, &mut Visibility), (Without<BuildingPiece>, Without<crate::world::Tree>)>,
@@ -3783,10 +3783,10 @@ fn building_visibility(
     for (floor, mut vis) in &mut sims {
         vis.set_if_neq(if floor.0 <= view_level { Visibility::Inherited } else { Visibility::Hidden });
     }
-    for (piece, wall_obj, mut vis, (car_out, in_hand)) in &mut pieces {
+    for (piece, wall_obj, mut vis, (car_out, in_hand, bike_away)) in &mut pieces {
         // (The household's car is away while someone's out in it; the guitar's in its player's
         // hands.)
-        let show = !far && !car_out && !in_hand && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
+        let show = !far && !car_out && !in_hand && !bike_away && piece.level <= view_level && !wall_obj.is_some_and(|w| is_cut(w.mid, piece.level));
         vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
     }
     if far {

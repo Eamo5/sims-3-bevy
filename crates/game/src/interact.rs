@@ -219,6 +219,9 @@ pub enum ObjectKind {
     PicnicTable,
     /// The household's own car (the game's `CarOwnable`): driven to work, or to a community lot.
     Car,
+    /// A bicycle, grown-ups' and teens' or a child's (`bicycles`): ridden off on the same trips.
+    Bicycle,
+    ChildBicycle,
     /// A house phone, on the wall or a table: the phone's menu.
     Phone,
     /// Bubble bath, and a rubber duck: baths with them, while they're about the house.
@@ -372,6 +375,10 @@ impl ObjectKind {
             Self::PicnicTable
         } else if s.starts_with("sims3.gameplay.objects.vehicles.car") && !["service", "taxi", "bus", "police", "limo"].iter().any(|x| s.contains(x)) {
             Self::Car
+        } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
+            Self::Bicycle
+        } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
+            Self::ChildBicycle
         } else if s.ends_with("cookingobjects.cake") {
             // (The birthday cake bought in buy mode, as the game sells it.)
             Self::BirthdayCake
@@ -596,7 +603,7 @@ impl ObjectKind {
             | Self::Drums
             | Self::LaserHarp => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
-            Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car => "Outdoors",
+            Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle => "Outdoors",
             Self::Buffet => "Surfaces",
             Self::Phone => "Electronics",
             Self::HotTub => "Plumbing",
@@ -2803,8 +2810,8 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven | K::ActivityTable),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
 
@@ -2919,7 +2926,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::PicnicBasket => &PICNIC,
         ObjectKind::PicnicTable => &PICNIC_TABLE,
         ObjectKind::ActivityTable => &ACTIVITY_TABLE,
-        ObjectKind::Car => &CAR,
+        ObjectKind::Car | ObjectKind::Bicycle | ObjectKind::ChildBicycle => &CAR,
         ObjectKind::Snowman => &SNOWMAN,
         ObjectKind::SnowAngel => &SNOW_ANGEL,
         ObjectKind::LeafPile => &LEAF_PILE,
@@ -3050,6 +3057,9 @@ pub enum ActionKind {
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
     /// lot, and what for (a competition, the horse sold).
     Equestrian { lot: usize, task: crate::equestrian::CenterTask },
+    /// A bike (or car) made the Sim's own to go out on (the game's `SetOwner`: "Make Preferred
+    /// Vehicle"): done at once.
+    PreferVehicle { vehicle: Entity },
     /// Putting a fire out (`fire`): which, where, and on what floor.
     Extinguish { target: Entity, at: Vec3, level: u8 },
     /// Phone round to throw a party.
@@ -3532,7 +3542,7 @@ pub(crate) fn run_actions(
             Option<&crate::opportunities::SimOpportunities>,
             Option<&crate::visit::OnLot>,
         ),
-        (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::riding::Mounted>),
+        (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::riding::Mounted>, Without<crate::bicycles::BikeRide>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
     (building, upper, visited, privacy, locks, cars, block_structures): (
@@ -3541,7 +3551,7 @@ pub(crate) fn run_actions(
         Option<Res<crate::visit::VisitedLot>>,
         Res<crate::privacy::Privacy>,
         Query<(Entity, &crate::doorlocks::DoorLock)>,
-        Query<(&GameObject, &Transform), (Without<Sim>, Without<crate::visit::LotObject>, Without<crate::traffic::CarOut>)>,
+        (Query<(Entity, &GameObject, &Transform), (Without<Sim>, Without<crate::visit::LotObject>, Without<crate::traffic::CarOut>, Without<crate::bicycles::BikeOut>)>, Query<&crate::bicycles::PreferredVehicle>),
         Res<crate::blocks::Structures>,
     ),
     mut life: MessageWriter<LifeEvent>,
@@ -3865,10 +3875,17 @@ pub(crate) fn run_actions(
                             let (mine, at) = (Vec2::new(tf.translation.x, tf.translation.z), at.xz());
                             Some((at + (mine - at).normalize_or(Vec2::X) * crate::fire::extinguish_distance(&sim.traits), *level))
                         }
-                        // (Off out from home with a car of their own: to it, to drive off in it, as
-                        // the game's `CarOwnable` has them; else to the street.)
-                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } if away.is_none() && cars.iter().any(|(o, _)| o.kind == ObjectKind::Car) => {
-                            cars.iter().find(|(o, _)| o.kind == ObjectKind::Car).map(|(o, ctf)| (o.use_point(ctf), 1))
+                        // (Off out from home with a car or bike of their own: to it, to drive or
+                        // ride off on it, as the game's `CarOwnable` has them, the one they prefer
+                        // first; else to the street.)
+                        ActionKind::GoToWork | ActionKind::Visit { .. } | ActionKind::GoToLot { .. }
+                            if away.is_none()
+                                && let Some((v, at, bike)) = crate::bicycles::vehicle(sim, cars.1.get(me).ok().map(|p| p.0), cars.0.iter()) =>
+                        {
+                            if bike {
+                                commands.entity(me).insert(crate::bicycles::BikeTrip(v));
+                            }
+                            Some((at, 1))
                         }
                         ActionKind::GoToWork | ActionKind::GoToSchool | ActionKind::Visit { .. } | ActionKind::GoToLot { .. } | ActionKind::GoHomeFromLot | ActionKind::Jog { .. } => way_out.map(|p| (p, 1)),
                         ActionKind::JoinCareer { target, .. } | ActionKind::Teleport { pad: target, .. } => {
@@ -3928,7 +3945,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4748,7 +4765,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } => finished = true,
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));

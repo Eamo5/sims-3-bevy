@@ -182,14 +182,19 @@ fn rides(
     data: Res<Baked>,
     mut queue: ResMut<PendingRides>,
     departed: Query<
-        (Entity, &Transform, Option<&crate::rabbitholes::AtRabbitHole>, Has<crate::interact::AtWork>, Has<crate::sim::HouseholdMember>),
+        (Entity, &Transform, Option<&crate::rabbitholes::AtRabbitHole>, Has<crate::interact::AtWork>, Has<crate::sim::HouseholdMember>, Has<crate::bicycles::BikeTrip>),
         Or<(Added<crate::interact::AtWork>, Added<crate::rabbitholes::AtRabbitHole>)>,
     >,
     (mut back_work, mut back_trip): (RemovedComponents<crate::interact::AtWork>, RemovedComponents<crate::rabbitholes::AtRabbitHole>),
     members: Query<&Transform, With<crate::sim::HouseholdMember>>,
     mut cars: Query<(Entity, &crate::interact::GameObject, Option<&mut CarOut>), Without<crate::visit::LotObject>>,
+    bikes_out: Query<&crate::bicycles::BikeOut>,
 ) {
-    for (e, tf, trip, work, member) in &departed {
+    for (e, tf, trip, work, member, bike) in &departed {
+        // (Off on a bike: `bicycles` sees them off.)
+        if bike {
+            continue;
+        }
         let kind = match trip {
             Some(t) if std::ptr::eq(t.activity, &crate::rabbitholes::SCHOOL) => "CarBusSchool",
             _ if work => "CarServiceSedan",
@@ -209,6 +214,10 @@ fn rides(
     let now = time.elapsed_secs();
     for e in back_work.read().chain(back_trip.read()) {
         let Ok(tf) = members.get(e) else { continue };
+        // (Back on their bike: `bicycles`.)
+        if bikes_out.iter().any(|b| b.rider == e) {
+            continue;
+        }
         match cars.iter_mut().find(|(_, _, out)| out.as_ref().is_some_and(|c| c.driver == e && c.back_at.is_none())) {
             Some((_, o, Some(mut out))) => {
                 queue.1.push((tf.translation.xz(), o.objd));

@@ -110,6 +110,8 @@ pub struct PieMenu {
     pub pages: Vec<Vec<(String, ActionKind)>>,
     /// Which way each option lies from the middle (for picking by the pointer's direction).
     pub dirs: Vec<Vec2>,
+    /// The car or bike whose menu it is: its trips taken on it.
+    pub vehicle: Option<Entity>,
     /// No name under the face (an object's menu, and its submenus).
     pub nameless: bool,
     /// The place in a pool's water a menu was opened on ("Swim", "Swim Here").
@@ -1282,7 +1284,7 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q, block_structures))), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q, block_structures, preferred_q))), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1304,7 +1306,7 @@ fn world_click(
                 Query<(), With<crate::guests::StayingOver>>,
                 Query<&crate::collecting::FishingSpot>,
                 Query<(), With<crate::swim::Swimming>>,
-                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>, Res<crate::blocks::Structures>),
+                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>, Res<crate::blocks::Structures>, Query<&crate::bicycles::PreferredVehicle>),
             ),
         ),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
@@ -1338,6 +1340,7 @@ fn world_click(
     let Ok((camera, cam_tf)) = cams.single() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     close_pie(&mut commands, &mut pie);
+    pie.vehicle = None;
     let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else { return };
     // (Chores, skills and work greyed while they're in no state for them: `stress`.)
     let front_exit = queues_q.get(actor).ok().and_then(|q| q.0.front()).is_some_and(|a| crate::stress::exit_of(&a.kind, &objects).is_some());
@@ -1654,9 +1657,16 @@ fn world_click(
             if obj.kind == ObjectKind::Crib {
                 options.extend(carry_q.on_crib(actor, actor_sim.age, t));
             }
+            // A bike: the trips its car would offer, for one the right size (`bicycles`), and
+            // made the Sim's own.
+            let bike = matches!(obj.kind, ObjectKind::Bicycle | ObjectKind::ChildBicycle);
+            if bike {
+                options.extend(crate::bicycles::options(actor_sim, t, obj.kind, preferred_q.get(actor).ok().map(|p| p.0), layout_ui.as_deref()));
+            }
             // The household's car, as the game's `CarOwnable` offers it (to teens and up): to
             // work when it's nearly time, or to a community lot ("Go to Community Lot...").
-            if obj.kind == ObjectKind::Car && (actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
+            if (obj.kind == ObjectKind::Car || bike) && crate::bicycles::can_use(actor_sim, obj.kind) {
+                pie.vehicle = Some(t);
                 let clock = &opp_q.2;
                 if let Ok(Some(job)) = jobs_q.get(actor)
                     && crate::careers::may_go_to_work(job, clock)
@@ -1725,7 +1735,7 @@ fn world_click(
                 let riding = mounted_q.get(actor).ok().filter(|m| m.up()).and_then(|m| pets_q.get(m.horse).ok().map(|p| (p.0, horse_skills_q.get(m.horse).ok())));
                 options.extend(crate::horsejumps::options(t, obs, &otf, obj, actor_sim, riding));
             }
-            let usable = if obj.kind == ObjectKind::Car { &[] } else { usable };
+            let usable = if obj.kind == ObjectKind::Car || bike { &[] } else { usable };
             for (i, d) in usable.iter().enumerate() {
                 if plant.is_some_and(|p| !crate::gardening::offers(p, d.special)) {
                     continue;
@@ -2835,6 +2845,18 @@ fn pie_buttons(
     let title = std::mem::take(&mut pie.title);
     let parent = (pie.at, title.clone(), pie.options.clone());
     close_pie(&mut commands, &mut pie);
+    // (A bike made a Sim's own there and then; a trip off a car's or bike's menu taken on it.)
+    if let (ActionKind::PreferVehicle { vehicle }, Some(a)) = (&kind, actor) {
+        commands.entity(a).insert(crate::bicycles::PreferredVehicle(*vehicle));
+        return;
+    }
+    if as_submenu(&kind).is_none()
+        && as_more(&kind).is_none()
+        && let (Some(v), Some(a)) = (pie.vehicle.take(), actor)
+        && matches!(kind, ActionKind::GoToWork | ActionKind::GoToLot { .. } | ActionKind::Visit { .. })
+    {
+        commands.entity(a).insert(crate::bicycles::PreferredVehicle(v));
+    }
     // (The pool's socials, begun there and then: `swim`.)
     if let ActionKind::Social { target, social } = kind
         && let Some(k) = social.checked_sub(crate::swim::POOL_SOCIAL)
