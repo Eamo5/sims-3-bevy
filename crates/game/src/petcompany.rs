@@ -56,10 +56,21 @@ pub enum Greet {
     GrowlAt,
     /// A cat hissing at a Sim it dislikes (`HissAt_recoil`).
     Hiss,
+    /// A horse kicking a Sim (`Horse Kick`: `ah2a_kick`).
+    Kick,
+    /// A kitten, puppy, cat or little dog bowling a child over in play (`Tackle`).
+    Tackle,
+}
+
+/// Whom a greeting's for: a Sim of an age, or a pet of a kind.
+#[derive(Clone, Copy, Debug)]
+pub enum Them<'a> {
+    Sim(Age),
+    Pet(&'a str),
 }
 
 impl Greet {
-    pub const ALL: [Greet; 13] = [
+    pub const ALL: [Greet; 15] = [
         Greet::Sniff,
         Greet::Nuzzle,
         Greet::Lick,
@@ -73,7 +84,73 @@ impl Greet {
         Greet::BarkAt,
         Greet::GrowlAt,
         Greet::Hiss,
+        Greet::Kick,
+        Greet::Tackle,
     ];
+
+    /// What the game calls it (`Gameplay/Excel/Socializing/Action:<its text key>`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Greet::Sniff => "Sniff",
+            Greet::Nuzzle => "Nuzzle",
+            Greet::Lick => "Lick",
+            Greet::MarkSim => "Mark",
+            Greet::PeeOn => "Pee On",
+            Greet::AttackSim => "Attack",
+            Greet::BiteAt => "Bite At",
+            Greet::Play => "Goof Around",
+            Greet::Groom => "Groom",
+            Greet::Pounce => "Pounce",
+            Greet::BarkAt => "Bark At",
+            Greet::GrowlAt => "Growl At",
+            Greet::Hiss => "Hiss At",
+            Greet::Kick => "Kick",
+            Greet::Tackle => "Tackle",
+        }
+    }
+
+    /// Whether it's one a pet of a kind can give them (the pack's `AGE` for it: who gives it,
+    /// who it's for).
+    pub fn between(self, kind: &str, them: Them) -> bool {
+        let species = kind.get(1..).unwrap_or("");
+        let grown = kind.starts_with('a');
+        let (dog, cat, horse) = (matches!(species, "d" | "l"), species == "c", species == "h");
+        let sim_from = |a: Age| match them {
+            Them::Sim(age) => match a {
+                Age::Teen => !matches!(age, Age::Baby | Age::Toddler | Age::Child),
+                _ => !matches!(age, Age::Baby | Age::Toddler),
+            },
+            Them::Pet(_) => false,
+        };
+        let pet = |f: &dyn Fn(&str) -> bool| matches!(them, Them::Pet(k) if f(k));
+        let any_pet = pet(&|_| true);
+        match self {
+            Greet::Sniff => sim_from(Age::Child) || any_pet,
+            Greet::Nuzzle => sim_from(Age::Child) || any_pet,
+            Greet::Lick | Greet::PeeOn => dog && grown && sim_from(Age::Child),
+            Greet::MarkSim | Greet::AttackSim => cat && sim_from(Age::Child),
+            Greet::BiteAt => horse && (sim_from(Age::Child) || pet(&|k| k.ends_with('h'))),
+            Greet::Play => (dog || cat) && pet(&|k| matches!(k.get(1..), Some("c" | "d" | "l"))),
+            Greet::Groom => (horse || (cat && grown)) && pet(&|k| k.get(1..) == Some(species)),
+            Greet::Pounce => cat && pet(&|k| k == "ac"),
+            Greet::BarkAt | Greet::GrowlAt => dog && (sim_from(Age::Child) || any_pet),
+            Greet::Hiss => cat && (sim_from(Age::Child) || any_pet),
+            Greet::Kick => horse && grown && sim_from(Age::Teen),
+            Greet::Tackle => (cat || dog) && kind != "ad" && matches!(them, Them::Sim(Age::Child)),
+        }
+    }
+
+    /// The pet's liking for a Sim it asks (`ALTR`): a nuzzle none against them, a lick some, a
+    /// cat's mark more; a kick none much fond of them.
+    pub fn liking_range(self) -> (f32, f32) {
+        match self {
+            Greet::Nuzzle => (0.0, 100.0),
+            Greet::Lick => (20.0, 100.0),
+            Greet::MarkSim => (40.0, 100.0),
+            Greet::Kick => (-100.0, 50.0),
+            _ => (-100.0, 100.0),
+        }
+    }
 
     /// The pack's clip stem (`<pet>2<them>_soc_neutral_<stem>_x`).
     fn stem(self) -> &'static str {
@@ -91,11 +168,13 @@ impl Greet {
             Greet::BarkAt => "barkAt_positive",
             Greet::GrowlAt => "growlAt_scold",
             Greet::Hiss => "HissAt_recoil",
+            Greet::Kick => "kick",
+            Greet::Tackle => "tackle_friendly_neutral",
         }
     }
 
     pub fn mean(self) -> bool {
-        matches!(self, Greet::PeeOn | Greet::AttackSim | Greet::BiteAt | Greet::GrowlAt | Greet::Hiss)
+        matches!(self, Greet::PeeOn | Greet::AttackSim | Greet::BiteAt | Greet::GrowlAt | Greet::Hiss | Greet::Kick)
     }
 
     /// The rounds of one played in parts (its start, then these in turn, then its end).
@@ -124,6 +203,7 @@ impl Greet {
         match self {
             _ if self.mean() => (10.0, 10.0, -10.0, -5.0),
             Greet::Play | Greet::Pounce => (25.0, 45.0, 20.0, 2.0),
+            Greet::Tackle => (20.0, 35.0, 5.0, 0.0),
             Greet::Groom => (40.0, 10.0, 25.0, 3.0),
             Greet::BarkAt => (15.0, 20.0, 5.0, 1.0),
             Greet::Sniff => (15.0, 5.0, 5.0, 1.0),
@@ -207,7 +287,7 @@ pub enum Other {
 }
 
 impl Other {
-    fn entity(self) -> Entity {
+    pub fn entity(self) -> Entity {
         match self {
             Other::Sim(e) | Other::Pet(e) => e,
         }
@@ -228,6 +308,8 @@ pub struct Greeting {
     round: u32,
     /// One in parts at its end.
     stopping: bool,
+    /// The player's (`petcontrol`): a Sim at something of their own accord stops for it.
+    ordered: bool,
 }
 
 /// A pet being greeted by another: it stays where it is.
@@ -255,6 +337,7 @@ fn clips(data: &Baked, kind: &str, them: &str, how: Greet, part: &str) -> Option
         Greet::Groom | Greet::Pounce => pair(format!("{kind}2{them}_{stem}_{part}")),
         Greet::BarkAt | Greet::Hiss => (format!("{kind}2{them}_{stem}_x"), None),
         Greet::GrowlAt => (format!("{kind}2{them}_{stem}_x"), Some(format!("{them}_{stem}_x"))),
+        Greet::Kick => pair(format!("{kind}2{them}_{stem}")),
         _ => pair(format!("{kind}2{them}_soc_neutral_{stem}")),
     };
     if !has(&x) {
@@ -271,6 +354,44 @@ fn clips(data: &Baked, kind: &str, them: &str, how: Greet, part: &str) -> Option
 /// it stands for a Sim's socials.
 fn spot(at: Vec2, from: Vec2, kind: &str) -> Vec2 {
     at + (from - at).normalize_or(Vec2::Y) * crate::pets::social_distance(kind)
+}
+
+/// The greetings a pet can be told to give a Sim (a liking for them) or another pet, that the
+/// game has the clips for: the pack's socials a played pet's offered (`petcontrol`).
+pub fn offered(data: &Baked, kind: &str, them: Them, liking: f32) -> Vec<Greet> {
+    let code = match them {
+        Them::Sim(age) => match age {
+            Age::Baby | Age::Toddler => return Vec::new(),
+            Age::Child => "c",
+            _ => "a",
+        },
+        Them::Pet(k) => k,
+    };
+    Greet::ALL
+        .into_iter()
+        .filter(|g| g.between(kind, them))
+        .filter(|g| {
+            let (lo, hi) = g.liking_range();
+            !matches!(them, Them::Sim(_)) || (lo..=hi).contains(&liking)
+        })
+        .filter(|g| clips(data, kind, code, *g, g.first()).is_some())
+        .collect()
+}
+
+/// A pet set off to greet someone (where they are): its way there, the other waiting if a pet.
+#[allow(clippy::too_many_arguments)]
+pub fn begin(commands: &mut Commands, e: Entity, kind: &str, here: Vec2, (other, how): (Other, Greet), at: Vec2, grid: &crate::nav::NavGrid, now: f64, ordered: bool) -> bool {
+    let to = spot(at, here, kind);
+    let path = grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z))));
+    let Some(mut path) = path else { return false };
+    if path.last().is_none_or(|l| l.distance(to) > 0.05) {
+        path.push(to);
+    }
+    if let Other::Pet(o) = other {
+        commands.entity(o).insert(Greeted(e));
+    }
+    commands.entity(e).insert(Greeting { other, how, path, set_off: now, since: None, until: 0.0, round: 0, stopping: false, ordered });
+    true
 }
 
 /// Household pets short of company or fun go and find it.
@@ -365,19 +486,12 @@ fn seek_company(
         {
             how = g;
         }
-        let to = spot(at, here, &pet.kind);
-        let path = grid.find_path(here, to).or_else(|| grid.nearest_free(to).and_then(|(x, z)| grid.find_path(here, grid.center_of(x, z))));
-        let Some(mut path) = path else { continue };
-        if path.last().is_none_or(|l| l.distance(to) > 0.05) {
-            path.push(to);
+        if !begin(&mut commands, e, &pet.kind, here, (other, how), at, &grid, now, false) {
+            continue;
         }
         info!("pet {} goes to greet {:?} ({how:?})", pet.name, other);
         *tested |= forced;
         claimed.extend([e, other.entity()]);
-        if let Other::Pet(o) = other {
-            commands.entity(o).insert(Greeted(e));
-        }
-        commands.entity(e).insert(Greeting { other, how, path, set_off: now, since: None, until: 0.0, round: 0, stopping: false });
     }
 }
 
@@ -394,7 +508,7 @@ fn greet(
     building: Option<Res<crate::building::ActiveBuilding>>,
     grid: Option<Res<crate::nav::NavGrid>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Option<&mut Greeting>, Option<&mut PetMotives>, Option<&mut PetBonds>), Without<Sim>>,
-    mut sims: Query<(&Sim, &Transform, &mut ActionQueue, Option<&crate::nav::PathFollow>, &mut crate::sim::Motives), (With<HouseholdMember>, Without<Pet>)>,
+    mut sims: Query<(&Sim, &Transform, &mut ActionQueue, Option<&crate::nav::PathFollow>, &mut crate::sim::Motives), Without<Pet>>,
     greeted: Query<(Entity, &Greeted)>,
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
@@ -466,6 +580,15 @@ fn greet(
                     None => end(&mut commands, e, Some(other), &mut pets, &mut rng),
                 }
                 continue;
+            }
+            // (Told to by the player: what they're at of their own accord given up for it.)
+            if g.ordered
+                && let Other::Sim(s) = g.other
+                && let Ok((_, _, mut q, ..)) = sims.get_mut(s)
+            {
+                for a in q.0.iter_mut().filter(|a| a.autonomous && !a.cancel && !matches!(a.kind, ActionKind::Outro { .. })) {
+                    a.cancel = true;
+                }
             }
             let waiting = matches!(g.other, Other::Sim(s) if sims.get(s).is_ok_and(|(_, _, q, p, _)| {
                 p.is_some_and(|p| !p.done) || q.0.front().is_some_and(|a| !a.autonomous || matches!(a.phase, crate::interact::Phase::Running(_)) || matches!(a.kind, ActionKind::Outro { .. }))
@@ -634,5 +757,21 @@ mod tests {
         assert_eq!(greeting_for_pet("ah", "ah", false, 0.2), Greet::Groom);
         assert_eq!(greeting_for_pet("ad", "ad", false, 0.2), Greet::Nuzzle);
         assert_eq!((Greet::Groom.first(), Greet::Sniff.first()), ("start", ""));
+    }
+
+    #[test]
+    fn a_played_pet_is_offered_its_kinds_socials() {
+        let adult = Them::Sim(Age::Adult);
+        assert!(Greet::Lick.between("ad", adult) && !Greet::Lick.between("ac", adult) && !Greet::Lick.between("cd", adult));
+        assert!(Greet::MarkSim.between("cc", adult) && Greet::AttackSim.between("ac", adult));
+        assert!(Greet::Kick.between("ah", adult) && !Greet::Kick.between("ah", Them::Sim(Age::Child)) && !Greet::Kick.between("ch", adult));
+        assert!(Greet::Tackle.between("cd", Them::Sim(Age::Child)) && !Greet::Tackle.between("cd", adult) && !Greet::Tackle.between("ad", Them::Sim(Age::Child)));
+        assert!(Greet::Play.between("ad", Them::Pet("ac")) && !Greet::Play.between("ad", adult) && !Greet::Play.between("ah", Them::Pet("ah")));
+        assert!(Greet::Groom.between("ah", Them::Pet("ch")) && !Greet::Groom.between("ac", Them::Pet("ad")));
+        assert!(Greet::Pounce.between("cc", Them::Pet("ac")) && !Greet::Pounce.between("ac", Them::Pet("cc")));
+        assert!(Greet::Sniff.between("ah", Them::Pet("ad")) && !Greet::Sniff.between("ac", Them::Sim(Age::Toddler)));
+        assert!(Greet::Kick.mean() && !Greet::Tackle.mean());
+        assert_eq!(Greet::MarkSim.liking_range().0, 40.0);
+        assert_eq!(Greet::Play.name(), "Goof Around");
     }
 }

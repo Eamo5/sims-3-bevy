@@ -1020,7 +1020,13 @@ installation is unreachable.
   the ground "Go Here", its bowl "Eat" (greyed while it's empty), its bed or a horse's stall
   "Sleep" (and "Eat Hay"), a litter box, scratching post, chew toy or water trough what it does
   there, a toy of its kind's "Play"; off it goes and does it with the pack's animations, the
-  need filling as when it sees to itself. `PET_CONTROL_TEST=<name>:<x>,<z>` (tests).
+  need filling as when it sees to itself. A Sim or another pet clicked offers the pack's socials
+  for its kind (`SocialData_EP5`'s, by who gives them and to whom, and as fond of a Sim as each
+  asks: Sniff and Nuzzle for all; a dog's Lick, Bark At, Growl At, Pee On; a cat's Mark, Attack,
+  Hiss At; a horse's Kick and Bite At; a young one's Tackle of a child; with pets, Goof Around,
+  Groom, Pounce), given as it gives them of its own accord, the Sim leaving what they were at of
+  their own accord for it (a horse turning its rump to kick). `PET_CONTROL_TEST=<name>:<x>,<z>`
+  or `<name>@<whom>[:<social>]` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

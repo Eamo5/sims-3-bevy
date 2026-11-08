@@ -229,6 +229,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_run_speed3_rider_y",
     // (Thrown off a horse in a foul mood; a rider's saddle sore idle.)
     "ah2a_riding_throwRider_",
+    // (A horse kicking a Sim: the pack's `Horse Kick`.)
+    "ah2a_kick_",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",

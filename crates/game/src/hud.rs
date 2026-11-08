@@ -1229,10 +1229,11 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q): (
+    (selected, pet_sel, bowl_food_q, baked): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
-        Query<(Entity, &crate::pets::Pet), (With<Selected>, With<crate::pets::HomePet>)>,
+        Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
+        Res<crate::baked::Baked>,
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
         Query<(), With<HouseholdMember>>,
@@ -1347,13 +1348,20 @@ fn world_click(
     pie.vehicle = None;
     let Ok((actor, rels, actor_sim, actor_motives)) = selected.single() else {
         // (A pet selected: the world's clicks are its, `petcontrol`.)
-        if let Ok((pe, pet)) = pet_sel.single() {
-            let is_object = |e: Entity| objects.contains(e);
-            let filter = |e: Entity| ancestor_with(e, &parents, is_object).is_some();
+        if let Ok((pe, pet, bonds)) = pet_sel.single() {
+            // (An object, a Sim or another pet; else the ground.)
+            let is_target = |e: Entity| e != pe && (objects.contains(e) || sims.contains(e) || pets_q.contains(e));
+            let filter = |e: Entity| ancestor_with(e, &parents, is_target).is_some();
             let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
-            let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_object)).or_else(|| pick_by_box(ray, &pickable)).filter(|t| objects.contains(*t));
-            let (title, options) = match target.and_then(|t| objects.get(t).ok().map(|o| (t, o))) {
-                Some((t, o)) => (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok())),
+            let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)).filter(|t| is_target(*t));
+            let (title, options) = match target {
+                Some(t) if objects.contains(t) => objects.get(t).map(|o| (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok()))).unwrap_or_default(),
+                Some(t) if sims.contains(t) => {
+                    let (sim, member, _) = sims.get(t).unwrap();
+                    let liking = bonds.map_or(if member { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(sim.id, member));
+                    (sim.full_name(), crate::petcontrol::sim_options(&baked, pet, t, sim.age, liking))
+                }
+                Some(t) => pets_q.get(t).map(|(other, ..)| (other.name.clone(), crate::petcontrol::pet_options(&baked, pet, t, &other.kind))).unwrap_or_default(),
                 None => (String::new(), floor_hit(ray, &world, building.as_deref()).map(|(p, _)| crate::petcontrol::ground_options(p.xz())).unwrap_or_default()),
             };
             if !options.is_empty() {

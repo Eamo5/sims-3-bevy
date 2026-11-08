@@ -6,7 +6,11 @@
 //! its bed or stall, "Sleep" (a horse's stall, "Eat Hay" too); a litter box, a scratching post, a
 //! chew toy, a water trough, a toy of its kind's, each what it does there. It goes and does it
 //! (the pack's own animations, the need filling as when it sees to itself), then is left to its
-//! own free will again.
+//! own free will again. A Sim or another pet clicked offers the pack's socials for its kind
+//! (`SocialData_EP5`'s, by who gives them and who they're for, as fond of a Sim as each asks:
+//! a dog's Lick, Bark At, Growl At, Pee On; a cat's Mark, Attack, Hiss At; a horse's Kick, Bite
+//! At; Sniff and Nuzzle for all; with pets, Goof Around, Groom, Pounce), given as a pet gives them
+//! of its own accord (`petcompany`).
 
 use bevy::prelude::*;
 
@@ -28,6 +32,7 @@ impl Plugin for PetControlPlugin {
 pub enum PetCommand {
     Go(Vec2),
     Do(PetDo),
+    Greet(crate::petcompany::Other, crate::petcompany::Greet),
 }
 
 /// An order for a pet, to be seen to.
@@ -65,16 +70,32 @@ pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&B
     out
 }
 
+/// A Sim clicked with a pet selected: the socials its kind gives one of their age, as fond of
+/// them as it is.
+pub fn sim_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, age: crate::sim::Age, liking: f32) -> Vec<(String, ActionKind)> {
+    use crate::petcompany::{Other, Them, offered};
+    offered(data, &pet.kind, Them::Sim(age), liking).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Sim(target), g)))).collect()
+}
+
+/// Another pet clicked: what the one gives the other.
+pub fn pet_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, kind: &str) -> Vec<(String, ActionKind)> {
+    use crate::petcompany::{Other, Them, offered};
+    offered(data, &pet.kind, Them::Pet(kind), 0.0).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Pet(target), g)))).collect()
+}
+
 /// Ground clicked with a pet selected: there.
 pub fn ground_options(at: Vec2) -> Vec<(String, ActionKind)> {
     vec![("Go Here".to_string(), ActionKind::PetCommand(PetCommand::Go(at)))]
 }
 
-/// A pet's orders seen to: what it was at left, off to what it's told.
+/// A pet's orders seen to (once it's free of a Sim seeing to it): what it was at left, off to
+/// what it's told.
 #[allow(clippy::type_complexity)]
 fn obey(
     mut commands: Commands,
-    pets: Query<(Entity, &Pet, &PetOrder, &Transform), With<HomePet>>,
+    clock: Res<crate::clock::GameClock>,
+    pets: Query<(Entity, &Pet, &PetOrder, &Transform), (With<HomePet>, Without<crate::pets::PetBusy>)>,
+    others: Query<&Transform, Or<(With<crate::sim::Sim>, With<Pet>)>>,
     objects: Query<(&GameObject, &Transform), Without<Pet>>,
     (grid, building): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::building::ActiveBuilding>>),
     mut notes: ResMut<crate::interact::Notifications>,
@@ -82,9 +103,18 @@ fn obey(
     let Some(grid) = grid else { return };
     let mut rng = rand::rng();
     for (e, pet, order, tf) in &pets {
-        commands.entity(e).remove::<PetOrder>();
+        commands.entity(e).remove::<(PetOrder, crate::petcompany::Greeting, crate::petneeds::PetTask)>();
         let here = tf.translation.xz();
         let (what, to, otf) = match order.0 {
+            PetCommand::Greet(other, how) => {
+                let at = others.get(other.entity()).map(|t| t.translation.xz());
+                if !at.is_ok_and(|at| crate::petcompany::begin(&mut commands, e, &pet.kind, here, (other, how), at, &grid, clock.minutes, true)) {
+                    notes.push(format!("{} can't get there.", pet.name));
+                } else {
+                    info!("pet control: {} told to {how:?}", pet.name);
+                }
+                continue;
+            }
             PetCommand::Go(at) => (PetDo::Go, Some(at), None),
             PetCommand::Do(what) => {
                 let Some((o, otf)) = what.object().and_then(|t| objects.get(t).ok()) else { continue };
@@ -102,16 +132,45 @@ fn obey(
 }
 
 /// `PET_CONTROL_TEST=<name>:<x>,<z>` (tests): ten seconds in, the household's pet of that name
-/// selected and sent so far from where it stands.
+/// selected and sent so far from where it stands. `<name>@<whom>[:<greeting>]`: selected, the
+/// camera on the Sim or pet of that name (to be clicked), and with a greeting, told to give it.
+#[allow(clippy::type_complexity)]
 fn pet_control_test(
     mut commands: Commands,
     time: Res<Time>,
     pets: Query<(Entity, &Pet, &Transform), With<HomePet>>,
+    sims: Query<(Entity, &crate::sim::Sim, &Transform)>,
     selected: Query<Entity, With<crate::sim::Selected>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
     mut done: Local<bool>,
 ) {
     let Ok(v) = std::env::var("PET_CONTROL_TEST") else { return };
-    if *done || time.elapsed_secs() < 10.0 {
+    if time.elapsed_secs() < 10.0 {
+        return;
+    }
+    if let Some((name, rest)) = v.split_once('@') {
+        let (whom, how) = rest.split_once(':').map_or((rest, None), |(a, b)| (a, Some(b)));
+        let other = sims.iter().find(|s| s.1.first.eq_ignore_ascii_case(whom)).map(|s| (crate::petcompany::Other::Sim(s.0), s.2.translation)).or_else(|| pets.iter().find(|p| p.1.name.eq_ignore_ascii_case(whom)).map(|p| (crate::petcompany::Other::Pet(p.0), p.2.translation)));
+        let Some((other, at)) = other else { return };
+        if let Ok(mut c) = cams.single_mut() {
+            c.look_at(at);
+            c.distance = 5.0;
+        }
+        if *done {
+            return;
+        }
+        let Some((e, ..)) = pets.iter().find(|(_, p, _)| p.name.eq_ignore_ascii_case(name)) else { return };
+        *done = true;
+        for s in &selected {
+            commands.entity(s).remove::<crate::sim::Selected>();
+        }
+        commands.entity(e).insert(crate::sim::Selected);
+        if let Some(g) = how.and_then(|h| crate::petcompany::Greet::ALL.into_iter().find(|g| format!("{g:?}").eq_ignore_ascii_case(h) || g.name().eq_ignore_ascii_case(h))) {
+            commands.entity(e).insert(PetOrder(PetCommand::Greet(other, g)));
+        }
+        return;
+    }
+    if *done {
         return;
     }
     let (name, off) = v.split_once(':').unwrap_or((&v, "3,0"));
@@ -124,7 +183,6 @@ fn pet_control_test(
     let to = tf.translation.xz() + Vec2::new(d.first().copied().unwrap_or(3.0), d.get(1).copied().unwrap_or(0.0));
     commands.entity(e).insert((crate::sim::Selected, PetOrder(PetCommand::Go(to))));
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
