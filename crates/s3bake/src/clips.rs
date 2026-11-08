@@ -698,6 +698,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "p2o_crib_",
     "p2o_toyXylophone_play_",
     "p2o_toyPegBox_play_",
+    // (The activity table's blocks: a toddler's, a child's building, knocking down, reacting.)
+    "p2o_toyBlocks_",
+    "c2o_toyBlocks_",
     "p2o_toybox_playIn_",
     "p2o_highChair_",
     // (The potty chair: sat on, potty training, emptied.)
@@ -812,6 +815,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
 
 /// Clip actors that are props held by the Sim (baked with the Sim's clips).
 pub const PROP_ACTORS: &[&str] = &[
+    // (An activity table's block.)
+    "block",
     "hoofPick",
     "hairDryer",
     "ropeFK",

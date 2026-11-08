@@ -494,6 +494,19 @@ installation is unreachable.
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play
   with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+- **The activity table**, as the game's (`ActivityTable`): four places round it, toddlers and
+  children each at their own ("Play with Blocks"). A toddler shakes and chews a block (the
+  pack's `p2o_toyBlocks` clips, the block in hand). A child kneels, gathers the blocks out
+  before them and builds, the loops low, middling and high as it goes up: the blocks
+  object's own geometry states, a pile, then half built after seven loops
+  (`kBuildLoopsToNextStage`), then whole, a house at first and, as their hidden Blocks skill
+  grows, a castle, a sphinx, a bridge or a tower (`kBuildingsAtSkill0` to `4`); proud of it,
+  they knock it down themselves after a while and start the next. Another child can "Knock
+  Down" a structure (greyed with the game's "Wait for them to build something before knocking
+  it down!" while there's only a pile): from the spot beside it (the game's mirrored one on
+  the builder's right), the two playing the pack's knock-down and reaction together, the blocks
+  scattered as the clip has it; fun for the one, the builder less fond of them. Done, they
+  clear the blocks away and get up. `BLOCKS_TEST=1`, `BLOCKS_KNOCK=<s>`, `BLOCKS_DIST` (tests).
 - **Curfews**, as the game's: children are home by ten at night and teens by eleven (till six),
   with a word an hour before for anyone still out. A child out after it without a grown-up of
   the household near goes home; a teen out unsupervised is Out After Curfew (not a Good one),

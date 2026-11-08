@@ -104,6 +104,8 @@ pub enum ObjectKind {
     ToyBox,
     Xylophone,
     PegBox,
+    /// An activity table: four places to play with blocks at (`blocks`).
+    ActivityTable,
     PottyChair,
     Dresser,
     Telescope,
@@ -455,6 +457,8 @@ impl ObjectKind {
             Self::ToyBox
         } else if has("toys.xylophone") {
             Self::Xylophone
+        } else if (has("toys.activitytable") || has("toys.mimics.activitytable")) && !s.contains('+') {
+            Self::ActivityTable
         } else if has("toypegbox") {
             Self::PegBox
         } else if has("pottychair") {
@@ -603,7 +607,7 @@ impl ObjectKind {
             // (Build mode's, not a buy-mode tab: see `loading::buy_category`.)
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
-            Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair => "Kids",
+            Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
             Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
@@ -1286,6 +1290,9 @@ pub enum Special {
     /// A bowl's fish fed, and a dead one cleaned out (`fishbowl`).
     FeedFish,
     CleanBowl,
+    /// Blocks played with at an activity table, and another's structure knocked down (`blocks`).
+    PlayBlocks,
+    KnockDownBlocks,
     /// The dollhouse smashed in a temper, and thrown away smashed (`dollhouse`).
     SmashDollhouse,
     DisposeDollhouse,
@@ -1848,6 +1855,11 @@ static CAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, ..def("Go
 static PICNIC: [InteractionDef; 1] = [def("Have a Picnic", 30.0, [150.0, 0.0, 0.0, 10.0, 0.0, 25.0], Pose::Use)];
 static XYLOPHONE: [InteractionDef; 1] = [def("Play Xylophone", 40.0, [0.0, 0.0, -4.0, 20.0, 0.0, 130.0], Pose::Use)];
 static PEGBOX: [InteractionDef; 1] = [def("Play with Peg Box", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use)];
+/// (A place each at an activity table: `blocks`. Fun a once for knocking a structure down.)
+static ACTIVITY_TABLE: [InteractionDef; 2] = [
+    InteractionDef { special: Special::PlayBlocks, ..def("Play with Blocks", 120.0, [0.0, 0.0, -4.0, 10.0, 0.0, 120.0], Pose::Use) },
+    InteractionDef { special: Special::KnockDownBlocks, ..def("Knock Down", 4.5, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
+];
 /// (Its menu's the locks: see `hud::world_click` and `doorlocks`.)
 static DOOR: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::LockDoor, ..def("Lock", 0.0, N, Pose::Use) }];
 /// (Its menu's the switches: see `hud::world_click` and `lights`.)
@@ -2609,6 +2621,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Play with Toys" => A::new(Some("p2o_toybox_playIn_start"), &["p2o_toybox_playIn_breathe", "p2o_toybox_playIn_playWithToy", "p2o_toybox_playIn_peekOut"]),
         "Play Xylophone" => A::new(Some("p2o_toyXylophone_play_start"), &["p2o_toyXylophone_play_loop"]),
         "Play with Peg Box" => A::new(Some("p2o_toyPegBox_play_start"), &["p2o_toyPegBox_play_loopBreathe", "p2o_toyPegBox_play_loopLook", "p2o_toyPegBox_play_insertPeg"]),
+        // (Blocks: a child's building, `blocks` changing the loops as it goes up; a toddler's.)
+        "Play with Blocks" => crate::blocks::child_start(),
+        "Knock Down" if kind == ObjectKind::ActivityTable => A::new(None, &["c2o_toyBlocks_knockDown2_y"]),
         _ => return None,
     })
 }
@@ -2786,10 +2801,10 @@ impl ObjectKind {
         use ObjectKind as K;
         match age {
             Age::Baby => false,
-            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair),
+            Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven | K::ActivityTable),
         }
     }
 
@@ -2903,6 +2918,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Buffet => &BUFFET,
         ObjectKind::PicnicBasket => &PICNIC,
         ObjectKind::PicnicTable => &PICNIC_TABLE,
+        ObjectKind::ActivityTable => &ACTIVITY_TABLE,
         ObjectKind::Car => &CAR,
         ObjectKind::Snowman => &SNOWMAN,
         ObjectKind::SnowAngel => &SNOW_ANGEL,
@@ -3519,13 +3535,14 @@ pub(crate) fn run_actions(
         (Without<GameObject>, Without<AtWork>, Without<crate::rabbitholes::AtRabbitHole>, Without<crate::riding::Mounted>),
     >,
     mut objects: Query<(&GameObject, &Transform, &mut UsedBy, Option<&Floor>), Without<Sim>>,
-    (building, upper, visited, privacy, locks, cars): (
+    (building, upper, visited, privacy, locks, cars, block_structures): (
         Option<Res<crate::building::ActiveBuilding>>,
         Option<Res<UpperFloors>>,
         Option<Res<crate::visit::VisitedLot>>,
         Res<crate::privacy::Privacy>,
         Query<(Entity, &crate::doorlocks::DoorLock)>,
         Query<(&GameObject, &Transform), (Without<Sim>, Without<crate::visit::LotObject>, Without<crate::traffic::CarOut>)>,
+        Res<crate::blocks::Structures>,
     ),
     mut life: MessageWriter<LifeEvent>,
     people: Query<(Entity, &Sim, &crate::life::Mood, Has<HouseholdMember>), Without<GameObject>>,
@@ -3729,6 +3746,25 @@ pub(crate) fn run_actions(
                                         notes.push(format!("{} can't use the {}: it's in use.", sim.first, obj.name));
                                     }
                                     None
+                                } else if obj.kind == ObjectKind::ActivityTable {
+                                    // (Its nearest place no one else has, a little one's nearer in;
+                                    // or, to knock a structure down, beside the one standing.)
+                                    let me_at = Vec2::new(tf.translation.x, tf.translation.z);
+                                    let toddler = sim.age == Age::Toddler;
+                                    let knock = interactions_for(obj.kind).get(*def).is_some_and(|d| d.special == Special::KnockDownBlocks);
+                                    let spots: Vec<Vec2> = if knock {
+                                        block_structures.0.iter().filter(|(t, ..)| t == target).flat_map(|(_, seat, _)| crate::blocks::knock_spots(otf, *seat)).collect()
+                                    } else {
+                                        (0..4).map(|i| crate::blocks::place(otf, i, toddler).0).collect()
+                                    };
+                                    spots
+                                        .into_iter()
+                                        .filter(|stand| {
+                                            knock || (!places_taken.iter().any(|(who, t, at)| *who != me && t == target && at.distance(*stand) < 0.45)
+                                                && !positions.iter().any(|(who, (p, _))| *who != me && Vec2::new(p.x, p.z).distance(*stand) < 0.35))
+                                        })
+                                        .min_by(|a, b| a.distance(me_at).total_cmp(&b.distance(me_at)))
+                                        .map(|stand| (stand, of.map_or(1, |f| f.0)))
                                 } else if obj.kind == ObjectKind::PicnicTable {
                                     // The nearest place no one else has.
                                     let me_at = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3990,7 +4026,7 @@ pub(crate) fn run_actions(
                             action.phase = Phase::Routing;
                             if let ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } = action.kind
                                 && let Ok((o, _, mut used, _)) = objects.get_mut(target)
-                                && !matches!(o.kind, ObjectKind::PicnicTable | ObjectKind::Chess)
+                                && !matches!(o.kind, ObjectKind::PicnicTable | ObjectKind::Chess | ObjectKind::ActivityTable)
                                 && !matches!(action.kind, ActionKind::Object { def, .. } if watches(o.kind, def))
                                 // (A meal's taken once they're at it: one coming from the far end
                                 // of the lot doesn't keep the cook beside it waiting.)
@@ -4169,6 +4205,7 @@ pub(crate) fn run_actions(
                                         });
                                     // (Into the seat first.)
                                     let seat_in = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(into, ..)| into);
+                                    let toddler_toy = toddler_toy.or_else(|| (sim.age == Age::Toddler && d.special == Special::PlayBlocks).then(crate::blocks::toddler_clip));
                                     let clip = toddler_toy.or_else(|| interaction_clip(d.name, obj.kind)).or_else(|| seat_in.map(|_| crate::anim::ActionClip::new(None, crate::anim::SIT_LOOPS)));
                                     // (Art looked over, and then what they make of it.)
                                     let clip = if d.special == Special::ViewArt { Some(view_clip(sim, art_taste(sim, obj.price, taste_roll(me, *target)))) } else { clip };
@@ -4302,6 +4339,14 @@ pub(crate) fn run_actions(
                                     } else if !making {
                                         tf.rotation = face;
                                         anim.seat_height = 0.0;
+                                    }
+                                    if obj.kind == ObjectKind::ActivityTable {
+                                        // (At the place come to, facing the table: a knocking spot
+                                        // slantwise beside a structure.)
+                                        let came = action.approach.unwrap_or(Vec2::new(tf.translation.x, tf.translation.z));
+                                        let (at, to) = crate::blocks::nearest_place(otf, came, sim.age == Age::Toddler, d.special == Special::KnockDownBlocks);
+                                        tf.translation = Vec3::new(at.x, otf.translation.y, at.y);
+                                        tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
                                     }
                                 }
                             }
@@ -4954,6 +4999,8 @@ pub(crate) fn run_actions(
                                             commands.insert_resource(crate::jobpaper::JobHunt { sim: me, computer: obj.kind == ObjectKind::Computer });
                                         }
                                         Special::Swim
+                                        | Special::PlayBlocks
+                                        | Special::KnockDownBlocks
                                         | Special::WriteNovel
                                         | Special::PlayInSprinkler
                                         | Special::Teleport
@@ -6474,7 +6521,7 @@ fn object_action_available(actor: Entity, kind: ObjectKind, def: usize, owner: O
     // (A group meal's served one at a time: the rest wait their turn. A picnic table is
     // shared, a place each.)
     !broken && interactions_for(kind).get(def).is_some()
-        && (matches!(kind, ObjectKind::PicnicTable | ObjectKind::Chess) || watches(kind, def) || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
+        && (matches!(kind, ObjectKind::PicnicTable | ObjectKind::Chess | ObjectKind::ActivityTable) || watches(kind, def) || if matches!(phase, Phase::Running(_)) { owner == Some(actor) } else { kind == ObjectKind::Meal || owner.is_none_or(|e| e == actor) })
 }
 
 fn maintenance_available(actor: Entity, kind: ObjectKind, owner: Option<Entity>, broken: bool, upgrades: Option<&crate::upgrades::Upgrades>, bit: Option<u8>) -> bool {

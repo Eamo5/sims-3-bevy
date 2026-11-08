@@ -1282,7 +1282,7 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q))), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q, block_structures))), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1304,7 +1304,7 @@ fn world_click(
                 Query<(), With<crate::guests::StayingOver>>,
                 Query<&crate::collecting::FishingSpot>,
                 Query<(), With<crate::swim::Swimming>>,
-                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>),
+                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>, Res<crate::blocks::Structures>),
             ),
         ),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
@@ -1773,6 +1773,18 @@ fn world_click(
                     continue;
                 }
                 // (Flush: while it needs one.)
+                // (At an activity table: blocks for toddlers and children, a structure knocked
+                // down by a child, greyed till one's built.)
+                if obj.kind == ObjectKind::ActivityTable {
+                    if !crate::blocks::offers(d.special, actor_sim) {
+                        continue;
+                    }
+                    if d.special == Special::KnockDownBlocks && !block_structures.0.iter().any(|(tb, _, who)| *tb == t && *who != actor) {
+                        let why = layout_ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Toys/ActivityTable:WaitForThemToBuild")).unwrap_or_else(|| "Wait for them to build something before knocking it down!".into());
+                        options.push((d.name.to_string(), ActionKind::Greyed(why)));
+                        continue;
+                    }
+                }
                 // (Being sick in it's never asked for: `nausea`; nor a book put back.)
                 if matches!(d.special, Special::Vomit | Special::ReturnBook) {
                     continue;

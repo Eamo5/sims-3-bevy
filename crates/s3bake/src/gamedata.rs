@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 171;
+pub const GAMEDATA_VERSION: u32 = 173;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -3174,8 +3174,8 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
 }
 
 /// Geometry states the game switches objects to (`alt_states.pack`): a dollhouse smashed, an
-/// outdoor trash can with its lid off.
-pub const ALT_STATES: [&str; 2] = ["dollhouseSmashed", "BinOnly"];
+/// outdoor trash can with its lid off, an activity table's blocks as they're built up (`blocks`).
+pub const ALT_STATES: [&str; 9] = ["dollhouseSmashed", "BinOnly", "pile", "midPointStructure", "house", "castle", "bridge", "sphinx", "tower"];
 
 /// A model's key in one of its other states (`alt_states.pack`): the state's hash its group.
 pub fn alt_state_key(model: crate::types::Key, state: u32) -> crate::types::Key {

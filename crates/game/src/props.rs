@@ -112,6 +112,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("horseShoe", "accessoryHorseshoe", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("puckInHand", "shuffleboardPuck", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("arcadeWhackAGnomeMallet", "arcadeWhackAGnomeMallet", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (A block from the activity table, played with and stacked.)
+    ("block", "activityTableSingleBlock", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];
