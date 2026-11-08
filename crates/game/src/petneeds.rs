@@ -160,7 +160,7 @@ pub fn tooltip(pet: &Pet, m: &PetMotives, traits: &[String], gu: Option<&crate::
     let how = if f.is_empty() { "Content".to_string() } else { f.join(", ") };
     let names: Vec<String> = traits.iter().map(|t| crate::pettraits::name(t, gu)).collect();
     let traits = if names.is_empty() { String::new() } else { format!("\n{}", names.join(", ")) };
-    format!("{} ({}){traits}\n{how}", pet.name, crate::pets::kind_name(&pet.kind))
+    format!("{} ({}){traits}\n{how}", pet.name, pet.age_name())
 }
 
 /// What's in a pet bowl: bites left (`kFullBowlFoodUnits`, eight).

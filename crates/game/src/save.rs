@@ -557,6 +557,9 @@ pub struct SaveGame {
     /// Tombstones on the lot, with who lies there.
     #[serde(default)]
     pub graves: Vec<SavedGrave>,
+    /// The household's pets' tombstones (`petaging`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pet_graves: Vec<crate::petaging::SavedPetGrave>,
     /// Leftovers in the fridge (servings, by recipe).
     #[serde(default)]
     pub leftovers: Vec<String>,
@@ -1035,11 +1038,12 @@ fn save_game(
         ),
         Without<crate::services::ServiceNpc>,
     >,
-    (bought, exit, graves, ghosts): (
+    (bought, exit, graves, ghosts, pet_graves): (
         Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
         Option<Res<crate::interact::LotExit>>,
         Query<(Entity, &crate::ghosts::Grave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
         Query<(Entity, &Sim, &crate::ghosts::Ghost, &Relationships)>,
+        Query<(&crate::petaging::PetGrave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
     ),
     ui: Option<Res<crate::icons::GameUi>>,
     mut notes: ResMut<Notifications>,
@@ -1052,7 +1056,7 @@ fn save_game(
         ),
         (Res<crate::meals::Leftovers>, Res<crate::ingredients::Fridge>, Res<crate::realestate::RealEstate>),
         Res<crate::weather::Weather>,
-        Query<(&crate::pets::Pet, &crate::pets::HomePet, &Transform, Option<&crate::petneeds::PetMotives>, (Option<&crate::pets::PetBonds>, Option<&crate::pets::PetTraits>, Has<crate::riding::Tack>, Option<&crate::dogtricks::DogTricks>, Option<&crate::pets::Accessories>, Option<&crate::horsejumps::HorseSkills>))>,
+        Query<crate::pets::SavedPetQuery>,
         Res<crate::pets::PetData>,
     ),
     (mut slot, (maid, paper), mail_due, upgraded, family, strokes, sculpted, broken, family_inventory, puddles): (
@@ -1261,6 +1265,7 @@ fn save_game(
                 SavedGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), cause: g.cause.clone(), sim: SavedSim { relationships: known, ..saved_look(&g.sim) }, epitaph: g.epitaph.clone() }
             })
             .collect(),
+        pet_graves: pet_graves.iter().map(|(g, tf)| crate::petaging::SavedPetGrave { position: tf.translation.to_array(), rotation: tf.rotation.to_array(), name: g.name.clone(), kind: g.kind.clone() }).collect(),
         leftovers: leftovers.0.clone(),
         leftovers_at: leftovers.1.clone(),
         fridge: fridge.0.clone(),
@@ -1603,6 +1608,10 @@ pub(crate) fn apply_loaded_game(
                 });
             }
         }
+    }
+    // (And the household's pets', theirs.)
+    for g in &game.pet_graves {
+        crate::petaging::place_grave(&mut commands, &mut assets, &mut ctx, &catalog, &data.0, g.name.clone(), &g.kind, lift(Vec3::from(g.position)), Quat::from_array(g.rotation));
     }
     commands.insert_resource(crate::ghosts::PendingRels(unmet));
     commands.insert_resource(crate::familyinv::FamilyInventory(game.family_inventory.clone()));

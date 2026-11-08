@@ -480,7 +480,7 @@ fn relationships_panel(
         w.area = [x, g.padding[1] + g.cell_padding[1], x + cw, g.padding[1] + g.cell_padding[1] + ch];
         let c = ui.spawn_under(&mut commands, &mut images, &mut fonts, &w, h);
         let rel = crate::social::Relationship { friendship: *liking, ..default() };
-        let label = format!("{} · {}", crate::pets::kind_name(&pet.kind), rel.friendship_label());
+        let label = format!("{} · {}", pet.age_name(), rel.friendship_label());
         if let Some(t) = c.id(ENTRY_THUMB) {
             commands.entity(t).despawn_children();
             let pic = portraits.portrait(&mut images, *e);

@@ -255,6 +255,7 @@ fn new_pet(data: &s3bake::PetsBaked, kind: &'static str, rng: &mut impl Rng) -> 
         fur: None,
         fur_mix: None,
         layers: None,
+        age: None,
     })
 }
 

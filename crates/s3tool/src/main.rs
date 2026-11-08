@@ -1167,6 +1167,14 @@ fn main() {
         }
         return;
     }
+    if args[1] == "petbreeds" {
+        // petbreeds [kind]: the baked breeds, each its kind, name, place in Create a Pet's list, outfit.
+        let pets = s3bake::load_pets(&s3bake::default_root()).expect("pets");
+        for b in pets.breeds.iter().filter(|b| args.get(2).is_none_or(|k| &b.kind == k)) {
+            println!("{} {:?} {:?} {:016X} age {:#x} gender {:#x}", b.kind, b.name, b.listed, b.outfit, b.age, b.gender);
+        }
+        return;
+    }
     if args[1] == "petthumbs" {
         // petthumbs <CasThumbnails.package>: which baked breeds (pet outfits) have a thumbnail
         // there, by type and group.

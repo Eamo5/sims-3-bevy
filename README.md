@@ -952,6 +952,22 @@ installation is unreachable.
   together (kneeling to stroke a cat, which looks up at them), for the Sim's fun and social.
   Grown-ups can adopt a pet by phone (a cat, kitten, dog, puppy, little dog, horse or foal, for
   its fee): one of the game's breeds of its kind comes home with a name of its own.
+  Pets grow up and grow old as the pack's `AgingManager` tuning has them (at the normal
+  lifespan, seven days to an aging year: a kitten or puppy a week, a foal not five days; a dog
+  grown twenty-five days, a cat twenty-eight, a horse thirty-five; an old dog at least fourteen
+  more, a cat or horse seventeen; all stretched or shortened by the lifespan picked), each
+  coming home a little way through its stage, the household told the day before. Growing up
+  plays the game's age transition (the young one's half, the pack's sting for it, the grown
+  one's half), and it's a grown cat, dog or horse of its own coat, keeping its traits, needs and
+  bonds; one neglected as it grew (its mood, energy, hunger, company, fun, claws or chewing, a
+  horse's exercise below the game's thresholds, weighed as `CheckForAdditionOfNegativePetTrait`
+  weighs them) comes out of it with a bad trait. Growing old has the elder's half (`ec_`,
+  `ed_`, `eh_`), and an old pet walks the pack's `elderWalk` and is shown as an Elder Cat or
+  Dog. Past its least span an old pet has the game's daily chance of passing away: it lies
+  down, the Grim Reaper appears and plays with it a last time (the pack's `death_friendly`
+  socials: a stick for a dog), it fades away and he raises its tombstone (the pack's feline,
+  canine or equine one), and the household mourns; pets' tombstones are kept in saves, ages
+  too. `PET_AGE_TEST=<name>:<grow|old|die>` (tests).
   The household's pets have needs, as the pack's `Motives` tuning has them for each species
   (hunger, bladder, energy, social, hygiene, fun; a cat's urge to scratch, a dog's to chew, a
   horse's thirst), and see to them themselves from what's bought for them, with the pack's own

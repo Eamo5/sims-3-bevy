@@ -126,6 +126,40 @@ fn starve(
 #[derive(Component)]
 pub struct GrimReaper;
 
+/// The Grim Reaper, appearing (`a_death_appear`) where he's put, then floating as he waits: in his
+/// robe and hood, with nothing showing beneath it.
+pub fn spawn_reaper(commands: &mut Commands, cas: Option<&crate::simbody::CasData>, at: Transform, floor: u8) -> Entity {
+    let part = |name: &str| cas.and_then(|c| c.parts.iter().find(|p| p.name == name && p.baked).map(|p| p.key));
+    let (robe, bald) = (part("amBodyReaperNPC"), part("amHairBald"));
+    let reaper = Sim {
+        first: "Grim".into(),
+        last: "Reaper".into(),
+        female: false,
+        age: Age::Adult,
+        skin: Color::srgb(0.08, 0.08, 0.09),
+        outfit: crate::sim::OutfitChoice { full: robe, hair: bald, ..default() },
+        ..crate::sim::random_sim(&mut rand::rng(), "Reaper", Some(false), Age::Adult)
+    };
+    commands
+        .spawn((
+            at,
+            Visibility::default(),
+            reaper,
+            crate::sim::SimAnim::default(),
+            crate::anim::ClipPlayer::default(),
+            crate::aging::NeedsNewBody,
+            GrimReaper,
+            crate::nav::Floor(floor),
+            ActionClip::new(Some("a_death_appear_x"), &["a_death_float_x"]),
+            DespawnOnExit(AppState::InGame),
+        ))
+        // (A body is rebuilt in place of the entity's model children.)
+        .with_children(|c| {
+            c.spawn((Transform::default(), Visibility::default()));
+        })
+        .id()
+}
+
 /// Seconds (at normal speed) between the scene's steps.
 const APPEAR_AT: f32 = 1.5;
 const REAP_AT: f32 = 7.0;
@@ -184,40 +218,10 @@ fn reap(
             }
             // The Reaper comes.
             1 if d.t >= APPEAR_AT => {
-                let part = |name: &str| cas.as_ref().and_then(|c| c.parts.iter().find(|p| p.name == name && p.baked).map(|p| p.key));
-                // The robe and hood, with nothing showing beneath it.
-                let (robe, bald) = (part("amBodyReaperNPC"), part("amHairBald"));
-                let reaper = Sim {
-                    first: "Grim".into(),
-                    last: "Reaper".into(),
-                    female: false,
-                    age: Age::Adult,
-                    skin: Color::srgb(0.08, 0.08, 0.09),
-                    outfit: crate::sim::OutfitChoice { full: robe, hair: bald, ..default() },
-                    ..crate::sim::random_sim(&mut rand::rng(), "Reaper", Some(false), Age::Adult)
-                };
                 let ahead = (tf.rotation * Vec3::Z).with_y(0.0).normalize_or(Vec3::Z);
                 let at = tf.translation + ahead * 1.6;
                 let facing = Quat::from_rotation_y((-ahead.x).atan2(-ahead.z));
-                let r = commands
-                    .spawn((
-                        Transform::from_translation(at).with_rotation(facing),
-                        Visibility::default(),
-                        reaper,
-                        crate::sim::SimAnim::default(),
-                        crate::anim::ClipPlayer::default(),
-                        crate::aging::NeedsNewBody,
-                        GrimReaper,
-                        crate::nav::Floor(floor.map_or(1, |f| f.0)),
-                        ActionClip::new(Some("a_death_appear_x"), &["a_death_float_x"]),
-                        DespawnOnExit(AppState::InGame),
-                    ))
-                    // (A body is rebuilt in place of the entity's model children.)
-                    .with_children(|c| {
-                        c.spawn((Transform::default(), Visibility::default()));
-                    })
-                    .id();
-                d.reaper = Some(r);
+                d.reaper = Some(spawn_reaper(&mut commands, cas.as_deref(), Transform::from_translation(at).with_rotation(facing), floor.map_or(1, |f| f.0)));
                 d.stage = 2;
             }
             // Their soul goes with him; a tombstone rises.
