@@ -34,7 +34,7 @@ pub struct PetMoodsPlugin;
 
 impl Plugin for PetMoodsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (attach, needs, states, moods_test).chain().run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (attach, needs, states, awww_autonomy, awww_test, moods_test).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -128,6 +128,79 @@ pub fn new_young(kind: &str) -> K {
 /// The Jumping a horse needs for a clean jump to be Nothing But Air (`kLevelForNothingButAir`).
 pub const NOTHING_BUT_AIR_LEVEL: u32 = 5;
 
+/// "Awwww" (the pack's `Awwww`): a Sim coos at a kitten or puppy within five metres
+/// (`kAwwwwDistanceLimit`), a little fun the first time (`kFunMotiveGain`), Kittens! or Puppies!
+/// for an hour.
+pub const AWWW_DISTANCE: f32 = 5.0;
+pub const AWWW_FUN: f32 = 5.0;
+/// Its clip's length (game minutes).
+pub const AWWW_MINUTES: f32 = 4.3;
+
+/// Whether a pet's one to coo at: a kitten or a puppy.
+pub fn cute(kind: &str) -> bool {
+    matches!(kind, "cc" | "cd" | "cl")
+}
+
+pub fn awww_clip(child: bool) -> &'static str {
+    if child { "c_pupiesandkittens_awww_x" } else { "a_pupiesandkittens_awww_x" }
+}
+
+/// Cooed: the fun the first time, the moodlet.
+pub fn awwwed(commands: &mut Commands, sim: Entity, cat: bool, now: f64) {
+    let kind = if cat { K::Kittens } else { K::Puppies };
+    commands.entity(sim).queue_silenced(move |mut w: EntityWorldMut| {
+        let had = w.get::<Moodlets>().is_some_and(|m| m.has(kind));
+        if !had && let Some(mut m) = w.get_mut::<crate::sim::Motives>() {
+            m.add(crate::sim::FUN, AWWW_FUN);
+        }
+        if let Some(mut m) = w.get_mut::<Moodlets>() {
+            m.add(kind, now);
+        }
+    });
+}
+
+/// How often a household Sim with nothing to do might coo at a kitten or puppy near by of their
+/// own accord (game minutes), and the chance (more for those who love animals: the
+/// interaction's tuning favours the Good, Animal Lovers, Cat and Dog People).
+const AWWW_THINK: f64 = 30.0;
+const AWWW_CHANCE: f64 = 0.15;
+const AWWW_KEEN_CHANCE: f64 = 0.4;
+
+#[allow(clippy::type_complexity)]
+fn awww_autonomy(
+    clock: Res<crate::clock::GameClock>,
+    mut sims: Query<(&crate::sim::Sim, &Transform, &mut crate::interact::ActionQueue, Option<&Moodlets>, Option<&crate::nav::PathFollow>), (With<crate::sim::HouseholdMember>, Without<Pet>)>,
+    pets: Query<(Entity, &Pet, &Transform)>,
+    mut next: Local<f64>,
+) {
+    let now = clock.minutes;
+    if now < *next {
+        return;
+    }
+    *next = now + AWWW_THINK;
+    let young: Vec<(Entity, Vec2, bool)> = pets.iter().filter(|p| cute(&p.1.kind)).map(|p| (p.0, p.2.translation.xz(), p.1.kind == "cc")).collect();
+    if young.is_empty() {
+        return;
+    }
+    let mut rng = rand::rng();
+    for (sim, tf, mut q, moods, path) in &mut sims {
+        if !q.0.is_empty() || path.is_some_and(|p| !p.done) || sim.age.is_little() {
+            continue;
+        }
+        let here = tf.translation.xz();
+        let Some((target, at, cat)) = young.iter().filter(|y| y.1.distance(here) <= AWWW_DISTANCE).min_by(|a, b| a.1.distance(here).total_cmp(&b.1.distance(here))).copied() else { continue };
+        // (Not again while it's still with them.)
+        if moods.is_some_and(|m| m.has(if cat { K::Kittens } else { K::Puppies })) {
+            continue;
+        }
+        use crate::life::Trait;
+        let keen = [Trait::Good, Trait::AnimalLover, Trait::CatPerson, Trait::DogPerson].iter().any(|t| sim.traits.contains(t));
+        if rand::Rng::random_bool(&mut rng, if keen { AWWW_KEEN_CHANCE } else { AWWW_CHANCE }) {
+            q.0.push_back(crate::interact::Action::new("Awwww", crate::interact::ActionKind::Awww { target, at, cat }, true));
+        }
+    }
+}
+
 /// A moodlet added to someone (a pet or a Sim) when it's next seen to.
 pub fn give(commands: &mut Commands, e: Entity, kind: K, now: f64) {
     commands.entity(e).queue_silenced(move |mut w: EntityWorldMut| {
@@ -183,6 +256,38 @@ fn states(mut pets: Query<(&mut Moodlets, Option<&crate::petlitters::PetPregnant
             ml.set_while(K::PetSkillFatigue, tired);
         }
     }
+}
+
+/// `PET_AWWW=<pet>` (tests): twelve seconds in, the selected Sim coos at that kitten or puppy,
+/// brought a couple of metres from them, the camera on them.
+#[allow(clippy::type_complexity)]
+fn awww_test(
+    time: Res<Time>,
+    mut sel: Query<(&Transform, &mut crate::interact::ActionQueue), (With<crate::sim::Selected>, Without<Pet>)>,
+    mut pets: Query<(Entity, &Pet, &mut Transform), Without<crate::sim::Sim>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut done: Local<bool>,
+) {
+    let Ok(name) = std::env::var("PET_AWWW") else { return };
+    if time.elapsed_secs() < 12.0 {
+        return;
+    }
+    let Ok((stf, mut q)) = sel.single_mut() else { return };
+    if let Ok(mut c) = cams.single_mut() {
+        c.look_at(stf.translation);
+        c.distance = 4.0;
+    }
+    if *done {
+        return;
+    }
+    let Some((e, pet, mut ptf)) = pets.iter_mut().find(|p| p.1.name.eq_ignore_ascii_case(&name)) else { return };
+    *done = true;
+    ptf.translation = stf.translation + stf.rotation * Vec3::new(0.0, 0.0, 2.0);
+    let at = ptf.translation.xz();
+    q.0.clear();
+    q.push_player(crate::interact::Action::new("Awwww", crate::interact::ActionKind::Awww { target: e, at, cat: pet.kind == "cc" }, false));
+
+    info!("awww test: at {}", pet.name);
 }
 
 /// `PET_MOODS=<pet>` (tests): ten seconds in, that pet hungry, lonely and having a blast, just
@@ -269,6 +374,8 @@ mod tests {
         assert!(from_social("Talk To Pet").is_empty());
         assert_eq!(from_greeting(crate::petcompany::Greet::Kick), Some(K::Kicked));
         assert_eq!(new_young("cl"), K::NewPuppiesPet);
+        assert!(cute("cc") && cute("cl") && !cute("ch") && !cute("ac"), "kittens and puppies, not foals");
+        assert_eq!(awww_clip(true), "c_pupiesandkittens_awww_x");
         assert_eq!((K::Delighted.def().value, K::StarvingPet.def().value, K::LovedPet.def().hours), (40, -80, 1.0));
         let mut ml = Moodlets::default();
         ml.add(K::Brushed, 100.0);

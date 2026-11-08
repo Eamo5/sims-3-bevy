@@ -3054,6 +3054,8 @@ pub enum ActionKind {
     /// A pet bathed in a tub (`petbath`): which, the tub, its kind, and where the Sim kneels and
     /// faces (planned from the tub's slots once asked for).
     BathePet { pet: Entity, tub: Entity, kind: &'static str, at: Vec2, face: Vec2, level: u8, planned: bool },
+    /// "Awwww" at a kitten or puppy near by (the pack's `Awwww`): where it is, and whether a cat.
+    Awww { target: Entity, at: Vec2, cat: bool },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -3940,6 +3942,15 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert((clip, crate::traitacts::Began(*act)));
                             continue;
                         }
+                        // (Turned to the kitten or puppy where they stand, and cooed at it.)
+                        ActionKind::Awww { at, .. } => {
+                            action.phase = Phase::Running(0.0);
+                            let to = *at - Vec2::new(tf.translation.x, tf.translation.z);
+                            tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                            anim.pose = Pose::Use;
+                            commands.entity(me).remove::<crate::nav::PathFollow>().insert(crate::anim::ActionClip::new(Some(crate::petmoods::awww_clip(sim.age == Age::Child)), &[]));
+                            continue;
+                        }
                         ActionKind::MotiveFail(k) => {
                             action.phase = Phase::Running(0.0);
                             anim.pose = Pose::Use;
@@ -4671,6 +4682,7 @@ pub(crate) fn run_actions(
                             | ActionKind::HireMaid(_)
                             | ActionKind::MotiveFail(_)
                             | ActionKind::TraitAct { .. }
+                            | ActionKind::Awww { .. }
                             | ActionKind::ReadJournal
                             | ActionKind::ThrowParty => {}
                             ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } => {
@@ -6093,6 +6105,13 @@ pub(crate) fn run_actions(
                             if elapsed >= minutes {
                                 finished = true;
                                 commands.queue(move |w: &mut World| crate::careermetrics::journal_read(w, me));
+                            }
+                        }
+                        // (Awww'd: Kittens! or Puppies!, and a little fun the first time.)
+                        ActionKind::Awww { cat, .. } => {
+                            finished = elapsed >= crate::petmoods::AWWW_MINUTES;
+                            if finished {
+                                crate::petmoods::awwwed(&mut commands, me, *cat, clock.minutes);
                             }
                         }
                         ActionKind::TraitAct { act, minutes } => {

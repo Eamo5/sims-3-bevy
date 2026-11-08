@@ -1432,6 +1432,10 @@ fn world_click(
             .filter(|(_, s)| s.min_liking.is_none_or(|m| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home)) >= m))
             .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
             .collect();
+        // (A kitten or puppy near by: "Awwww", the pack's `Awwww`.)
+        if crate::petmoods::cute(kind) && postures.get(actor).is_ok_and(|p| p.1.translation().xz().distance(at) <= crate::petmoods::AWWW_DISTANCE) {
+            options.push(("Awwww".to_string(), ActionKind::Awww { target: t, at, cat: kind == "cc" }));
+        }
         // (A young one of the household's not yet named: "Name Pet", the game's `NamePet`.)
         if home && unnamed_q.contains(t) {
             options.insert(0, ("Name Pet".to_string(), ActionKind::PetCommand(crate::petcontrol::PetCommand::Name(t))));

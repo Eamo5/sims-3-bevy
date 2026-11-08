@@ -1079,6 +1079,10 @@ installation is unreachable.
   with it played (the game's names, icons and words, in its sex), its mood on the meter and
   round its face on the skewer, and a horse throws its rider as its mood (the game's
   `MoodValue`) turns foul. Timed ones are kept in saves. `PET_MOODS=<pet>` (tests).
+  A kitten or puppy within five metres can be cooed at ("Awwww", the pack's `Awwww`: the Sim
+  turns to it and bends down to it, `a_pupiesandkittens_awww`), a little fun the first time and
+  Kittens! or Puppies! for an hour; Sims do it of their own accord now and then, the Good and
+  those who love animals more often. `PET_AWWW=<pet>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

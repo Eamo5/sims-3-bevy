@@ -252,6 +252,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "al_huntingSkill_",
     "ad_dig",
     "al_dig",
+    // (A Sim cooing at a kitten or puppy: the pack's `Awwww`.)
+    "a_pupiesandkittens_",
+    "c_pupiesandkittens_",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",
