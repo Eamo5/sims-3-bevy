@@ -369,6 +369,11 @@ fn attach(
             commands.entity(e).insert((FountainWater, BathWater));
             continue;
         }
+        // (A hitching post's trough, a water trough: their water drawn as water.)
+        if matches!(o.kind, ObjectKind::HitchingPost | ObjectKind::WaterTrough) {
+            commands.entity(e).insert(FountainWater);
+            continue;
+        }
         // (A shower over a tub: the tub's water, and the shower's spray only while showering.)
         if o.kind == ObjectKind::ShowerTub {
             commands.entity(e).insert((FountainWater, BathWater, ShowerOnly));

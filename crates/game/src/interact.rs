@@ -266,6 +266,8 @@ pub enum ObjectKind {
     PetBed,
     /// A pet house (the pack's `PetHouse`): slept in, and where cats and dogs try for a litter.
     PetHouse,
+    /// A hitching post (the pack's `HitchingPost`): horses tied to it (`hitching`).
+    HitchingPost,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -445,6 +447,8 @@ impl ObjectKind {
             Self::FoodSynthesizer
         } else if has("appliances.foodprocessor") {
             Self::FoodProcessor
+        } else if has("pets.hitchingpost") {
+            Self::HitchingPost
         } else if has("environment.vendingmachinecandy") {
             Self::VendingCandy
         } else if has("environment.vendingmachinehealthy") {
@@ -624,7 +628,7 @@ impl ObjectKind {
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
-            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
+            Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::HitchingPost | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
             Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
         }
@@ -3068,6 +3072,12 @@ pub enum ActionKind {
     BathePet { pet: Entity, tub: Entity, kind: &'static str, at: Vec2, face: Vec2, level: u8, planned: bool },
     /// "Awwww" at a kitten or puppy near by (the pack's `Awwww`): where it is, and whether a cat.
     Awww { target: Entity, at: Vec2, cat: bool },
+    /// At a hitching post (`hitching`): up on a horse, "Tie Up" there (the ride's to see to);
+    /// on foot, a horse called over and tied at a place of it; a tied horse untied (where to
+    /// stand for it).
+    TieUp { post: Entity },
+    TieHorse { post: Entity, horse: Entity, part: usize },
+    Untie { horse: Entity, at: Vec2 },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -3880,6 +3890,9 @@ pub(crate) fn run_actions(
                         ActionKind::BathePet { at, level, .. } => Some((*at, *level)),
                         // (Before a jump's bars.)
                         ActionKind::PickUpJump { at, .. } => Some((*at, 1)),
+                        // (At a hitching post's place to tie a horse, or to untie one.)
+                        ActionKind::TieHorse { post, part, .. } => objects.get(*post).ok().map(|(_, otf, _, of)| (crate::hitching::tie_spot(otf, *part).0, of.map_or(1, |f| f.0))),
+                        ActionKind::Untie { at, .. } => Some((*at, 1)),
                         // (Standing before the pet, as far off as the game's jig has them.)
                         ActionKind::PetSocial { at, kind, .. } | ActionKind::DogTrick { at, kind, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -3974,7 +3987,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4795,7 +4808,22 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
+                            // (At the post: the horse called over, `hitching` ties it once it's there;
+                            // or the rope untied.)
+                            ActionKind::TieHorse { post, horse, part } => {
+                                if let Ok((_, otf, ..)) = objects.get(*post) {
+                                    let to = otf.translation.xz() - tf.translation.xz();
+                                    tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                }
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::anim::ActionClip::new(Some(crate::hitching::CALL_CLIP), &[]));
+                                commands.entity(*horse).insert(crate::hitching::CalledToPost { post: *post, part: *part });
+                            }
+                            ActionKind::Untie { .. } => {
+                                anim.pose = Pose::Use;
+                                commands.entity(me).insert(crate::anim::ActionClip::new(Some(crate::hitching::UNTIE_CLIP), &[]));
+                            }
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -6382,6 +6410,13 @@ pub(crate) fn run_actions(
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
                         ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } => {}
+                        ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
+                        ActionKind::Untie { horse, .. } => {
+                            finished = elapsed >= crate::hitching::UNTIE_MINUTES;
+                            if finished {
+                                crate::hitching::untie_later(&mut commands, *horse);
+                            }
+                        }
                         _ => finished = true,
                     }
                 }

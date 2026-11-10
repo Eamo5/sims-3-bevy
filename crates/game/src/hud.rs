@@ -1294,7 +1294,7 @@ fn world_click(
         (Res<crate::frontdoor::Front>, Res<crate::frontdoor::Doorbell>),
         Res<crate::traitacts::Mess>,
     ),
-    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q, block_structures, preferred_q))), company_q): (
+    (on_lot, writers, jobs_q, toddler_q, (bowl_q, terra_q), inv_q, upg_q, family, door_q, pets_q, labour_q, tv_levels, classes_q, (books_q, novels_q, carry_q, (stay_q, spots_q, swim_q, (obstacles_q, mounted_q, horse_skills_q, home_pets_q, block_structures, preferred_q, (tied_q, horses_q)))), company_q): (
         Query<&crate::visit::OnLot>,
         Query<(Option<&crate::writing::Author>, &crate::interact::Skills, Option<&crate::meals::KnownRecipes>)>,
         Query<Option<&crate::careers::Job>>,
@@ -1316,7 +1316,7 @@ fn world_click(
                 Query<(), With<crate::guests::StayingOver>>,
                 Query<&crate::collecting::FishingSpot>,
                 Query<(), With<crate::swim::Swimming>>,
-                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>, Res<crate::blocks::Structures>, Query<&crate::bicycles::PreferredVehicle>),
+                (Query<&crate::horsejumps::Obstacle>, Query<&crate::riding::Mounted>, Query<&crate::horsejumps::HorseSkills>, Query<(), With<crate::pets::HomePet>>, Res<crate::blocks::Structures>, Query<&crate::bicycles::PreferredVehicle>, (Query<(Entity, &crate::hitching::Tied)>, Query<(Entity, &crate::pets::Pet), With<crate::pets::HomePet>>)),
             ),
         ),
         Query<(Entity, &Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<HouseholdMember>, With<crate::interact::Visitor>)>>,
@@ -1445,6 +1445,14 @@ fn world_click(
         if kind == "ah" {
             let riding = queues_q.get(actor).ok().and_then(crate::riding::riding_on);
             let liking = bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home));
+            // (Tied to a hitching post: untied, the game's `Untie`, by a teen or older.)
+            if let Ok((_, tied)) = tied_q.get(t)
+                && crate::riding::can_ride(actor_sim)
+                && let Ok((_, gtf, ..)) = pickable.get(tied.post)
+            {
+                let at = crate::hitching::tie_spot(&gtf.compute_transform(), tied.part).0;
+                options.insert(0, (crate::hitching::UNTIE.to_string(), ActionKind::Untie { horse: t, at }));
+            }
             if riding == Some(t) {
                 options = vec![("Dismount".to_string(), ActionKind::Dismount)];
             } else if home
@@ -1779,6 +1787,26 @@ fn world_click(
                 }) {
                     options.push((GO_SHOPPING.to_string(), ActionKind::Visit { lot, activity: task }));
                 }
+            }
+            // (A hitching post: "Tie Up" up on a horse; on foot, a horse about tied to it, or one
+            // tied there untied: `hitching`.)
+            if obj.kind == ObjectKind::HitchingPost
+                && crate::riding::can_ride(actor_sim)
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let ptf = gtf.compute_transform();
+                let riding = mounted_q.get(actor).ok().is_some_and(|m| m.up());
+                let here: Vec<(Entity, usize)> = tied_q.iter().filter(|(_, x)| x.post == t).map(|(h, x)| (h, x.part)).collect();
+                let tied_here: Vec<(Entity, String, Vec2)> = here.iter().filter_map(|(h, part)| pets_q.get(*h).ok().map(|p| (*h, p.0.name.clone(), crate::hitching::tie_spot(&ptf, *part).0))).collect();
+                // (The household's grown horses, not tied up nor ridden.)
+                let free: Vec<(Entity, String)> = horses_q
+                    .iter()
+                    .filter(|(h, p)| p.kind == "ah" && !tied_q.contains(*h) && !queues_q.iter().any(|q| crate::riding::riding_on(q) == Some(*h)))
+                    .map(|(h, p)| (h, p.name.clone()))
+                    .collect();
+                let taken: Vec<usize> = here.iter().map(|x| x.1).collect();
+                let part = crate::hitching::free_part(&taken).unwrap_or(0);
+                options.extend(crate::hitching::post_options(t, part, riding, taken.len(), &free, &tied_here, &mut pie.submenus, submenu_kind));
             }
             // (A horse jump: "Jump" up on a horse, "Pick Up" its bars knocked down.)
             if obj.kind == ObjectKind::HorseJump

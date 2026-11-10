@@ -1083,6 +1083,16 @@ installation is unreachable.
   turns to it and bends down to it, `a_pupiesandkittens_awww`), a little fun the first time and
   Kittens! or Puppies! for an hour; Sims do it of their own accord now and then, the Good and
   those who love animals more often. `PET_AWWW=<pet>` (tests).
+  Hitching posts (the pack's `HitchingPost`) have two places for a horse, hay and a trough
+  before them: up on a horse, "Tie Up" rides it in straight at a free place, the rider gets off
+  and it's tied there, a rope from its halter to the post's ring; on foot, "Tie Horse to Post ›"
+  calls one of the household's horses over (`social_callOver`) and ties it; "Untie" (the horse's
+  menu) or "Untie Hitched Horse ›" (the post's) frees it. Tied, a horse stays put, eating the
+  post's hay and drinking from its trough as it needs (the game's `EatHay` and `Drink`); wanting
+  what the post can't give it (sleep, the bathroom, company, a run) it breaks the rope and is off
+  (`BreakRope`, `ah_hitchingPost_breakRope`). Both places taken, the post's "Tie Up" is greyed
+  with the game's words. Troughs' water (a hitching post's, a water trough's) is drawn as water.
+  `HITCH_TEST=<horse>` with `HITCH_NEEDS=hungry|break`, `HITCH_RIDE=1` or `HITCH_CALL=1` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

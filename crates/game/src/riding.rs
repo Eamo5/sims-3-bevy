@@ -254,11 +254,13 @@ pub struct Mounted {
     /// minutes).
     sore_at: f64,
     throw_at: Option<f64>,
+    /// To be tied up at a hitching post (`hitching`): which, at which place, the spot there.
+    tie: Option<(Entity, usize, Vec2)>,
 }
 
 impl Mounted {
     pub fn new(horse: Entity, unsaddle: bool) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None, sore_at: f64::INFINITY, throw_at: None }
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None, sore_at: f64::INFINITY, throw_at: None, tie: None }
     }
 
     /// Playing in step with the horse (not saddling it).
@@ -347,9 +349,10 @@ pub(crate) fn ride(
     mut horses: Query<(&Pet, &mut Transform, &mut PetAnim, Option<&mut crate::petneeds::PetMotives>, Option<&mut PetBonds>, (&crate::pets::PetSkeleton, Option<&Tack>, Option<&mut crate::horsejumps::HorseSkills>, Option<&crate::pets::PetTraits>, Option<&crate::life::Mood>)), Without<Sim>>,
     (mut notes, mut life): (ResMut<Notifications>, MessageWriter<crate::life::LifeEvent>),
     (pet_data, mut assets, mut meshes, mut images, mut materials): (Res<crate::pets::PetData>, ResMut<crate::objects::ObjectAssets>, ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    (obstacles, jumps): (
+    (obstacles, jumps, (posts, tied)): (
         Query<(&crate::horsejumps::Obstacle, &Transform), (Without<Pet>, Without<Sim>)>,
         Query<(Has<crate::horsejumps::HorseJumping>, Has<crate::horsejumps::JumpRequest>)>,
+        (Query<&Transform, (With<crate::interact::GameObject>, Without<Pet>, Without<Sim>)>, Query<&crate::hitching::Tied>),
     ),
 ) {
     let dt = time.delta_secs().min(0.1) * SPEED_RATES[clock.speed].min(3.0);
@@ -463,6 +466,16 @@ pub(crate) fn ride(
                     commands.entity(e).remove::<(Mounted, ActionClip)>();
                     commands.entity(m.horse).remove::<Ridden>();
                     hanim.replay(format!("{}_idle_stand_breathe_x", pet.kind));
+                    // (Got off at a hitching post to tie it up: tied there.)
+                    if let Some((post, part, _)) = m.tie.take()
+                        && let Ok(ptf) = posts.get(post)
+                    {
+                        let (at, face) = crate::hitching::horse_spot(ptf, part);
+                        htf.translation = Vec3::new(at.x, htf.translation.y, at.y);
+                        htf.rotation = face;
+                        crate::hitching::tie(&mut commands, m.horse, post, part);
+                        info!("riding: {} tied {} up", sim.first, pet.name);
+                    }
                     anim.pose = Pose::Stand;
                     info!("riding: {} is off {}", sim.first, pet.name);
                 }
@@ -485,6 +498,21 @@ pub(crate) fn ride(
                         ActionKind::HorseJump { obstacle } => {
                             jump_to = Some(obstacle);
                             to = None;
+                            queue.0.remove(i);
+                        }
+                        // ("Tie Up": ridden to a free place at the post, to get off there.)
+                        ActionKind::TieUp { post } => {
+                            let taken: Vec<usize> = tied.iter().filter(|t| t.post == post).map(|t| t.part).collect();
+                            match (crate::hitching::free_part(&taken), posts.get(post)) {
+                                (Some(part), Ok(ptf)) => {
+                                    let spot = crate::hitching::horse_spot(ptf, part).0;
+                                    m.tie = Some((post, part, spot));
+                                    // (Up to it from behind, walked in straight at the post.)
+                                    let away = (spot - ptf.translation.xz()).normalize_or(Vec2::Y);
+                                    (to, jump_to) = (Some(spot + away * 1.6), None);
+                                }
+                                _ => notes.push(crate::hitching::POST_FULL.to_string()),
+                            }
                             queue.0.remove(i);
                         }
                         ActionKind::Dismount => {
@@ -527,6 +555,17 @@ pub(crate) fn ride(
                     && !ml.has(crate::life::MoodletKind::SaddleSore)
                 {
                     ml.add(crate::life::MoodletKind::SaddleSore, clock.minutes);
+                }
+                // (At the hitching post's place: off, to tie it up; not getting there, not.)
+                if let Some((_, _, spot)) = m.tie
+                    && m.path.is_empty()
+                    && to.is_none()
+                {
+                    if htf.translation.xz().distance(spot) < 0.9 {
+                        off = true;
+                    } else {
+                        m.tie = None;
+                    }
                 }
                 if off {
                     let way = way_on(level, rng.random());
@@ -571,6 +610,13 @@ pub(crate) fn ride(
                         }
                         None => notes.push(format!("{} can't ride {} there.", sim.first, pet.name)),
                     }
+                }
+                // (The last steps in to the hitching post's place.)
+                if to.is_some()
+                    && let Some((_, _, spot)) = m.tie
+                    && !m.path.is_empty()
+                {
+                    m.path.push(spot);
                 }
                 // Along the way at its gait, in step with its clip's own pace (the run-in at a
                 // jump at a gallop).

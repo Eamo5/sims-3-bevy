@@ -257,6 +257,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "c_pupiesandkittens_",
     // (A food processor whizzing up a meal's ingredients: the Sim's, the tray's, its own.)
     "a2o_foodProcessor_",
+    // (A horse breaking free of a hitching post; a Sim calling one over, untying it.)
+    "ah_hitchingPost_",
+    "a2o_object_genericSwipe_x",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",
