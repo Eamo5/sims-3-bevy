@@ -43,6 +43,7 @@ impl Plugin for SoundPlugin {
                 Update,
                 (
                     clip_cues,
+                    ambient_loops,
                     play_sounds,
                     loop_volumes,
                     ui_clicks,
@@ -159,6 +160,53 @@ struct CueLoop {
     owner: Entity,
     name: String,
     def: SoundDef,
+}
+
+/// An object's own sound, looped while it has this (the game's `ObjectSound`: a fountain's
+/// water, a fountain jet's by its instance name); louder the nearer the camera.
+#[derive(Component, Clone, Debug)]
+pub struct AmbientSound(pub String);
+
+/// The first of some sound names the game has (as given, lower case).
+pub fn first_sound(sounds: &Sounds, names: &[&str]) -> Option<String> {
+    names.iter().flat_map(|n| [n.to_string(), n.to_ascii_lowercase()]).find(|n| sounds.def(n).is_some())
+}
+
+/// Objects' own sounds started as they're given them, stopped as they lose them.
+#[allow(clippy::type_complexity)]
+fn ambient_loops(
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+    (mut cache, mut sources): (ResMut<SampleCache>, ResMut<Assets<AudioSource>>),
+    added: Query<(Entity, &AmbientSound, &GlobalTransform), Added<AmbientSound>>,
+    mut removed: RemovedComponents<AmbientSound>,
+    loops: Query<(Entity, &CueLoop)>,
+    cams: Query<&SimsCamera>,
+) {
+    for gone in removed.read() {
+        for (e, l) in &loops {
+            if l.owner == gone {
+                commands.entity(e).try_despawn();
+            }
+        }
+    }
+    let cam = cams.single().ok();
+    for (owner, a, tf) in &added {
+        let Some(name) = first_sound(&sounds, &[a.0.as_str()]) else {
+            if *LOG {
+                info!("ambient loop: no sound {}", a.0);
+            }
+            continue;
+        };
+        let Some(def) = sounds.def(&name).cloned() else { continue };
+        let Some(&id) = def.samples.choose(&mut rand::rng()) else { continue };
+        let Some(h) = sounds.sample(id, &mut cache, &mut sources) else { continue };
+        let v = def.gain * SFX_VOLUME * spatial_gain(&def, tf.translation(), cam);
+        if *LOG {
+            info!("ambient loop: {name} ({id:016X})");
+        }
+        commands.spawn((AudioPlayer::new(h), PlaybackSettings::LOOP.with_volume(Volume::Linear(v)), CueLoop { owner, name, def }, DespawnOnExit(AppState::InGame)));
+    }
 }
 
 /// How loud a sound at `at` is for the camera.

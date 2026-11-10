@@ -354,6 +354,10 @@ fn attach(
             let shape = data.0.catalog_entry(&o.objd).and_then(|c| JetShape::of(&c.instance_name));
             if let (Some(shape), Some(r)) = (shape, reach) {
                 commands.entity(e).insert(Emitter { slot: Vec3::new(0.0, 0.08, 0.0), spray: Spray::Jet(shape, shape.reach(r)), owed: 0.0, sounding: None });
+                // (Its water heard: the game's `Sound(ObjectInstanceName)`.)
+                if let Some(c) = data.0.catalog_entry(&o.objd) {
+                    commands.entity(e).insert(crate::sound::AmbientSound(c.instance_name.clone()));
+                }
             }
             continue;
         }
@@ -386,7 +390,7 @@ fn attach(
             _ => continue,
         };
         if spray == Spray::Fountain {
-            commands.entity(e).insert(FountainWater);
+            commands.entity(e).insert((FountainWater, crate::sound::AmbientSound(fountain_sound(data.0.catalog_entry(&o.objd).map_or("", |c| c.instance_name.as_str())).into())));
         }
         if spray == Spray::Sprinkler {
             commands.entity(e).insert(SprayDome);
@@ -399,6 +403,28 @@ fn attach(
             continue;
         }
         commands.entity(e).insert(Emitter { slot: Vec3::from(slot), spray, owed: 0.0, sounding: None });
+    }
+}
+
+/// The running water a fountain's heard by, by its style (the game's fountains' own loops: the
+/// French, the Asian, the lounge's, the science one's, the Aztec, the future's; a plain run of
+/// water for the rest).
+pub fn fountain_sound(instance: &str) -> &'static str {
+    let n = instance.to_ascii_lowercase();
+    if n.contains("asia") {
+        "fountain_run_asia_lp"
+    } else if n.contains("francegarden") {
+        "fountain_run_francea_lp"
+    } else if n.contains("lounge") {
+        "fx_fountain_lounge_lp"
+    } else if n.contains("science") {
+        "fx_fountain_science_loop"
+    } else if n.contains("aztec") {
+        "fx_fountain_aztec_lp"
+    } else if n.contains("future") {
+        "fx_fountain_future_lp"
+    } else {
+        "fountain_run_franceb_lp"
     }
 }
 
@@ -1058,6 +1084,8 @@ mod tests {
         assert_eq!(JetShape::of("fountainJetAngleSm"), Some(JetShape::Spray));
         assert_eq!(JetShape::of("fountainJetUpLg"), Some(JetShape::Geyser));
         assert_eq!(JetShape::of("fountainModern"), None);
+        assert_eq!(fountain_sound("fountainAsia2x2"), "fountain_run_asia_lp");
+        assert_eq!(fountain_sound("FountainLarge"), "fountain_run_franceb_lp");
         let reach = JetReach { center: Vec2::new(0.0, 4.3), half: Vec2::new(0.16, 4.5) };
         assert!((JetShape::Spray.reach(&reach) - 8.8).abs() < 1e-4);
     }

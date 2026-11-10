@@ -3235,6 +3235,14 @@ fn main() {
         }
         return;
     }
+    if args[1] == "bankhas" {
+        // bankhas <name> [names...]: which of the sounds the baked bank (sounds.bin) can play.
+        let bank: s3bake::SoundBank = s3bake::read_value(&s3bake::default_root().global_dir().join("sounds.bin")).expect("sounds.bin");
+        for n in &args[2..] {
+            println!("{n} {}", if bank.get(n).is_some() { "yes" } else { "MISSING" });
+        }
+        return;
+    }
     if args[1] == "sounds" {
         // sounds <root> [name filter]: sound property records with their samples.
         use s3formats::audio;

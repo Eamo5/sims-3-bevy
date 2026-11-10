@@ -1294,7 +1294,12 @@ installation is unreachable.
   in the circle their model marks out: a geyser straight up, a dome in sixteen arcs all round, a
   dual dome with a taller tier inside, a spray in one arc ahead; the circle itself (the game's
   grab area, `SetGrabbableVisibility`) shows only in Buy and Build mode, and the jet stands where
-  its nozzle is, not across its whole circle.
+  its nozzle is, not across its whole circle. Fountains and fountain jets are heard, their own
+  loops louder the nearer the camera (a jet's by its instance name, as the game's
+  `Sound(ObjectInstanceName)`; a fountain's running water by its style: the French, the Asian,
+  the lounge's, the science one's, the Aztec, the future's). The game's stings and interface
+  sounds the scripts name (a pet's pregnancy and litter, the Equestrian Center's finishes, the
+  holidays', the queue's click...) and Create a Sim's voice lines are baked with the rest.
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.
