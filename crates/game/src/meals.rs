@@ -149,6 +149,7 @@ fn cook_prep(
     data: Res<Baked>,
     mut sims: Query<(Entity, &Transform, &mut ActionQueue), Without<CookPrepped>>,
     objects: Query<(Entity, &GameObject, &Transform, &UsedBy), Without<crate::interact::Broken>>,
+    ui: Option<Res<crate::icons::GameUi>>,
 ) {
     for (e, tf, mut queue) in &mut sims {
         let Some(front) = queue.0.front_mut() else { continue };
@@ -173,8 +174,17 @@ fn cook_prep(
         let counter = near(&|o: &GameObject| o.kind == ObjectKind::Table && data.0.catalog_entry(&o.objd).is_some_and(|c| c.script.contains("Counter")));
         let fridge = near(&|o: &GameObject| o.kind == ObjectKind::Fridge);
         let def = |kind: ObjectKind, s: Special| crate::interact::interactions_for(kind).iter().position(|d| d.special == s);
-        if let (Some(c), Some(d)) = (counter, def(ObjectKind::Table, Special::PrepFood)) {
-            queue.0.push_front(Action::new("Prepare Food", ActionKind::Object { target: c, def: d }, true));
+        // (Prepared at a food processor where the recipe allows and there's one free: the
+        // game's `FoodTray_Prepare.BringTrayToFoodProcessor`; else chopped on the counter.)
+        let recipe = front.recipe_choice.zip(ui.as_deref()).and_then(|(i, u)| u.data.recipes.get(i));
+        let processor = recipe.filter(|r| r.food_processor).and(near(&|o: &GameObject| o.kind == ObjectKind::FoodProcessor));
+        match (processor, def(ObjectKind::FoodProcessor, Special::PrepFood)) {
+            (Some(p), Some(d)) => queue.0.push_front(Action::new("Prepare Food", ActionKind::Object { target: p, def: d }, true)),
+            _ => {
+                if let (Some(c), Some(d)) = (counter, def(ObjectKind::Table, Special::PrepFood)) {
+                    queue.0.push_front(Action::new("Prepare Food", ActionKind::Object { target: c, def: d }, true));
+                }
+            }
         }
         if let (Some(f), Some(d)) = (fridge, def(ObjectKind::Fridge, Special::GetIngredients)) {
             queue.0.push_front(Action::new("Get Ingredients", ActionKind::Object { target: f, def: d }, true));
@@ -1518,6 +1528,17 @@ fn release_plates(mut commands: Commands, sims: Query<(Entity, &ActionQueue, &Ea
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_food_processor_prepares_the_ingredients() {
+        let k = ObjectKind::from_script("Sims3.Gameplay.Objects.Appliances.FoodProcessor", "Ingredient Eviscerator 235X");
+        assert_eq!(k, ObjectKind::FoodProcessor);
+        let d = crate::interact::interactions_for(k);
+        assert!(d.iter().any(|d| d.special == Special::PrepFood && !d.autonomous), "its part in cooking, never on the menu");
+        let counter = crate::interact::interactions_for(ObjectKind::Table).iter().find(|d| d.special == Special::PrepFood).map(|d| d.minutes);
+        assert!(d[0].minutes < counter.unwrap_or(0.0), "quicker than chopping");
+        assert!(crate::interact::interaction_clip("Prepare Food", k).is_some());
+    }
 
     #[test]
     fn leftovers_go_off_by_the_fridge_and_are_cleaned_out() {

@@ -76,6 +76,9 @@ pub enum ObjectKind {
     Fridge,
     Stove,
     Microwave,
+    /// A food processor on the counter (the game's `FoodProcessor`): a meal's ingredients
+    /// prepared in it, where the recipe allows.
+    FoodProcessor,
     BedDouble,
     BedSingle,
     Toilet,
@@ -440,6 +443,8 @@ impl ObjectKind {
             Self::FoodReplicator
         } else if has("appliances.futurefoodsynthesizer") {
             Self::FoodSynthesizer
+        } else if has("appliances.foodprocessor") {
+            Self::FoodProcessor
         } else if has("environment.vendingmachinecandy") {
             Self::VendingCandy
         } else if has("environment.vendingmachinehealthy") {
@@ -567,7 +572,7 @@ impl ObjectKind {
 
     pub fn category(&self) -> &'static str {
         match self {
-            Self::Fridge | Self::Stove | Self::Microwave | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
+            Self::Fridge | Self::Stove | Self::Microwave | Self::FoodProcessor | Self::Grill | Self::HotBeverage | Self::FoodSynthesizer => "Appliances",
             Self::VendingSoda | Self::VendingCandy | Self::VendingBoth => "Misc",
             Self::AlarmClock => "Electronics",
             Self::TrashCan | Self::OutdoorTrashCan | Self::TrashCompactor | Self::WasteChute | Self::Candle | Self::ClothingPile => "Misc",
@@ -1550,6 +1555,9 @@ static CAKE: [InteractionDef; 1] =
     [InteractionDef { autonomous: false, special: Special::BlowOutCandles, ..def("Grow Up", 3.0, [0.0, 0.0, 0.0, 10.0, 0.0, 20.0], Pose::Use) }];
 // (Cooking and grabbing a plate don't feed by themselves: the hunger figures are what they lead
 // to, for autonomy to weigh. The meal is eaten afterwards.)
+/// A food processor's part in cooking (the game's `FoodProcessor.Prepare`, never on the menu):
+/// the ingredients tipped in and whizzed, quicker than chopping them on the counter.
+static FOOD_PROCESSOR: [InteractionDef; 1] = [InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 8.0, [0.0, 0.0, 0.0, 0.0, -1.0, 4.0], Pose::Use) }];
 static STOVE: [InteractionDef; 2] = [
     InteractionDef { skill: Some("Cooking"), special: Special::ServeMeal, ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use) },
     InteractionDef { special: Special::NeuroticCheck, ..def("Check Stove", 5.3, N, Pose::Use) },
@@ -2404,6 +2412,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Read a Book" => A::new(None, &["a2o_bookshelf_getBook_Carry_x"]),
         "Get Ingredients" => A::steps("a2o_fridge_openDoor_x", &["a2o_fridge_takeFoodOut_foodTray_x", "a2o_fridge_closeDoor_x"], &["a2o_foodTray_carry_x"]),
         "Set Down Meal" => A::new(None, &["a2o_carryObject_putDown_counter_x"]),
+        // (At a food processor: the lid off, the tray tipped in, the lid on and the switch, a wait
+        // while it whizzes, the mix poured into a bowl: the game's `FoodProcessor` state machine.)
+        "Prepare Food" if kind == ObjectKind::FoodProcessor => A::steps("a2o_foodProcessor_open_foodTray_x", &["a2o_foodProcessor_load_foodTray_x", "a2o_foodProcessor_start_foodTray_x"], &["a2o_foodProcessor_wait_loopBreathe_x"]).ending(&["a2o_foodProcessor_stop_bowl_x"], 0.8),
         "Prepare Food" => A::new(Some("a2o_cuttingBoard_start_fromCarry_x"), &["a2o_cuttingBoard_chop_loopMedSkill_x", "a2o_cuttingBoard_chop_loopLowSkill_x"]).ending(&["a2o_cuttingBoard_chop_stop_x"], 0.7),
         "Read Book" if matches!(kind, ObjectKind::Sofa | ObjectKind::Chair | ObjectKind::Stool) => {
             A::new(Some("a2o_book_readBook_sitting_fromCarry_start_x"), &["a2o_book_readBook_sitting_loopRead_x", "a2o_book_readBook_sitting_loopTurnPage_x"])
@@ -2915,6 +2926,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Bar => &BAR,
         ObjectKind::FoodReplicator => &FOOD_REPLICATOR,
         ObjectKind::FoodSynthesizer => &FOOD_SYNTHESIZER,
+        ObjectKind::FoodProcessor => &FOOD_PROCESSOR,
         ObjectKind::VendingSoda => &VENDING_SODA,
         ObjectKind::VendingCandy => &VENDING_CANDY,
         ObjectKind::VendingBoth => &VENDING_BOTH,

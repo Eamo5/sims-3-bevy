@@ -1291,7 +1291,12 @@ installation is unreachable.
 - **Cooking dinner**: the cook first fetches the ingredients from the fridge (its door swinging
   open and shut), carries the tray to the nearest counter and chops them there, then takes the
   frying pan to the stove, each with the game's animations and props; the meal cooked, the
-  platter is carried to the nearest counter or table and set down, and dinner is served.
+  platter is carried to the nearest counter or table and set down, and dinner is served. Where
+  the recipe allows (the game's `Allows_Food_Processor`: spaghetti, mac and cheese, pancakes,
+  cobbler, chili...) and there's a food processor on the counter, the tray's taken to it instead
+  and its ingredients whizzed up (`FoodTray_Prepare.BringTrayToFoodProcessor`: the lid off, the
+  tray tipped in, a wait while it runs, the mix poured out, the processor's own half of each
+  clip), quicker than chopping.
 - **Television**: *Watch TV* turns the set on, then the Sim sits down on a sofa or chair facing
   it to watch (the game's seated and armchair TV animations; standing when there's no seat), the
   screen flickering with pictures as long as someone watches.

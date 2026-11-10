@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 174;
+pub const GAMEDATA_VERSION: u32 = 175;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1915,6 +1915,9 @@ pub struct RecipeInfo {
     /// Heated in a microwave (the Microwave Meal).
     #[serde(default)]
     pub microwave: bool,
+    /// Its ingredients prepared at a food processor where the lot has one (`Allows_Food_Processor`).
+    #[serde(default)]
+    pub food_processor: bool,
     /// Whether it's made for one ("Have Dinner...") and for a group ("Serve Dinner...").
     #[serde(default)]
     pub for_one: bool,
@@ -4421,6 +4424,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 book_price: 0,
                 snack,
                 microwave: get(&f, "Recipe_Class") == "MicrowaveMeal",
+                food_processor: !get(&f, "Allows_Food_Processor").is_empty(),
                 for_one: !get(&f, "Can_Make_Single").is_empty(),
                 for_group: !get(&f, "Can_Make_Group").is_empty(),
                 key,
