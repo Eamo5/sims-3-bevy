@@ -270,6 +270,9 @@ pub enum ObjectKind {
     HitchingPost,
     /// A pet toy crate (the pack's `PetToyCrate`): cats' and dogs' toys kept in it (`toycrate`).
     PetToyCrate,
+    /// The cats' wall dancer (the pack's `CatToyWallDancer`): played with by a cat, or a Sim and a
+    /// cat (`walldancer`).
+    CatWallToy,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -313,6 +316,8 @@ impl ObjectKind {
             Self::ScratchingPost
         } else if (has("objects.pets.chewtoy") || has("objects.pets.squeakychewtoy")) && !has("jig") {
             Self::ChewToy
+        } else if has("objects.pets.cattoywalldancer") {
+            Self::CatWallToy
         } else if has("objects.pets.cattoy") && !has("jig") && !has("walldancer") {
             Self::CatToy
         } else if has("objects.pets.kittybag") {
@@ -634,7 +639,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::HitchingPost | Self::PetToyCrate | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
+            Self::CatToy | Self::CatWallToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -3085,6 +3090,8 @@ pub enum ActionKind {
     Untie { horse: Entity, at: Vec2 },
     /// A toy lying about picked up and put back in its crate (`toycrate`).
     PutAwayToy { toy: Entity, crate_e: Entity },
+    /// Playing with a cat at the wall dancer, from one side of it (`walldancer`).
+    WallDancerWith { toy: Entity, cat: Entity, slot: u8, child: bool },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -3900,6 +3907,8 @@ pub(crate) fn run_actions(
                         // (At a hitching post's place to tie a horse, or to untie one.)
                         ActionKind::TieHorse { post, part, .. } => objects.get(*post).ok().map(|(_, otf, _, of)| (crate::hitching::tie_spot(otf, *part).0, of.map_or(1, |f| f.0))),
                         ActionKind::Untie { at, .. } => Some((*at, 1)),
+                        // (To one side of the wall dancer, where its slot has them.)
+                        ActionKind::WallDancerWith { toy, slot, child, .. } => objects.get(*toy).ok().map(|(_, otf, _, of)| (crate::walldancer::sim_spot(otf, *slot, *child).0, of.map_or(1, |f| f.0))),
                         // (Beside a toy on the floor, to pick it up.)
                         ActionKind::PutAwayToy { toy, .. } => objects.get(*toy).ok().map(|(_, otf, _, of)| {
                             let at = otf.translation.xz();
@@ -4844,6 +4853,8 @@ pub(crate) fn run_actions(
                                 anim.pose = Pose::Use;
                                 commands.entity(me).insert(crate::anim::ActionClip::new(Some(crate::toycrate::PICK_UP_CLIP), &[]));
                             }
+                            // (At the wall dancer: `walldancer` plays with the cat from here.)
+                            ActionKind::WallDancerWith { .. } => anim.pose = Pose::Use,
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -6429,7 +6440,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

@@ -1102,6 +1102,16 @@ installation is unreachable.
   words with none of its kind left in it. Toys lying about are put back by a Sim ("Put Away Toys"
   on the crate: each picked up off the floor and back in it), a Neat Sim of their own accord.
   What's in a crate is kept in saves. `TOYCRATE_TEST=<pet>` with `TOYCRATE_TIDY=1` (tests).
+  The wall dancer (the pack's `CatToyWallDancer`, a bird or a feather on a spring hung on a
+  wall): a bored cat stands up at it and bats it about (`Play`, `CatWallToyPlay`: the cat's half
+  of the pack's clips, rounds of them at random, the toy bobbing and swinging with its own,
+  `o_wallDancerToy`; Fun 30 an hour); a played cat's "Play" sends it. A Sim plays with a cat at
+  it ("Play With... ›" one of the household's cats that doesn't dislike them, the game's
+  `kMiniumRequiredLtr`): the cat's called over before it, the Sim sits to the nearer side (the
+  left side's clips mirrored, a child's and a teen's their own), and they play it together for
+  half an hour (`catwalltoyplaywith`: its start, rounds, its end), both having fun and company
+  (`RunPlayWith`: Fun 60, Social 40 an hour) and the cat liking them the better for it
+  (`kLtrGain` 20). `WALLDANCER_TEST=<cat>`, with `WALLDANCER_WITH=1` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

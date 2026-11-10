@@ -1789,6 +1789,22 @@ fn world_click(
                     options.push((GO_SHOPPING.to_string(), ActionKind::Visit { lot, activity: task }));
                 }
             }
+            // (The wall dancer: played with a cat of theirs that doesn't dislike them:
+            // `walldancer`.)
+            if obj.kind == ObjectKind::CatWallToy
+                && !actor_sim.age.is_little()
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let ttf = gtf.compute_transform();
+                let cats: Vec<(Entity, String)> = horses_q
+                    .iter()
+                    .filter(|(c, p)| p.kind == "ac" && pets_q.get(*c).ok().is_none_or(|x| x.2.is_none_or(|b| b.liking(actor_sim.id, x.3) >= crate::walldancer::MIN_LIKING)))
+                    .map(|(c, p)| (c, p.name.clone()))
+                    .collect();
+                let here = pickable.get(actor).map_or(ttf.translation.xz(), |a| a.1.translation().xz());
+                let slot = crate::walldancer::nearer_slot(&ttf, here);
+                options.extend(crate::walldancer::options(t, slot, actor_sim.age == crate::sim::Age::Child, &cats, &mut pie.submenus, submenu_kind));
+            }
             // (A pet toy crate: its toys lying about put away: `toycrate`.)
             if obj.kind == ObjectKind::PetToyCrate && !actor_sim.age.is_little() {
                 let loose = crate::toycrate::loose_toys(toy_objects_q.iter(), &baked);

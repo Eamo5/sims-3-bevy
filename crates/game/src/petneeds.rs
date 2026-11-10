@@ -768,7 +768,7 @@ fn act(
                     let face = match (toy, st.side) {
                         (_, Some(s)) => -s,
                         (Toy::KittyBag, _) => (toy_tf.rotation * Vec3::Z).xz(),
-                        (Toy::Hygienator, _) => -(toy_tf.rotation * Vec3::Z).xz(),
+                        (Toy::Hygienator | Toy::WallDancer, _) => -(toy_tf.rotation * Vec3::Z).xz(),
                         _ => toy_tf.translation.xz() - here,
                     };
                     if face.length() > 1e-3 {

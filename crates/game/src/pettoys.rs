@@ -23,6 +23,8 @@ pub enum Toy {
     HorseBall,
     /// Washed in the pet hygienator.
     Hygienator,
+    /// A cat playing with the wall dancer on its own (`walldancer`).
+    WallDancer,
 }
 
 /// What a pet of a kind plays at with a toy of a kind (none: it doesn't).
@@ -33,6 +35,7 @@ pub fn toy_for(kind: &str, obj: ObjectKind) -> Option<Toy> {
         ("ad" | "al", ObjectKind::DogBall) => Some(Toy::DogBall),
         ("ah", ObjectKind::HorseBall) => Some(Toy::HorseBall),
         ("ac" | "ad" | "al", ObjectKind::PetHygienator) => Some(Toy::Hygienator),
+        ("ac", ObjectKind::CatWallToy) => Some(Toy::WallDancer),
         _ => None,
     }
 }
@@ -78,6 +81,8 @@ impl Toy {
                 s("ah2o_horseBall_play2Neutral_x"),
             ),
             Toy::Hygienator => (s(&format!("{k}2o_hygienator_getIn_x")), vec![format!("{k}2o_hygienator_use_x")], s(&format!("{k}2o_hygienator_getOut_x"))),
+            // (The cat's half of the pack's clips: `CatWallToyPlay` plays them alone.)
+            Toy::WallDancer => (s("a2ac_wallDancerToy_start_y"), (1..=4).map(|i| format!("a2ac_wallDancerToy_loop{i}_y")).collect(), s("a2ac_wallDancerToy_stop_y")),
         }
     }
 
@@ -112,6 +117,7 @@ impl Toy {
             Toy::HorseBall => (100.0, 0.0),
             // (Its 200 over the wash, a fifth of an hour.)
             Toy::Hygienator => (1000.0, 0.0),
+            Toy::WallDancer => (30.0, 0.0),
         }
     }
 
@@ -128,6 +134,7 @@ impl Toy {
             (Toy::DogBall, _) => 0.671,
             (Toy::HorseBall, _) => 1.192,
             (Toy::Hygienator, _) => 1.3,
+            (Toy::WallDancer, _) => crate::walldancer::CAT_SLOT.y,
         }
     }
 
@@ -163,6 +170,9 @@ const TOY_ACTORS: [&str; 5] = ["catToy", "kittyBag", "dogBall", "horseBall", "pe
 
 /// The toy's half of a pet's clip (`ad2o_dogBall_pushBall_x` → `ad2o_dogBall_pushBall_dogBall`).
 pub fn half_of(names: &[String], clip: &str) -> Option<String> {
+    if let Some(h) = crate::walldancer::half_of(names, clip) {
+        return Some(h);
+    }
     let stem = clip.strip_suffix("_x")?;
     TOY_ACTORS.iter().find_map(|a| {
         let want = format!("{stem}_{a}");
@@ -192,8 +202,9 @@ pub fn stand_at(toy: Toy, kind: &str, at: Vec2, facing: Quat, from: Vec2, side: 
             let f = (facing * Vec3::Z).xz().normalize_or(Vec2::Y);
             (at - f * toy.stand_off(kind), f)
         }
-        // (Before its door, its routing slot in front of it, facing in.)
-        Toy::Hygienator => {
+        // (Before its door, its routing slot in front of it, facing in; before the wall dancer,
+        // facing the wall.)
+        Toy::Hygienator | Toy::WallDancer => {
             let f = (facing * Vec3::Z).xz().normalize_or(Vec2::Y);
             (at + f * toy.stand_off(kind), -f)
         }

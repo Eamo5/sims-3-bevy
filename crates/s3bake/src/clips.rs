@@ -265,6 +265,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "ad2o_petToyCrate_",
     "al2o_petToyCrate_",
     "a_genericSwipe_pickUp_floor_x",
+    // (A cat at the wall dancer, alone or with a Sim; the toy's own.)
+    "a2ac_wallDancerToy_",
+    "t2ac_wallDancerToy_",
+    "c2ac_wallDancerToy_",
+    "o_wallDancerToy_",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",
