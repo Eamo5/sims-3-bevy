@@ -1093,6 +1093,15 @@ installation is unreachable.
   (`BreakRope`, `ah_hitchingPost_breakRope`). Both places taken, the post's "Tie Up" is greyed
   with the game's words. Troughs' water (a hitching post's, a water trough's) is drawn as water.
   `HITCH_TEST=<horse>` with `HITCH_NEEDS=hungry|break`, `HITCH_RIDE=1` or `HITCH_CALL=1` (tests).
+  The pet toy crate (the pack's `PetToyCrate`) comes with three of the cats' toys and three of
+  the dogs' (the game's `kMedatorCatToyNames` and `kMedatorDogToyNames`: a catnip mouse, a paper,
+  yarn, foil or plastic ball; a newspaper, a bone, a hot dog), and looks as full as it is (its
+  `empty`, `partiallyFull` and `full` geometry states, full from six). A bored cat or dog goes to
+  it and takes a toy of its kind out (`GetToy`, `ac2o_petToyCrate_pickUpToy`...), a cat batting
+  it about there, a dog chewing it; a played pet's "Get Toy" sends it, greyed with the game's
+  words with none of its kind left in it. Toys lying about are put back by a Sim ("Put Away Toys"
+  on the crate: each picked up off the floor and back in it), a Neat Sim of their own accord.
+  What's in a crate is kept in saves. `TOYCRATE_TEST=<pet>` with `TOYCRATE_TIDY=1` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

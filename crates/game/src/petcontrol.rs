@@ -39,6 +39,8 @@ pub enum PetCommand {
     Name(Entity),
     /// Off hunting (`pethunting`): a cat's "Locate Prey...", a dog's "Sniff Out Collectable".
     Hunt,
+    /// A toy taken out of a crate and played with (`toycrate`).
+    GetToy(Entity),
 }
 
 /// An order for a pet, to be seen to.
@@ -46,7 +48,7 @@ pub enum PetCommand {
 pub struct PetOrder(pub PetCommand);
 
 /// What a selected pet can be told to do at an object, by its kind and the pet's.
-pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&BowlFood>) -> Vec<(String, ActionKind)> {
+pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&BowlFood>, toys: Option<&crate::toycrate::ToyCrate>) -> Vec<(String, ActionKind)> {
     let species = pet.kind.chars().nth(1).unwrap_or('d');
     let horse = species == 'h';
     let order = |label: &str, what: PetDo| (label.to_string(), ActionKind::PetCommand(PetCommand::Do(what)));
@@ -72,6 +74,13 @@ pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&B
     }
     if let Some(toy) = crate::pettoys::toy_for(&pet.kind, o.kind) {
         out.push(order("Play", PetDo::Play(target, toy)));
+    }
+    // (A toy crate: a toy of its kind's taken out, greyed with none.)
+    if o.kind == ObjectKind::PetToyCrate
+        && let Some(cat) = crate::toycrate::takes_toys(&pet.kind)
+    {
+        let has = toys.is_some_and(|t| t.0.iter().any(|x| crate::toycrate::toy_kind(x) == Some(cat)));
+        out.push((crate::toycrate::GET_TOY.to_string(), if has { ActionKind::PetCommand(PetCommand::GetToy(target)) } else { ActionKind::Greyed(crate::toycrate::NO_TOYS.into()) }));
     }
     out
 }
@@ -140,6 +149,14 @@ fn obey(
             PetCommand::Mate(_) | PetCommand::Name(_) => continue,
             PetCommand::Hunt => {
                 commands.entity(e).insert(crate::pethunting::GoHunt);
+                continue;
+            }
+            PetCommand::GetToy(c) => {
+                if let Ok((_, ctf)) = objects.get(c)
+                    && !crate::toycrate::send(&mut commands, e, pet, here, c, ctf, &grid, building.as_deref(), &mut rng)
+                {
+                    notes.push(format!("{} can't get there.", pet.name));
+                }
                 continue;
             }
             PetCommand::Do(what) => {
@@ -229,14 +246,18 @@ mod tests {
     fn a_pet_is_offered_what_its_kind_does_there() {
         let t = Entity::from_raw_u32(7).unwrap();
         let bowl = object(ObjectKind::PetBowl);
-        let full = object_options(&pet("ad"), t, &bowl, Some(&BowlFood(3)));
+        let full = object_options(&pet("ad"), t, &bowl, Some(&BowlFood(3)), None);
         assert!(matches!(full.first().map(|o| &o.1), Some(ActionKind::PetCommand(PetCommand::Do(PetDo::Eat(b)))) if *b == t));
-        assert!(matches!(object_options(&pet("ad"), t, &bowl, Some(&BowlFood(0)))[0].1, ActionKind::Greyed(_)), "an empty bowl's greyed");
-        assert!(object_options(&pet("ah"), t, &bowl, None).is_empty(), "no bowls for horses");
-        assert_eq!(labels(&object_options(&pet("ah"), t, &object(ObjectKind::BoxStall), None)), ["Eat Hay", "Sleep"]);
-        assert_eq!(labels(&object_options(&pet("ac"), t, &object(ObjectKind::ScratchingPost), None)), ["Scratch"]);
-        assert!(object_options(&pet("ad"), t, &object(ObjectKind::ScratchingPost), None).is_empty(), "posts are cats'");
-        assert_eq!(labels(&object_options(&pet("al"), t, &object(ObjectKind::DogBall), None)), ["Play"]);
+        assert!(matches!(object_options(&pet("ad"), t, &bowl, Some(&BowlFood(0)), None)[0].1, ActionKind::Greyed(_)), "an empty bowl's greyed");
+        assert!(object_options(&pet("ah"), t, &bowl, None, None).is_empty(), "no bowls for horses");
+        assert_eq!(labels(&object_options(&pet("ah"), t, &object(ObjectKind::BoxStall), None, None)), ["Eat Hay", "Sleep"]);
+        assert_eq!(labels(&object_options(&pet("ac"), t, &object(ObjectKind::ScratchingPost), None, None)), ["Scratch"]);
+        assert!(object_options(&pet("ad"), t, &object(ObjectKind::ScratchingPost), None, None).is_empty(), "posts are cats'");
+        assert_eq!(labels(&object_options(&pet("al"), t, &object(ObjectKind::DogBall), None, None)), ["Play"]);
+        let crate_ = object(ObjectKind::PetToyCrate);
+        let dogs_only = crate::toycrate::ToyCrate(vec!["chewToyBone".into()]);
+        assert!(matches!(object_options(&pet("ad"), t, &crate_, None, Some(&dogs_only))[0].1, ActionKind::PetCommand(PetCommand::GetToy(c)) if c == t));
+        assert!(matches!(object_options(&pet("ac"), t, &crate_, None, Some(&dogs_only))[0].1, ActionKind::Greyed(_)), "no cats' toys in it");
         assert_eq!(labels(&ground_options(&pet("ac"), Vec2::ZERO)), ["Go Here", "Locate Prey..."]);
         assert_eq!(labels(&ground_options(&pet("al"), Vec2::ZERO)), ["Go Here", "Sniff Out Collectable"]);
         assert_eq!(labels(&ground_options(&pet("ah"), Vec2::ZERO)), ["Go Here"]);

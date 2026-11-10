@@ -260,6 +260,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // (A horse breaking free of a hitching post; a Sim calling one over, untying it.)
     "ah_hitchingPost_",
     "a2o_object_genericSwipe_x",
+    // (A cat or dog taking a toy out of its crate; a Sim picking one up off the floor.)
+    "ac2o_petToyCrate_",
+    "ad2o_petToyCrate_",
+    "al2o_petToyCrate_",
+    "a_genericSwipe_pickUp_floor_x",
     "ah2t_riding_throwRider_",
     "a_ridingSkill_",
     "a_rideHorse_walk_unsteady_y",

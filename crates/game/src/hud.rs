@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q)): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,6 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1360,7 +1361,7 @@ fn world_click(
             let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
             let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)).filter(|t| is_target(*t));
             let (title, options) = match target {
-                Some(t) if objects.contains(t) => objects.get(t).map(|o| (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok()))).unwrap_or_default(),
+                Some(t) if objects.contains(t) => objects.get(t).map(|o| (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok(), toycrates_q.get(t).ok()))).unwrap_or_default(),
                 Some(t) if sims.contains(t) => {
                     let (sim, member, _) = sims.get(t).unwrap();
                     let liking = bonds.map_or(if member { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(sim.id, member));
@@ -1787,6 +1788,11 @@ fn world_click(
                 }) {
                     options.push((GO_SHOPPING.to_string(), ActionKind::Visit { lot, activity: task }));
                 }
+            }
+            // (A pet toy crate: its toys lying about put away: `toycrate`.)
+            if obj.kind == ObjectKind::PetToyCrate && !actor_sim.age.is_little() {
+                let loose = crate::toycrate::loose_toys(toy_objects_q.iter(), &baked);
+                options.extend(crate::toycrate::crate_options(t, &loose));
             }
             // (A hitching post: "Tie Up" up on a horse; on foot, a horse about tied to it, or one
             // tied there untied: `hitching`.)
