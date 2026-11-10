@@ -2092,21 +2092,26 @@ fn near_debug(
 fn route_debug(
     mut done: Local<bool>,
     visited: Option<Res<crate::visit::VisitedLot>>,
-    objects: Query<(&crate::interact::GameObject, &Transform), With<crate::visit::LotObject>>,
+    objects: Query<(&crate::interact::GameObject, &Transform, Has<crate::visit::LotObject>)>,
+    (home, sel, time): (Option<Res<crate::nav::NavGrid>>, Query<&Transform, With<crate::sim::Selected>>, Res<Time>),
 ) {
     let Ok(kind) = std::env::var("ROUTE_DEBUG") else { return };
-    let Some(v) = visited else { return };
-    if *done || v.grid.dirty {
+    // (On a community lot from its way in; at home, from the selected Sim.)
+    let (g, from, town) = match (&visited, &home, sel.single()) {
+        (Some(v), _, _) => (&v.grid, v.exit, true),
+        (None, Some(h), Ok(s)) if time.elapsed_secs() > 12.0 => (h.as_ref(), s.translation.xz(), false),
+        _ => return,
+    };
+    if *done || g.dirty {
         return;
     }
     *done = true;
-    for (o, tf) in objects.iter().filter(|(o, _)| format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)) {
+    for (o, tf, _) in objects.iter().filter(|(o, _, lot)| *lot == town && format!("{:?}", o.kind).eq_ignore_ascii_case(&kind)) {
         let p = o.use_point(tf);
-        let cell = v.grid.cell_of(p);
-        let free = cell.is_some_and(|(x, z)| !v.grid.is_blocked(x, z));
-        let path = v.grid.find_path(v.exit, p).map(|w| w.len());
+        let cell = g.cell_of(p);
+        let free = cell.is_some_and(|(x, z)| !g.is_blocked(x, z));
+        let path = g.find_path(from, p).map(|w| w.len());
         // (How much free ground is joined to the use point, and how far it goes.)
-        let g = &v.grid;
         let mut seen = std::collections::HashSet::new();
         let mut open: Vec<(usize, usize)> = cell.into_iter().collect();
         let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
@@ -3844,7 +3849,8 @@ fn auto_place(
         // (PLACE_NAME=<part of its name>: that one of them.)
         let named = |e: &&crate::loading::CatalogEntry| std::env::var("PLACE_NAME").map_or(true, |n| e.name.to_ascii_lowercase().contains(&n.to_ascii_lowercase()));
         let Some(e) = catalog.entries.iter().filter(|e| e.price > 0 && format!("{:?}", e.kind).to_ascii_lowercase() == want).filter(named).min_by_key(|e| e.price) else {
-            warn!("--place {want}: nothing in the catalog");
+            let like: Vec<String> = catalog.entries.iter().filter(|e| e.name.to_ascii_lowercase().contains(want)).take(6).map(|e| format!("{} {:?} {}", e.name, e.kind, e.price)).collect();
+            warn!("--place {want}: nothing in the catalog (named so: {like:?})");
             continue;
         };
         // (PLACE_AHEAD=<metres>: further off than the 2 m before them, clear of the hedges.)
@@ -3908,8 +3914,9 @@ fn auto_action(
     }
     // (Once everyone has settled in.)
     let t0 = *since.get_or_insert(time.elapsed_secs());
-    // (And, a save loaded, once its Sims are back: they'd come with their own queues.)
-    if (matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") || name.starts_with("Visit") || args.load.is_some()) && time.elapsed_secs() - t0 < 4.0 {
+    // (And, a save loaded, once its Sims are back: they'd come with their own queues. Something
+    // placed for the test, once it's there.)
+    if (matches!(name.as_str(), "Meal" | "Die" | "Starve" | "Shock" | "Electrocute") || name.starts_with("Visit") || args.load.is_some() || args.place.is_some()) && time.elapsed_secs() - t0 < 4.0 {
         return;
     }
     // "Care:<social>": the selected Sim looks after the household's baby (or toddler with
@@ -4668,7 +4675,14 @@ fn auto_action(
     // ("Paint: Large Canvas": on that canvas.)
     let canvas = name.strip_prefix("Paint: ").and_then(|c| crate::paintings::CANVASES.iter().position(|x| x.eq_ignore_ascii_case(c)));
     let def_name = if canvas.is_some() { "Paint" } else { name.as_str() };
-    for (e, o) in &objects {
+    // (The nearest that offers it: one placed for the test before the lot's own.)
+    let here = sel_tf.single().map_or(Vec3::ZERO, |t| t.translation);
+    let mut offering: Vec<(Entity, &crate::interact::GameObject)> = objects.iter().collect();
+    offering.sort_by(|a, b| {
+        let d = |e: Entity| tfs.get(e).map_or(f32::MAX, |t| t.translation().distance(here));
+        d(a.0).total_cmp(&d(b.0))
+    });
+    for (e, o) in offering {
         if let Some(i) = crate::interact::interactions_for(o.kind).iter().position(|d| d.name.eq_ignore_ascii_case(def_name)) {
             q.0.clear();
             let mut action = crate::interact::Action::new(name.clone(), crate::interact::ActionKind::Object { target: e, def: i }, false);

@@ -51,7 +51,14 @@ pub struct BakedData {
 impl BakedData {
     pub fn open(root: BakeRoot, world: Option<&str>) -> Result<Self, String> {
         let g = root.global_dir();
-        let catalog: Vec<CatalogEntry> = s3bake::read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog: {e}"))?;
+        let mut catalog: Vec<CatalogEntry> = s3bake::read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog: {e}"))?;
+        // (Build mode's fireplaces priced: the Buy catalogue has them unsold.)
+        let build_prices: HashMap<Key, i32> = s3bake::read_value::<Vec<(Key, i32)>>(&g.join("build_prices.bin")).unwrap_or_default().into_iter().collect();
+        for c in catalog.iter_mut() {
+            if let Some(&p) = build_prices.get(&c.objd) {
+                c.price = p;
+            }
+        }
         let catalog_index: HashMap<Key, usize> = catalog.iter().enumerate().map(|(i, c)| (c.objd, i)).collect();
         let models = PackReader::open(&g.join("models.pack")).map_err(|e| format!("models: {e}"))?;
         let world_models = world.and_then(|w| PackReader::open(&root.world_dir(w).join("models.pack")).ok());

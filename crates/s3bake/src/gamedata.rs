@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 176;
+pub const GAMEDATA_VERSION: u32 = 177;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -2382,6 +2382,29 @@ pub struct ObjectDesigns {
     pub size: (u16, u16),
 }
 
+/// Whether an object's sold in Build mode though not flagged for the Buy catalogue: the
+/// fireplaces (the Construction catalogue's), not the chimney pieces built over them.
+pub fn sold_in_build_mode(script: &str) -> bool {
+    script.contains(".Fireplaces.") && !script.contains("Chimney")
+}
+
+/// The prices of the objects Build mode sells that the Buy catalogue doesn't (`build_prices.bin`,
+/// by OBJD key): the catalogue has them unsold (-1).
+fn bake_build_prices(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
+    let g = root.global_dir();
+    let catalog: Vec<crate::types::CatalogEntry> = read_value(&g.join("catalog.bin")).map_err(|e| format!("catalog.bin: {e}"))?;
+    let prices: Vec<(crate::types::Key, i32)> = catalog
+        .iter()
+        .filter(|c| c.price < 0 && sold_in_build_mode(&c.script))
+        .filter_map(|c| {
+            let o = s3formats::object::parse_objd(&pkgs.read(&crate::types::rkey(c.objd))?).ok()?;
+            (o.price > 0.0).then_some((c.objd, o.price as i32))
+        })
+        .collect();
+    write_value(&g.join("build_prices.bin"), &prices).map_err(|e| e.to_string())?;
+    Ok(prices.len())
+}
+
 /// Every buyable object's designs, each drawn from its complate into the texture store (objects
 /// whose meshes share one composited texture: the designs are recipes for it).
 fn bake_object_designs(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, String> {
@@ -4472,6 +4495,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     progress("Converting: object designs…");
     let designs = bake_object_designs(root, pkgs)?;
     progress(&format!("Converting: designs for {designs} objects…"));
+    let fireplaces = bake_build_prices(root, pkgs)?;
+    progress(&format!("Converting: Build mode prices for {fireplaces} fireplaces…"));
     let paintings = bake_paintings(root, pkgs, xml("PaintingSkillDB"))?;
     progress(&format!("Converting: {paintings} paintings…"));
     let skins = bake_object_skins(root, pkgs)?;

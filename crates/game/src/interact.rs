@@ -505,7 +505,8 @@ impl ObjectKind {
             Self::Foosball
         } else if has("pools.poolladder") {
             Self::PoolLadder
-        } else if has("objects.fireplaces.") {
+        // (Not the chimney pieces built up over a fireplace: `Fireplace+Chimney`.)
+        } else if has("objects.fireplaces.") && !has("chimney") {
             Self::Fireplace
         } else if has("miscellaneous.candle") {
             Self::Candle
@@ -8122,6 +8123,8 @@ mod tests {
         assert_eq!(slide_clip(false, 0.99).start, Some("a2o_waterSlide_succeedSlide3_x"));
         assert!(interactions_for(ObjectKind::SlippySlide).iter().any(|d| d.name == "Slide"));
         assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Environment.SlippySlideGeneric", "SlippySlideFrog"), ObjectKind::SlippySlide);
+        assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Fireplaces.Mimics.FireplaceHearthValue", "fireplaceHearthValue"), ObjectKind::Fireplace);
+        assert_ne!(ObjectKind::from_script("Sims3.Gameplay.Objects.Fireplaces.Fireplace+Chimney", "Chimney1x1cap"), ObjectKind::Fireplace, "a chimney's no hearth");
         assert_eq!(ObjectKind::from_script("Sims3.Gameplay.Objects.Toys.Mimics.ToyboxContemporary", "Roy Rock’s Toy Box"), ObjectKind::ToyBox);
     }
 

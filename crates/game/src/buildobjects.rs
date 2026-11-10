@@ -70,11 +70,12 @@ fn scripted(
             info!("build objects test: {} columns", objects.count);
             shot(&mut commands, "bo1_columns");
         }
+        // (BUILD_OBJECTS=fireplaces: the fireplaces in place of the arches.)
         3 if t > 15.0 => {
-            objects.choose(ObjTab::Arches);
+            objects.choose(if std::env::var("BUILD_OBJECTS").as_deref() == Ok("fireplaces") { ObjTab::Fireplaces } else { ObjTab::Arches });
         }
         4 if t > 17.0 => {
-            info!("build objects test: {} arches", objects.count);
+            info!("build objects test: {} arches (or fireplaces)", objects.count);
             shot(&mut commands, "bo1b_arches");
         }
         5 if t > 18.0 => {

@@ -1357,7 +1357,10 @@ installation is unreachable.
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown
   out too: a little flame and a soft flickering light for a few hours. Anyone within ten metres
   of a fire is Cozy (the game's `CozyFireBuffNormal`, 10); *Poke Fire* (the game's poker clips,
-  fifteen minutes) sets it raging for twenty, brighter, and Cozy 20.
+  fifteen minutes) sets it raging for twenty, brighter, and Cozy 20. Build mode sells the
+  fireplaces at their prices (the game has them out of the Buy catalogue, so they were missing
+  from the Construction catalogue's Fireplaces tab), and a chimney built up over one is just a
+  chimney: nobody tries to light it.
 - **Homework**: children and teens come home from school (Monday to Friday) with homework,
    and sit down at a table to do it (the game's homework animations and base completion rate;
    faster for Bookworms, Workaholics and Multi-Taskers, slower for Perfectionists); done, it
