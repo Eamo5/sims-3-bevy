@@ -1300,6 +1300,10 @@ installation is unreachable.
   the lounge's, the science one's, the Aztec, the future's). The game's stings and interface
   sounds the scripts name (a pet's pregnancy and litter, the Equestrian Center's finishes, the
   holidays', the queue's click...) and Create a Sim's voice lines are baked with the rest.
+  Machines are heard as their scripts start them: a washing machine or dryer running (its
+  `washer_running_loop`/`dryer_running_loop`, cheap or expensive) and its buzzer when the load's
+  done, a computer in use (`comp_run_cheap_lp`, `comp_run_exp_lp`, a laptop's
+  `comp_ltop_run_lp`), a fire in the hearth (`fireplace_fire_small_lp`, a raging one's large).
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 14;
+pub const SOUNDS_VERSION: u32 = 15;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -216,6 +216,20 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "music_mode_cas",
     "music_mode_map",
     "music_mode_edit_town",
+    // Machines running, fires burning (their scripts' `ObjectSound`s).
+    "washer_running_loop_chp",
+    "washer_running_loop_exp",
+    "washer_buzzer_chp",
+    "washer_buzzer_exp",
+    "dryer_running_loop_chp",
+    "dryer_running_loop_exp",
+    "dryer_buzzer_chp",
+    "dryer_buzzer_exp",
+    "comp_run_cheap_lp",
+    "comp_run_exp_lp",
+    "comp_ltop_run_lp",
+    "fireplace_fire_small_lp",
+    "fireplace_fire_large_lp",
     // Named by the game's scripts for what's done here (stings, the interface's sounds, the
     // equestrian competitions', Create a Sim's voice lines, fountains' and fountain jets' water).
     "fountain_run_asia_lp",

@@ -43,6 +43,7 @@ impl Plugin for SoundPlugin {
                 Update,
                 (
                     clip_cues,
+                    machine_sounds,
                     ambient_loops,
                     play_sounds,
                     loop_volumes,
@@ -178,7 +179,7 @@ fn ambient_loops(
     mut commands: Commands,
     sounds: Res<Sounds>,
     (mut cache, mut sources): (ResMut<SampleCache>, ResMut<Assets<AudioSource>>),
-    added: Query<(Entity, &AmbientSound, &GlobalTransform), Added<AmbientSound>>,
+    added: Query<(Entity, &AmbientSound, &GlobalTransform), Changed<AmbientSound>>,
     mut removed: RemovedComponents<AmbientSound>,
     loops: Query<(Entity, &CueLoop)>,
     cams: Query<&SimsCamera>,
@@ -192,6 +193,12 @@ fn ambient_loops(
     }
     let cam = cams.single().ok();
     for (owner, a, tf) in &added {
+        // (Another sound now: the last one stopped.)
+        for (e, l) in &loops {
+            if l.owner == owner {
+                commands.entity(e).try_despawn();
+            }
+        }
         let Some(name) = first_sound(&sounds, &[a.0.as_str()]) else {
             if *LOG {
                 info!("ambient loop: no sound {}", a.0);
@@ -206,6 +213,68 @@ fn ambient_loops(
             info!("ambient loop: {name} ({id:016X})");
         }
         commands.spawn((AudioPlayer::new(h), PlaybackSettings::LOOP.with_volume(Volume::Linear(v)), CueLoop { owner, name, def }, DespawnOnExit(AppState::InGame)));
+    }
+}
+
+/// What a machine's heard doing, as the game's scripts start it: a washing machine or dryer
+/// running (`washer_running_loop_chp`, `dryer_running_loop_exp`... by how good it is), a
+/// computer in use (`comp_run_cheap_lp`, a laptop's `comp_ltop_run_lp`), a fire in the hearth
+/// (`fireplace_fire_small_lp`, a raging one's `fireplace_fire_large_lp`).
+pub fn machine_sound(kind: crate::interact::ObjectKind, script: &str, running: bool, lit: bool, raging: bool) -> Option<String> {
+    use crate::interact::ObjectKind as K;
+    let s = script.to_ascii_lowercase();
+    let grade = if s.contains("expensive") { "exp" } else { "chp" };
+    match kind {
+        K::Washer if running => Some(format!("washer_running_loop_{grade}")),
+        K::Dryer if running => Some(format!("dryer_running_loop_{grade}")),
+        K::Computer if running && s.contains("laptop") => Some("comp_ltop_run_lp".into()),
+        K::Computer if running => Some(if s.contains("expensive") { "comp_run_exp_lp" } else { "comp_run_cheap_lp" }.into()),
+        K::Fireplace if raging => Some("fireplace_fire_large_lp".into()),
+        K::Fireplace if lit => Some("fireplace_fire_small_lp".into()),
+        _ => None,
+    }
+}
+
+/// Machines heard while they run (a load done, its buzzer).
+#[allow(clippy::type_complexity)]
+fn machine_sounds(
+    mut commands: Commands,
+    data: Option<Res<crate::baked::Baked>>,
+    objects: Query<(Entity, &crate::interact::GameObject, &GlobalTransform, Option<&crate::laundry::Load>, Option<&crate::interact::UsedBy>, (Has<crate::fireplace::Lit>, Has<crate::fireplace::Raging>), Option<&AmbientSound>)>,
+    mut play: MessageWriter<PlaySound>,
+    mut was: Local<HashMap<Entity, bool>>,
+) {
+    use crate::interact::ObjectKind as K;
+    let Some(data) = data else { return };
+    for (e, o, tf, load, used, (lit, raging), now) in &objects {
+        if !matches!(o.kind, K::Washer | K::Dryer | K::Computer | K::Fireplace) {
+            continue;
+        }
+        let script = data.0.catalog_entry(&o.objd).map_or("", |c| c.script.as_str());
+        let running = match o.kind {
+            K::Washer | K::Dryer => matches!(load, Some(crate::laundry::Load::Running(_))),
+            _ => used.is_some_and(|u| u.0.is_some()),
+        };
+        // (A load done: the machine's buzzer.)
+        if matches!(o.kind, K::Washer | K::Dryer) {
+            let before = was.insert(e, running).unwrap_or(false);
+            if before && !running {
+                let which = if o.kind == K::Washer { "washer" } else { "dryer" };
+                let grade = if script.to_ascii_lowercase().contains("expensive") { "exp" } else { "chp" };
+                play.write(PlaySound { name: format!("{which}_buzzer_{grade}"), at: Some(tf.translation()), volume: SFX_VOLUME, speed: 1.0 });
+            }
+        }
+        let want = machine_sound(o.kind, script, running, lit, raging);
+        if want.as_deref() != now.map(|a| a.0.as_str()) {
+            match want {
+                Some(n) => {
+                    commands.entity(e).insert(AmbientSound(n));
+                }
+                None => {
+                    commands.entity(e).remove::<AmbientSound>();
+                }
+            }
+        }
     }
 }
 
@@ -622,4 +691,20 @@ fn ambience(
         amb.next = amb.next.max(sounds.duration(id) * 0.8);
     }
     play.write(PlaySound::ui(name).with_volume(AMBIENCE_VOLUME * zoom));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interact::ObjectKind as K;
+
+    #[test]
+    fn machines_are_heard_as_the_game_starts_them() {
+        assert_eq!(machine_sound(K::Washer, "Sims3.Gameplay.Objects.Appliances.WashingMachineCheap", true, false, false).as_deref(), Some("washer_running_loop_chp"));
+        assert_eq!(machine_sound(K::Dryer, "Sims3.Gameplay.Objects.Appliances.DryerExpensive", true, false, false).as_deref(), Some("dryer_running_loop_exp"));
+        assert_eq!(machine_sound(K::Washer, "WashingMachineCheap", false, false, false), None, "quiet when it's done");
+        assert_eq!(machine_sound(K::Computer, "Sims3.Gameplay.Objects.Electronics.ComputerExpensive", true, false, false).as_deref(), Some("comp_run_exp_lp"));
+        assert_eq!(machine_sound(K::Fireplace, "", false, true, true).as_deref(), Some("fireplace_fire_large_lp"));
+        assert_eq!(machine_sound(K::Fireplace, "", false, true, false).as_deref(), Some("fireplace_fire_small_lp"));
+    }
 }
