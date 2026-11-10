@@ -273,6 +273,8 @@ pub enum ObjectKind {
     /// The cats' wall dancer (the pack's `CatToyWallDancer`): played with by a cat, or a Sim and a
     /// cat (`walldancer`).
     CatWallToy,
+    /// What's left of a plant a horse ate (the pack's `HarvestableShreds`): cleaned up (`petgarden`).
+    PlantShreds,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -316,6 +318,8 @@ impl ObjectKind {
             Self::ScratchingPost
         } else if (has("objects.pets.chewtoy") || has("objects.pets.squeakychewtoy")) && !has("jig") {
             Self::ChewToy
+        } else if has("harvestableshreds") {
+            Self::PlantShreds
         } else if has("objects.pets.cattoywalldancer") {
             Self::CatWallToy
         } else if has("objects.pets.cattoy") && !has("jig") && !has("walldancer") {
@@ -639,7 +643,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::HitchingPost | Self::PetToyCrate | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::CatWallToy | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
+            Self::CatToy | Self::CatWallToy | Self::PlantShreds | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1346,6 +1350,8 @@ pub enum Special {
     EatMeal,
     /// Clear away dirty dishes.
     CleanUp,
+    /// A plant's shreds cleared away, into the trash (`petgarden`).
+    ClearShreds,
     /// Pay the bills waiting in the mailbox.
     PayBills,
     /// Read the paper (then recycle it).
@@ -1971,6 +1977,8 @@ static SLIPPY_SLIDE: [InteractionDef; 1] = [InteractionDef { special: Special::S
 static BOX_STALL: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean Stall", 15.0, [0.0, 0.0, -4.0, 0.0, -15.0, 0.0], Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
+/// (A plant's shreds, cleared into the trash: the game's `DisposeTrash` on its `TrashPile`.)
+static SHREDS: [InteractionDef; 1] = [InteractionDef { special: Special::ClearShreds, ..def("Clean Up", 4.0, [0.0, 0.0, -1.0, 0.0, -2.0, -2.0], Pose::Use) }];
 static FOOSBALL: [InteractionDef; 1] = [def("Play Foosball", 40.0, [0.0, 0.0, -4.0, 10.0, 0.0, 65.0], Pose::Use)];
 static POOL_TABLE: [InteractionDef; 1] = [def("Play Pool", 45.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use)];
 static DARTBOARD: [InteractionDef; 1] = [def("Throw Darts", 30.0, [0.0, 0.0, -3.0, 0.0, 0.0, 55.0], Pose::Use)];
@@ -2295,6 +2303,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Clean" if kind == ObjectKind::Terrarium => A::new(Some("a2o_terrarium_clean_start_x"), &["a2o_terrarium_clean_loop_x"]).ending(&["a2o_terrarium_clean_stop_x"], 1.5),
         "Mourn" if kind == ObjectKind::Terrarium => A::new(Some("a_react_cry_start"), &["a_react_cry_loop", "a_react_cry_loop2"]).ending(&["a_react_cry_stop"], 1.5),
         "Clean" if kind == ObjectKind::Sink => A::new(Some("a2o_sink_clean_start_x"), &["a2o_sink_clean_loop1_x", "a2o_sink_clean_loop2_x"]).ending(&["a2o_sink_clean_stop_x"], 1.5),
+        "Clean Up" if kind == ObjectKind::PlantShreds => A::new(None, &["a_genericSwipe_pickUp_floor_x"]),
         "Mop Up" => A::new(Some("a2o_puddle_mopUp_start_x"), &["a2o_puddle_mopUp_loop_1_x", "a2o_puddle_mopUp_loop_2_x"]).ending(&["a2o_puddle_mopUp_stop_x"], 1.2),
         "Make Bed" => A::steps("a2o_bed_make_start_x", &["a2o_bed_make_smooth_x", "a2o_bed_make_pat_x"], &["a2o_bed_make_smooth_x"]).ending(&["a2o_bed_make_stop_x"], 1.0),
         "Nap" if kind == ObjectKind::Sofa => A::new(Some("a2o_sofa_sit_trans_nap_x"), &["a2o_sofa_nap_loop1_x"]),
@@ -2914,6 +2923,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::JungleGym => &JUNGLEGYM,
         ObjectKind::Slide => &SLIDE,
         ObjectKind::Puddle => &PUDDLE,
+        ObjectKind::PlantShreds => &SHREDS,
         ObjectKind::Foosball => &FOOSBALL,
         ObjectKind::PoolTable => &POOL_TABLE,
         ObjectKind::Dartboard => &DARTBOARD,
@@ -5519,6 +5529,10 @@ pub(crate) fn run_actions(
                                         }
                                         Special::ServeDrinks => {
                                             commands.entity(me).insert(crate::hotdrinks::ServedAt(*target));
+                                        }
+                                        Special::ClearShreds => {
+                                            commands.entity(*target).try_despawn();
+                                            commands.entity(me).insert(crate::surroundings::Discarded);
                                         }
                                         Special::CleanUp => {
                                             commands.entity(*target).try_despawn();

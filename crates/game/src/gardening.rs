@@ -37,7 +37,8 @@ pub struct GardeningPlugin;
 impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Garden>()
-            .add_systems(Update, (starter_packet, restore_plants, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks).chain().run_if(in_state(PlayMode::Live)));
+            .add_message::<PlantNow>()
+            .add_systems(Update, (starter_packet, restore_plants, plant_now, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -493,7 +494,35 @@ fn plant_at(
 
 /// The soil under a plant (cleared away with it).
 #[derive(Component)]
-struct PlantSoil(Entity);
+pub struct PlantSoil(pub Entity);
+
+/// A plant put in the ground as it is (tests): which of the game's, where, how grown, how much
+/// ready on it.
+#[derive(Message, Clone, Copy)]
+pub struct PlantNow {
+    pub plant: usize,
+    pub at: Vec3,
+    pub growth: f32,
+    pub ready: u32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plant_now(
+    mut commands: Commands,
+    mut asked: MessageReader<PlantNow>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    (data, catalog, mut assets): (Res<Baked>, Res<Catalog>, ResMut<ObjectAssets>),
+    (mut meshes, mut images, mut materials): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    clock: Res<crate::clock::GameClock>,
+) {
+    let Some(ui) = ui else { return };
+    let mut ctx = AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut materials };
+    for a in asked.read() {
+        let Some(info) = ui.data.plants.get(a.plant) else { continue };
+        let state = GrowingPlant { plant: a.plant, growth: a.growth, water: 80.0, weedy: false, ready: a.ready, harvests_left: 3, next_ready: clock.minutes + 24.0 * 60.0, quality: 0.5, care: 0.0, vigor: 0.0, dead: false, fertilizer: None };
+        plant_at(&mut commands, &mut assets, &mut ctx, &catalog, info, state, a.at, 0.0);
+    }
+}
 
 fn scale(growth: f32) -> f32 {
     0.25 + 0.75 * growth.clamp(0.0, 1.0)

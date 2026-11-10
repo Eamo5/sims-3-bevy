@@ -1134,6 +1134,13 @@ installation is unreachable.
   (`a2ah_feedHarvestable`), the horse's hunger filling (`kHungerDelta` 10, a carrot a fifth again,
   `kEatingCarrotMod`) and its liking for them up; not while it's ridden or tied. A horse begs a
   Sim for a treat ("Beg For Carrots", `BegForHarvestable`). `TREATS_TEST=<horse>` (tests).
+  Pets get at the garden (the pack's `EatFromHarvestPlantPet`): a hungry horse or dog eats
+  produce ready on a low or medium plant where the ingredient says its kind eats it off the plant
+  (`PetSpeciesThatCanEatOffPlant`: horses most vegetables and fruit, dogs tomatoes and grapes),
+  and a horse eats a young plant whole, leaving its shreds (`HarvestableShreds`: gone in two days,
+  `kDecayTime`, or cleaned up sooner, "Clean Up"). It takes ten minutes (`kEatTime`, the pack's
+  `harvestable_vine_eat` clips) and fills its hunger; a Piggy pet does it the more, a Neat one never
+  of its own accord. `GARDEN_TEST=<pet>`, with `GARDEN_WHOLE=1` a young lettuce (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more
