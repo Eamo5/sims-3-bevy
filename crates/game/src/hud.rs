@@ -1365,7 +1365,9 @@ fn world_click(
                 Some(t) if sims.contains(t) => {
                     let (sim, member, _) = sims.get(t).unwrap();
                     let liking = bonds.map_or(if member { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(sim.id, member));
-                    (sim.full_name(), crate::petcontrol::sim_options(&baked, pet, t, sim.age, liking))
+                    // (Sitting on a sofa: a lap to sit in, `petlap`.)
+                    let seated = queues_q.get(t).ok().and_then(|q| crate::petlap::seated_on_sofa(q, |o| objects.get(o).ok().map(|g| g.kind))).map(|_| sim.first.as_str());
+                    (sim.full_name(), crate::petcontrol::sim_options(&baked, pet, t, sim.age, liking, seated))
                 }
                 Some(t) => pets_q
                     .get(t)

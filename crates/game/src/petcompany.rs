@@ -402,7 +402,7 @@ fn seek_company(
     time: Res<Time>,
     data: Res<Baked>,
     grid: Option<Res<crate::nav::NavGrid>>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetBonds>, Option<&PetAnim>), (With<HomePet>, Without<crate::petneeds::PetTask>, Without<PetBusy>, Without<Greeting>, Without<Greeted>, Without<crate::petlitters::Held>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform, Option<&PetBonds>, Option<&PetAnim>), (With<HomePet>, Without<crate::petneeds::PetTask>, Without<PetBusy>, Without<Greeting>, Without<Greeted>, Without<crate::petlitters::Held>, Without<crate::petlap::OnLap>)>,
     sims: Query<(Entity, &Sim, &Transform, &ActionQueue, Option<&crate::nav::PathFollow>, Option<&crate::interact::OffLot>, &InheritedVisibility), With<HouseholdMember>>,
     mut next: Local<HashMap<Entity, f64>>,
     mut tested: Local<bool>,

@@ -1120,6 +1120,14 @@ installation is unreachable.
   again ("Put Down", `_pickUp_stop`). Anything else that needs their hands has them put it
   down first (the posture's standing transition), and a pet that badly needs something is put
   down for it. `PETCARRY_TEST=<pet>` (tests).
+  Cats and little dogs sit in laps (the pack's `SitOnSim`): one short of company goes up to one
+  of the family sitting on a sofa or loveseat, jumps up into their lap and is petted there
+  (`SitOnLap`: `ac2a_sofa_jumpUpLap`, rounds of `LapIdle`, `jumpDownLap`; a child's `ac2c_`) for
+  half an hour to an hour (`kTimeRangeToSit`), the Sim staying put till it's down, both having
+  company and fun, and the pet liking them the better every quarter hour (`kLTRIncrease`); a
+  lazy or independent pet does it less, a friendly one more (the game's score multipliers). A
+  Sim who dislikes it (liking -10, or 0 and Mean-Spirited or Grumpy) won't have it, and it likes
+  them the less (`kLTRDecrease`). A played pet's "Sit on <Sim>". `LAP_TEST=<pet>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

@@ -3616,7 +3616,7 @@ pub(crate) fn run_actions(
         Res<crate::realestate::RealEstate>,
         Query<&crate::celebrity::Famous>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q, lapped))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -3637,6 +3637,7 @@ pub(crate) fn run_actions(
                 Res<crate::groups::Conversations>,
                 Query<(Entity, &Transform, &crate::nav::Floor), (With<crate::ghosts::Ghost>, Without<crate::ghosts::Resting>, Without<crate::sim::Motives>)>,
                 Query<&crate::little::Carried>,
+                Query<(), With<crate::petlap::LapTaken>>,
             ),
         ),
     ),
@@ -5022,6 +5023,9 @@ pub(crate) fn run_actions(
                                     action.completed || elapsed >= minutes
                                 } else if cuddles.get(me).is_ok_and(|c| c.accepted) {
                                     // (Cuddling there: not up till the cuddle's over.)
+                                    false
+                                } else if lapped.contains(me) {
+                                    // (A pet coming to their lap, or in it: not up till it's down.)
                                     false
                                 } else if d.special == Special::Homework {
                                     homework.as_mut().is_none_or(|assignment| assignment.advance(dt, minutes))

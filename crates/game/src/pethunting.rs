@@ -528,7 +528,7 @@ const BORED: f32 = 30.0;
 fn autonomy(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    pets: Query<(Entity, &Pet, &PetMotives, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<crate::petlitters::Held>, Without<Hunt>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::sim::Selected>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, Option<&PetTraits>), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<crate::petlitters::Held>, Without<crate::petlap::OnLap>, Without<Hunt>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::sim::Selected>)>,
     mut next: Local<std::collections::HashMap<Entity, f64>>,
 ) {
     if std::env::var_os("PET_HUNT_TEST").is_some() || !(7.0..20.0).contains(&clock.hour_f()) {

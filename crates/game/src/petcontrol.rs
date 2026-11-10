@@ -41,6 +41,8 @@ pub enum PetCommand {
     Hunt,
     /// A toy taken out of a crate and played with (`toycrate`).
     GetToy(Entity),
+    /// Up into the lap of a Sim sitting on a sofa (`petlap`).
+    SitOnSim(Entity),
 }
 
 /// An order for a pet, to be seen to.
@@ -87,9 +89,16 @@ pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&B
 
 /// A Sim clicked with a pet selected: the socials its kind gives one of their age, as fond of
 /// them as it is.
-pub fn sim_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, age: crate::sim::Age, liking: f32) -> Vec<(String, ActionKind)> {
+pub fn sim_options(data: &crate::baked::Baked, pet: &Pet, target: Entity, age: crate::sim::Age, liking: f32, seated: Option<&str>) -> Vec<(String, ActionKind)> {
     use crate::petcompany::{Other, Them, offered};
-    offered(data, &pet.kind, Them::Sim(age), liking).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Sim(target), g)))).collect()
+    let mut out: Vec<(String, ActionKind)> = offered(data, &pet.kind, Them::Sim(age), liking).into_iter().map(|g| (g.name().to_string(), ActionKind::PetCommand(PetCommand::Greet(Other::Sim(target), g)))).collect();
+    // (Sitting on a sofa: up into their lap, a cat's or little dog's.)
+    if let Some(first) = seated
+        && crate::petlap::sits(&pet.kind)
+    {
+        out.push((crate::petlap::label(first), ActionKind::PetCommand(PetCommand::SitOnSim(target))));
+    }
+    out
 }
 
 /// Another pet clicked: what the one gives the other, and trying for young with it where they
@@ -149,6 +158,14 @@ fn obey(
             PetCommand::Mate(_) | PetCommand::Name(_) => continue,
             PetCommand::Hunt => {
                 commands.entity(e).insert(crate::pethunting::GoHunt);
+                continue;
+            }
+            PetCommand::SitOnSim(s) => {
+                if let Ok(stf) = others.get(s)
+                    && !crate::petlap::send(&mut commands, e, pet, here, s, stf, &grid, &mut rng)
+                {
+                    notes.push(format!("{} can't get there.", pet.name));
+                }
                 continue;
             }
             PetCommand::GetToy(c) => {

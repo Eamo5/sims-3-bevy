@@ -150,7 +150,7 @@ pub fn send(commands: &mut Commands, e: Entity, pet: &Pet, here: Vec2, crate_e: 
 fn want_toys(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    pets: Query<(Entity, &Pet, &PetMotives, &Transform), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<FetchingToy>, Without<crate::petlitters::Held>, Without<crate::petcompany::Greeting>, Without<crate::sim::Selected>)>,
+    pets: Query<(Entity, &Pet, &PetMotives, &Transform), (With<HomePet>, Without<PetTask>, Without<PetBusy>, Without<FetchingToy>, Without<crate::petlitters::Held>, Without<crate::petlap::OnLap>, Without<crate::petcompany::Greeting>, Without<crate::sim::Selected>)>,
     crates: Query<(Entity, &ToyCrate, &Transform), Without<Pet>>,
     (grid, building): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::building::ActiveBuilding>>),
     mut next: Local<std::collections::HashMap<Entity, f64>>,

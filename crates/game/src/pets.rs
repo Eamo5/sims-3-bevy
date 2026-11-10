@@ -326,7 +326,7 @@ fn social_partners(
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
-    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>, With<crate::petlitters::Held>, With<crate::walldancer::AtDancer>, With<crate::petcarry::CarriedPet>)>>,
+    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>, With<crate::petlitters::Held>, With<crate::walldancer::AtDancer>, With<crate::petcarry::CarriedPet>, With<crate::petlap::OnLap>)>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected, player) in &sims {
@@ -1251,7 +1251,7 @@ fn home_pets(
     world: Res<crate::loading::CurrentWorld>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     household: Option<Res<crate::interact::Household>>,
-    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::petlitters::Held>)>,
+    mut q: Query<(&Pet, &mut HomePet, &mut Transform, &mut PetAnim), (Without<PetBusy>, Without<crate::petneeds::PetTask>, Without<crate::petcompany::Greeting>, Without<crate::petcompany::Greeted>, Without<crate::petlitters::Held>, Without<crate::petlap::OnLap>)>,
 ) {
     let Some(grid) = grid else { return };
     let lot = household.as_ref().and_then(|h| world.data.lots.get(h.lot_index));

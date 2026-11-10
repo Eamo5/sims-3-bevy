@@ -270,6 +270,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (A cat or little dog up in a seated Sim's lap.)
+    "ac2a_sofa_",
+    "ac2c_sofa_",
+    "al2a_sofa_",
+    "al2c_sofa_",
     // (A cat or little dog picked up, held, petted in the arms, put down.)
     "a2ac_pickUp_",
     "a2al_pickUp_",
