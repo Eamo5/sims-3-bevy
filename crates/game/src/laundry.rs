@@ -26,7 +26,16 @@ impl Plugin for LaundryPlugin {
         app.init_resource::<Laundry>()
             .init_resource::<PendingLaundry>()
             .add_message::<ChangedClothes>()
-            .add_systems(Update, (changes, gather_piles, requests, run_machines, board, restore).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (laundry_test, changes, gather_piles, requests, run_machines, board, restore).chain().run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// `LAUNDRY=<n>` (tests): so many clothes waiting in the hamper, five seconds in.
+fn laundry_test(time: Res<Time>, mut laundry: ResMut<Laundry>, mut done: Local<bool>) {
+    let Some(n) = std::env::var("LAUNDRY").ok().and_then(|v| v.parse::<u32>().ok()) else { return };
+    if !*done && time.elapsed_secs() > 5.0 {
+        *done = true;
+        laundry.waiting = n;
     }
 }
 
