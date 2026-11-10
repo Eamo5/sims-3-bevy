@@ -1128,6 +1128,12 @@ installation is unreachable.
   lazy or independent pet does it less, a friendly one more (the game's score multipliers). A
   Sim who dislikes it (liking -10, or 0 and Mean-Spirited or Grumpy) won't have it, and it likes
   them the less (`kLTRDecrease`). A played pet's "Sit on <Sim>". `LAP_TEST=<pet>` (tests).
+  Horses are fed produce by hand ("Feed Produce ›", the pack's `FeedHarvestable`): what a Sim
+  carries that the game's ingredients say horses eat off the ground (`PetSpeciesThatCanEatOffGround`:
+  apples, carrots, lettuce, grapes, horse granola...) is held out and eaten from their hand
+  (`a2ah_feedHarvestable`), the horse's hunger filling (`kHungerDelta` 10, a carrot a fifth again,
+  `kEatingCarrotMod`) and its liking for them up; not while it's ridden or tied. A horse begs a
+  Sim for a treat ("Beg For Carrots", `BegForHarvestable`). `TREATS_TEST=<horse>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more

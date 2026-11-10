@@ -60,6 +60,8 @@ pub enum Greet {
     Kick,
     /// A kitten, puppy, cat or little dog bowling a child over in play (`Tackle`).
     Tackle,
+    /// A horse begging a Sim for a treat (`Beg For Harvestable`: "Beg For Carrots").
+    Beg,
 }
 
 /// Whom a greeting's for: a Sim of an age, or a pet of a kind.
@@ -70,7 +72,7 @@ pub enum Them<'a> {
 }
 
 impl Greet {
-    pub const ALL: [Greet; 15] = [
+    pub const ALL: [Greet; 16] = [
         Greet::Sniff,
         Greet::Nuzzle,
         Greet::Lick,
@@ -86,6 +88,7 @@ impl Greet {
         Greet::Hiss,
         Greet::Kick,
         Greet::Tackle,
+        Greet::Beg,
     ];
 
     /// What the game calls it (`Gameplay/Excel/Socializing/Action:<its text key>`).
@@ -106,6 +109,7 @@ impl Greet {
             Greet::Hiss => "Hiss At",
             Greet::Kick => "Kick",
             Greet::Tackle => "Tackle",
+            Greet::Beg => "Beg For Carrots",
         }
     }
 
@@ -137,6 +141,7 @@ impl Greet {
             Greet::Hiss => cat && (sim_from(Age::Child) || any_pet),
             Greet::Kick => horse && grown && sim_from(Age::Teen),
             Greet::Tackle => (cat || dog) && kind != "ad" && matches!(them, Them::Sim(Age::Child)),
+            Greet::Beg => horse && grown && sim_from(Age::Child),
         }
     }
 
@@ -148,6 +153,7 @@ impl Greet {
             Greet::Lick => (20.0, 100.0),
             Greet::MarkSim => (40.0, 100.0),
             Greet::Kick => (-100.0, 50.0),
+            Greet::Beg => (-40.0, 100.0),
             _ => (-100.0, 100.0),
         }
     }
@@ -170,6 +176,7 @@ impl Greet {
             Greet::Hiss => "HissAt_recoil",
             Greet::Kick => "kick",
             Greet::Tackle => "tackle_friendly_neutral",
+            Greet::Beg => "begHarvestable_neutral_neutral",
         }
     }
 

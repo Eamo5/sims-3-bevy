@@ -731,7 +731,7 @@ mod tests {
     use s3bake::gamedata::IngredientInfo;
 
     fn data() -> GameDataBaked {
-        let ing = |key: &str, parent: &str, tab: &str, price: i32, grown: bool| IngredientInfo { key: key.into(), name: key.into(), parent: parent.into(), kind: price == 0, price, can_buy: price > 0, grown, tab: tab.into(), fertilizer: None };
+        let ing = |key: &str, parent: &str, tab: &str, price: i32, grown: bool| IngredientInfo { key: key.into(), name: key.into(), parent: parent.into(), kind: price == 0, price, can_buy: price > 0, grown, tab: tab.into(), fertilizer: None, pets_eat: Vec::new(), pets_graze: Vec::new() };
         GameDataBaked {
             ingredients: vec![ing("Ingredient", "ROOT", "", 0, false), ing("Vegetable", "Ingredient", "", 0, false), ing("Tomato", "Vegetable", "Produce", 3, true), ing("Onion", "Vegetable", "Produce", 7, true), ing("Hot Dogs", "Ingredient", "Meat", 8, false)],
             recipes: vec![s3bake::gamedata::RecipeInfo { key: "Stew".into(), name: "Stew".into(), ingredients: vec!["Vegetable".into(), "Hot Dogs".into()], ..Default::default() }],

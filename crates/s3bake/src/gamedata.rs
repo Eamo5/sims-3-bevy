@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 177;
+pub const GAMEDATA_VERSION: u32 = 178;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1842,6 +1842,12 @@ pub struct IngredientInfo {
     /// `Fertilizer_Days`; none where they're empty).
     #[serde(default)]
     pub fertilizer: Option<(f32, u32)>,
+    /// The animals that eat it off the ground (`PetSpeciesThatCanEatOffGround`: `AllDogs`,
+    /// `Cats`, `Horses`, `AB` the deer, `AllAvailable`), and off the plant.
+    #[serde(default)]
+    pub pets_eat: Vec<String>,
+    #[serde(default)]
+    pub pets_graze: Vec<String>,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -4701,6 +4707,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
         let days = f.get("Fertilizer_Days")?.trim().parse::<f32>().ok()? as u32;
         (days > 0).then_some((value, days))
     };
+    let species_list = |f: &HashMap<String, String>, k: &str| -> Vec<String> { get(f, k).split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect() };
     if let Some(ing) = xml("ingredients") {
         for f in records(&ing, "Data") {
             let key = get(&f, "Ingredient_Key");
@@ -4717,6 +4724,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 grown: !get(&f, "Plant_Name").is_empty(),
                 tab: get(&f, "UiTab"),
                 fertilizer: fertilizer(&f),
+                pets_eat: species_list(&f, "PetSpeciesThatCanEatOffGround"),
+                pets_graze: species_list(&f, "PetSpeciesThatCanEatOffPlant"),
                 key,
             });
         }
@@ -4739,6 +4748,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 grown: false,
                 tab: "Fish".into(),
                 fertilizer: fertilizer(&f),
+                pets_eat: species_list(&f, "PetSpeciesThatCanEatOffGround"),
+                pets_graze: species_list(&f, "PetSpeciesThatCanEatOffPlant"),
                 key,
             });
         }

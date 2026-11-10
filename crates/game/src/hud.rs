@@ -1463,6 +1463,16 @@ fn world_click(
                 let at = crate::hitching::tie_spot(&gtf.compute_transform(), tied.part).0;
                 options.insert(0, (crate::hitching::UNTIE.to_string(), ActionKind::Untie { horse: t, at }));
             }
+            // (Produce they carry that it eats, fed from their hand, on foot and it untied:
+            // `horsetreats`.)
+            if riding.is_none()
+                && tied_q.get(t).is_err()
+                && !queues_q.iter().any(|q| crate::riding::riding_on(q) == Some(t))
+                && let Some(ui) = opp_q.0.as_ref()
+            {
+                let stacks = crate::horsetreats::treats(&ui.data, inv_q.get(actor).ok());
+                options.extend(crate::horsetreats::options(t, at, &stacks, &mut pie.submenus, submenu_kind));
+            }
             if riding == Some(t) {
                 options = vec![("Dismount".to_string(), ActionKind::Dismount)];
             } else if home

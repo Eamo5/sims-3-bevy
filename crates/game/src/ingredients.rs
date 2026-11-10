@@ -176,7 +176,7 @@ mod tests {
     use super::*;
 
     fn ing(key: &str, parent: &str, price: i32, grown: bool) -> IngredientInfo {
-        IngredientInfo { key: key.into(), name: key.into(), parent: parent.into(), kind: price == 0 && parent != "Fish", price, can_buy: price > 0, grown, tab: String::new(), fertilizer: None }
+        IngredientInfo { key: key.into(), name: key.into(), parent: parent.into(), kind: price == 0 && parent != "Fish", price, can_buy: price > 0, grown, tab: String::new(), fertilizer: None, pets_eat: Vec::new(), pets_graze: Vec::new() }
     }
 
     fn data() -> GameDataBaked {

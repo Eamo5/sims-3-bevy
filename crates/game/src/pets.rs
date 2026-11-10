@@ -326,7 +326,7 @@ fn social_partners(
     sims: Query<(&crate::interact::ActionQueue, &Transform, &crate::sim::Sim, Option<&Rejected>, Option<&crate::anim::ClipPlayer>), Without<Pet>>,
     mut pets: Query<(Entity, &Pet, &mut Transform, &mut PetAnim, Has<PetBusy>)>,
     ridden: Query<(), With<crate::riding::Ridden>>,
-    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>, With<crate::petlitters::Held>, With<crate::walldancer::AtDancer>, With<crate::petcarry::CarriedPet>, With<crate::petlap::OnLap>)>>,
+    bathing: Query<(), Or<(With<crate::petbath::InBath>, With<crate::horsejumps::AtJump>, With<crate::petaging::AgingUp>, With<crate::petaging::PetDying>, With<crate::petlitters::Held>, With<crate::walldancer::AtDancer>, With<crate::petcarry::CarriedPet>, With<crate::petlap::OnLap>, With<crate::horsetreats::FedByHand>)>>,
 ) {
     let mut seen: Vec<Entity> = Vec::new();
     for (q, stf, sim, rejected, player) in &sims {
