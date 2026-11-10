@@ -3092,6 +3092,10 @@ pub enum ActionKind {
     PutAwayToy { toy: Entity, crate_e: Entity },
     /// Playing with a cat at the wall dancer, from one side of it (`walldancer`).
     WallDancerWith { toy: Entity, cat: Entity, slot: u8, child: bool },
+    /// A cat or little dog picked up, put down, petted in the arms (`petcarry`).
+    PickUpPet { pet: Entity, at: Vec2 },
+    PutDownPet { pet: Entity },
+    PetHeldPet { pet: Entity },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -3907,6 +3911,13 @@ pub(crate) fn run_actions(
                         // (At a hitching post's place to tie a horse, or to untie one.)
                         ActionKind::TieHorse { post, part, .. } => objects.get(*post).ok().map(|(_, otf, _, of)| (crate::hitching::tie_spot(otf, *part).0, of.map_or(1, |f| f.0))),
                         ActionKind::Untie { at, .. } => Some((*at, 1)),
+                        // (Before a pet to pick it up, as far off as the clips lift it from; a held
+                        // one's seen to where they stand.)
+                        ActionKind::PickUpPet { at, .. } => {
+                            let mine = Vec2::new(tf.translation.x, tf.translation.z);
+                            Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::petcarry::APART, floor.0))
+                        }
+                        ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } => Some((tf.translation.xz(), floor.0)),
                         // (To one side of the wall dancer, where its slot has them.)
                         ActionKind::WallDancerWith { toy, slot, child, .. } => objects.get(*toy).ok().map(|(_, otf, _, of)| (crate::walldancer::sim_spot(otf, *slot, *child).0, of.map_or(1, |f| f.0))),
                         // (Beside a toy on the floor, to pick it up.)
@@ -4855,6 +4866,15 @@ pub(crate) fn run_actions(
                             }
                             // (At the wall dancer: `walldancer` plays with the cat from here.)
                             ActionKind::WallDancerWith { .. } => anim.pose = Pose::Use,
+                            // (Before the pet, facing it: `petcarry` lifts it from here.)
+                            ActionKind::PickUpPet { at, .. } => {
+                                let to = *at - tf.translation.xz();
+                                if to.length() > 0.05 {
+                                    tf.rotation = Quat::from_rotation_y(to.x.atan2(to.y));
+                                }
+                                anim.pose = Pose::Use;
+                            }
+                            ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } => anim.pose = Pose::Use,
                             // (At the tub: `petbath` bathes the pet from here.)
                             ActionKind::BathePet { face, .. } | ActionKind::PickUpJump { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -6440,7 +6460,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

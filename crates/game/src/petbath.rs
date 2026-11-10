@@ -399,7 +399,8 @@ fn bathe(
         }
         debug!("pet bath: {} {:?}: {x}", pet.name, s.part);
         s.time = 0.0;
-        s.length = lib.get(&data, &x).map_or(2.0, |c| c.duration.max(0.3));
+        // (Done a moment before the clips are, the pet's not looping back to its start.)
+        s.length = lib.get(&data, &x).map_or(2.0, |c| c.duration).min(lib.get(&data, &y).map_or(f32::MAX, |c| c.duration)).max(0.3) - 0.05;
         let x: &'static str = crate::pets::intern(x);
         let clips: &'static [&'static str] = Box::leak(Box::new([x]));
         commands.entity(e).insert(ActionClip::new(None, clips));

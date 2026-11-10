@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1433,6 +1433,13 @@ fn world_click(
             .filter(|(_, s)| s.min_liking.is_none_or(|m| bonds.map_or(if home { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(actor_sim.id, home)) >= m))
             .map(|(i, s)| (s.name.to_string(), ActionKind::PetSocial { target: t, social: i, at, kind }))
             .collect();
+        // (A cat or little dog: picked up, by one not holding one already (a child too); held,
+        // petted in the arms or put down: `petcarry`.)
+        if holding_pet_q.get(actor).is_ok_and(|h| h.0 == t) {
+            options = crate::petcarry::held_options(t);
+        } else if crate::petcarry::liftable(kind) && !carried_pets_q.contains(t) && holding_pet_q.get(actor).is_err() {
+            options.insert(0, (crate::petcarry::PICK_UP.to_string(), ActionKind::PickUpPet { pet: t, at }));
+        }
         // (A kitten or puppy near by: "Awwww", the pack's `Awwww`.)
         if crate::petmoods::cute(kind) && postures.get(actor).is_ok_and(|p| p.1.translation().xz().distance(at) <= crate::petmoods::AWWW_DISTANCE) {
             options.push(("Awwww".to_string(), ActionKind::Awww { target: t, at, cat: kind == "cc" }));

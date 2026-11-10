@@ -1112,6 +1112,14 @@ installation is unreachable.
   half an hour (`catwalltoyplaywith`: its start, rounds, its end), both having fun and company
   (`RunPlayWith`: Fun 60, Social 40 an hour) and the cat liking them the better for it
   (`kLtrGain` 20). `WALLDANCER_TEST=<cat>`, with `WALLDANCER_WITH=1` (tests).
+  Cats and little dogs are picked up ("Pick Up", the pack's `PickUpPet`; a cat, a kitten, a
+  little dog or a puppy, by a child too): the Sim stoops and lifts it into their arms
+  (`a2ac_pickUp_start` and the rest by Sim and pet, a child's `c2â€¦` their own), walks about with
+  it held (`_pickUp_pose`, the pet idling in their arms and now and then meowing or barking),
+  pets it there ("Pet", `_petHeld`: Loved, and it likes them a little better) and puts it down
+  again ("Put Down", `_pickUp_stop`). Anything else that needs their hands has them put it
+  down first (the posture's standing transition), and a pet that badly needs something is put
+  down for it. `PETCARRY_TEST=<pet>` (tests).
   Pets take to Sims, as the pack's socials (`SocialData_EP5`) have it: each pet has its liking
   for each Sim (its family 30 to begin with, a stranger nothing), warmed by petting, praise, a
   hug, a smoochie, a treat, a horse's neck rubbed or calmed down, cooled by a scolding, more
