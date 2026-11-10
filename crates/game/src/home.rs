@@ -694,8 +694,11 @@ pub fn spawn_game_object_design(
     let (name, price, kind) = entry
         .map(|e| (e.name.clone(), e.price, e.kind))
         .unwrap_or_else(|| ("Object".into(), 0, ObjectKind::Other));
-    // (A sprinkler's model holds the dome of its spray: it stands where its solid parts are.)
-    let solid: Vec<_> = parts.iter().filter(|p| kind != ObjectKind::Sprinkler || p.mode == 0).cloned().collect();
+    // (A sprinkler's model holds the dome of its spray: it stands where its solid parts are. A
+    // fountain jet's the circle its water lands in, shown only in Buy and Build mode: it stands
+    // where its nozzle is.)
+    let jet = ctx.baked.catalog_entry(&objd).is_some_and(|c| c.script.contains("FountainJet"));
+    let solid: Vec<_> = parts.iter().filter(|p| (kind != ObjectKind::Sprinkler || p.mode == 0) && (!jet || p.mode != 2)).cloned().collect();
     let (mn, mx) = parts_bounds(if solid.is_empty() { &parts } else { &solid })?;
     // (Rugs and other flat things are raised over the floor in their meshes: see
     // `objects::cpu_model`.)
@@ -703,6 +706,12 @@ pub fn spawn_game_object_design(
     let e = spawn_parts(commands, &parts, tf);
     let center = Vec2::new((mn.x + mx.x) * 0.5, (mn.z + mx.z) * 0.5);
     let half = Vec2::new((mx.x - mn.x) * 0.5, (mx.z - mn.z) * 0.5);
+    if jet {
+        let circle: Vec<_> = parts.iter().filter(|p| p.mode == 2).cloned().collect();
+        if let Some((a, b)) = parts_bounds(&circle) {
+            commands.entity(e).insert(crate::effects::JetReach { center: Vec2::new((a.x + b.x) * 0.5, (a.z + b.z) * 0.5), half: Vec2::new((b.x - a.x) * 0.5, (b.z - a.z) * 0.5) });
+        }
+    }
     commands.entity(e).insert((
         GameObject { kind, name, objd, price, center, half, height: mx.y, route: None },
         UsedBy::default(),

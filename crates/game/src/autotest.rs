@@ -3874,7 +3874,7 @@ fn auto_place(
         if let Some(object) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, e.key, pos, rot, design) {
             let level = building.as_ref().map_or(1, |b| b.level_at_point(pos));
             commands.entity(object.entity).insert((crate::save::Bought, crate::nav::Floor(level), crate::building::BuildingPiece { level }));
-            info!("placed {} for the test", e.name);
+            info!("placed {} for the test at {pos}", e.name);
         }
     }
 }

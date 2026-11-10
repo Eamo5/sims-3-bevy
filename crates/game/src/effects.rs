@@ -1,6 +1,10 @@
 //! Water effects at objects' effect slots (from their RSLT): fountains play all the time;
 //! showers spray and sinks run while someone's using them. Droplets are small camera-facing
-//! sprites thrown from the slot and falling under gravity.
+//! sprites thrown from the slot and falling under gravity. Fountain jets (the game's
+//! `FountainJet`s, set in a fountain built with the Fountain tool or a pond) throw their water as
+//! their kind does, landing in the circle their model marks out (shown, as the game's grab
+//! area, only in Buy and Build mode): a geyser straight up, a dome all round, a dual dome in two
+//! tiers, a spray in an arc ahead.
 
 use std::collections::HashMap;
 
@@ -20,7 +24,7 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterLooks>()
             .add_message::<SpinSparkle>()
-            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, emit, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, jet_circles, emit, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -34,6 +38,99 @@ enum Spray {
     Tap,
     /// Arcs thrown out round a garden sprinkler, while it's on.
     Sprinkler,
+    /// A fountain jet's water, its kind's shape, landing as far off as its reach.
+    Jet(JetShape, f32),
+}
+
+/// A fountain jet's kind, by its catalogue instance (`fountainJetUpLg`, `fountainJetSpreadMed`,
+/// `fountainJet2TierSm`, `fountainJetAngleLg`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum JetShape {
+    Geyser,
+    Dome,
+    DualDome,
+    Spray,
+}
+
+impl JetShape {
+    pub fn of(instance: &str) -> Option<Self> {
+        let n = instance.to_ascii_lowercase();
+        if !n.starts_with("fountainjet") {
+            return None;
+        }
+        Some(if n.contains("2tier") {
+            JetShape::DualDome
+        } else if n.contains("spread") {
+            JetShape::Dome
+        } else if n.contains("angle") {
+            JetShape::Spray
+        } else {
+            JetShape::Geyser
+        })
+    }
+
+    /// How far its water lands (metres) from its model's circle (`JetReach`): a spray's ahead,
+    /// the others' all round.
+    pub fn reach(self, r: &JetReach) -> f32 {
+        match self {
+            JetShape::Spray => r.center.y + r.half.y,
+            _ => r.half.x.max(r.half.y),
+        }
+    }
+}
+
+/// A fountain jet's circle (model space): where its water lands, the game's grab area.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct JetReach {
+    pub center: Vec2,
+    pub half: Vec2,
+}
+
+/// A fountain jet's circle part, shown only in Buy and Build mode (`SetGrabbableVisibility`).
+#[derive(Component)]
+struct JetCircle;
+
+/// The gravity droplets fall by.
+const GRAVITY: f32 = 9.8;
+
+/// A jet's droplet as thrown (model space: a spray's ahead is +Z): its direction, speed and how
+/// long till it's fallen back to the nozzle's height (`roll` four numbers from 0 to 1).
+pub fn jet_launch(shape: JetShape, reach: f32, roll: [f32; 4]) -> (Vec3, f32, f32) {
+    let lerp = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    // (A dome's water in so many streams round it, each a little loose.)
+    let streams = |n: f32, r: f32| {
+        let k = (r * n).floor();
+        (k + 0.5 + ((r * n).fract() - 0.5) * 0.12) / n * std::f32::consts::TAU
+    };
+    let around = match shape {
+        JetShape::Dome => streams(16.0, roll[0]),
+        JetShape::DualDome if roll[3] < 0.4 => streams(8.0, roll[0]) + std::f32::consts::PI / 8.0,
+        JetShape::DualDome => streams(16.0, roll[0]),
+        _ => roll[0] * std::f32::consts::TAU,
+    };
+    // (Thrown at an angle to land so far off.)
+    let arc = |range: f32, theta: f32, yaw: f32| {
+        let v = (range * GRAVITY / (2.0 * theta).sin()).sqrt();
+        let dir = Vec3::new(yaw.sin() * theta.cos(), theta.sin(), yaw.cos() * theta.cos());
+        (dir, v, 2.0 * v * theta.sin() / GRAVITY)
+    };
+    match shape {
+        // (Straight up, a few times as high as its splash is wide, falling within it.)
+        JetShape::Geyser => {
+            let height = (reach * 2.0 + 0.5) * lerp(0.9, 1.0, roll[1]);
+            let up = (2.0 * GRAVITY * height).sqrt();
+            let life = 2.0 * up / GRAVITY;
+            let out = reach * 0.5 * roll[2] / life;
+            let v = Vec3::new(around.sin() * out, up, around.cos() * out);
+            (v.normalize(), v.length(), life)
+        }
+        JetShape::Dome => arc(reach * lerp(0.88, 1.0, roll[1]), lerp(52.0, 62.0, roll[2]).to_radians(), around),
+        // (Two tiers: the outer dome, and a taller one inside it.)
+        JetShape::DualDome if roll[3] < 0.4 => arc(reach * lerp(0.4, 0.5, roll[1]), lerp(65.0, 72.0, roll[2]).to_radians(), around),
+        JetShape::DualDome => arc(reach * lerp(0.88, 1.0, roll[1]), lerp(52.0, 60.0, roll[2]).to_radians(), around),
+        // (One arc ahead, a little spread.)
+        JetShape::Spray => arc(reach * lerp(0.9, 1.0, roll[1]), lerp(41.0, 49.0, roll[2]).to_radians(), lerp(-0.05, 0.05, roll[3])),
+    }
 }
 
 /// Where an object's water comes from (object space) and how.
@@ -86,6 +183,8 @@ struct Droplet {
     vel: Vec3,
     age: f32,
     life: f32,
+    /// Drawn out along its flight (a jet's stream), as long as it's fast (its width).
+    streak: Option<f32>,
 }
 
 /// A TV's screen: where it is, and the picture on it while it's on.
@@ -240,16 +339,24 @@ fn dot_image() -> Image {
 /// Gives fountains, showers and sinks an emitter at their effect slot.
 fn attach(
     mut commands: Commands,
-    objects: Query<(Entity, &GameObject), Without<FxChecked>>,
+    objects: Query<(Entity, &GameObject, Option<&JetReach>), Without<FxChecked>>,
     ui: Option<Res<crate::icons::GameUi>>,
     data: Res<crate::baked::Baked>,
     mut slots: Local<Option<HashMap<s3bake::Key, Vec<[f32; 3]>>>>,
 ) {
     let Some(ui) = ui else { return };
     let slots = slots.get_or_insert_with(|| ui.data.fx_slots.iter().cloned().collect());
-    for (e, o) in &objects {
+    for (e, o, reach) in &objects {
         commands.entity(e).insert(FxChecked);
         let script = data.0.catalog_entry(&o.objd).map_or("", |c| c.script.as_str());
+        // A fountain jet: its water from its nozzle, as its kind throws it.
+        if script.contains("FountainJet") {
+            let shape = data.0.catalog_entry(&o.objd).and_then(|c| JetShape::of(&c.instance_name));
+            if let (Some(shape), Some(r)) = (shape, reach) {
+                commands.entity(e).insert(Emitter { slot: Vec3::new(0.0, 0.08, 0.0), spray: Spray::Jet(shape, shape.reach(r)), owed: 0.0, sounding: None });
+            }
+            continue;
+        }
         // A TV's screen: the effect slot in its middle, up off the floor.
         if o.kind == ObjectKind::Tv {
             let screen = slots.get(&o.objd).and_then(|s| s.iter().filter(|p| p[1] > 0.3 && p[0].abs() < 0.2).max_by(|a, b| a[1].total_cmp(&b[1])).copied());
@@ -390,6 +497,29 @@ fn sprinkler_spray(
     }
 }
 
+/// A fountain jet's circle: found (its see-through part), and shown only in Buy and Build mode.
+fn jet_circles(
+    mut commands: Commands,
+    jets: Query<&Children, With<JetReach>>,
+    mut parts: Query<(Entity, &MeshMaterial3d<StandardMaterial>, &mut Visibility, Has<JetCircle>)>,
+    mats: Res<Assets<StandardMaterial>>,
+    buy: Option<Res<crate::buy::BuyMode>>,
+) {
+    let shown = buy.is_some_and(|b| b.active);
+    for children in &jets {
+        for c in children {
+            let Ok((p, m, mut v, circle)) = parts.get_mut(*c) else { continue };
+            if !circle {
+                if !mats.get(&m.0).is_some_and(|m| m.alpha_mode == AlphaMode::Blend) {
+                    continue;
+                }
+                commands.entity(p).insert((JetCircle, NotShadowCaster));
+            }
+            v.set_if_neq(if shown { Visibility::Inherited } else { Visibility::Hidden });
+        }
+    }
+}
+
 /// Fountains play; showers and taps run while someone's at them.
 #[allow(clippy::type_complexity)]
 fn emit(
@@ -410,7 +540,7 @@ fn emit(
         // (Broken, a tap or a shower sprays all the while: water everywhere, and puddles.)
         let leaking = broken && matches!(em.spray, Spray::Tap | Spray::Shower);
         let on = match em.spray {
-            Spray::Fountain => true,
+            Spray::Fountain | Spray::Jet(..) => true,
             Spray::Sprinkler => sprinkling,
             _ if leaking => true,
             // (Someone at it, not just on their way.)
@@ -446,6 +576,9 @@ fn emit(
             debug!("{:?} running at {:?}", em.spray, gt.transform_point(em.slot));
         }
         let rate = match em.spray {
+            Spray::Jet(JetShape::Geyser, r) => 90.0 + 40.0 * r,
+            Spray::Jet(JetShape::Spray, r) => (30.0 * r).clamp(40.0, 260.0),
+            Spray::Jet(_, r) => (60.0 * r).clamp(80.0, 400.0),
             Spray::Tap if leaking => 120.0,
             Spray::Fountain => 170.0,
             Spray::Sprinkler => 140.0,
@@ -469,10 +602,17 @@ fn emit(
             })
             .clone();
         let origin = gt.transform_point(em.slot);
+        let turn = gt.to_scale_rotation_translation().1;
         while em.owed >= 1.0 {
             em.owed -= 1.0;
             let a = rng.random_range(0.0..std::f32::consts::TAU);
+            let streak = matches!(em.spray, Spray::Jet(..));
             let (dir, speed, life, size, jitter) = match em.spray {
+                // As its kind throws it, turned as the jet is.
+                Spray::Jet(shape, reach) => {
+                    let (d, v, t) = jet_launch(shape, reach, [rng.random(), rng.random(), rng.random(), rng.random()]);
+                    (turn * d, v, t, (0.05 + 0.008 * reach).clamp(0.05, 0.1), 0.01)
+                }
                 // A crown of jets thrown up and out.
                 Spray::Fountain => {
                     let out = rng.random_range(0.08..0.4);
@@ -499,7 +639,7 @@ fn emit(
                 Mesh3d(quad.clone()),
                 MeshMaterial3d(mat.clone()),
                 Transform::from_translation(at).with_scale(Vec3::splat(size)),
-                Droplet { vel: dir.normalize() * speed, age: 0.0, life },
+                Droplet { vel: dir.normalize() * speed, age: 0.0, life, streak: streak.then_some(size) },
                 NotShadowCaster,
                 DespawnOnExit(AppState::InGame),
             ));
@@ -524,8 +664,19 @@ fn fall(
         }
         d.vel.y -= 9.8 * dt;
         tf.translation += d.vel * dt;
-        if let Some(c) = cam {
-            tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+        match (d.streak, cam) {
+            // (A jet's: along its flight, turned to the camera about it.)
+            (Some(width), Some(c)) => {
+                let along = d.vel.normalize_or(Vec3::Y);
+                let right = along.cross(c - tf.translation).normalize_or(Vec3::X);
+                let face = right.cross(along);
+                tf.rotation = Quat::from_mat3(&Mat3::from_cols(right, along, face));
+                tf.scale = Vec3::new(width, (d.vel.length() * 0.05).max(width), 1.0);
+            }
+            (None, Some(c)) => {
+                tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
+            }
+            _ => {}
         }
     }
 }
@@ -869,5 +1020,40 @@ fn censor(
                 commands.entity(me).add_child(e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where a droplet comes down, back at the nozzle's height (metres out from it).
+    fn lands(shape: JetShape, reach: f32, roll: [f32; 4]) -> f32 {
+        let (d, v, t) = jet_launch(shape, reach, roll);
+        let at = d * v * t + Vec3::Y * (-0.5 * GRAVITY * t * t);
+        assert!(at.y.abs() < 1e-3, "back at the nozzle's height");
+        at.xz().length()
+    }
+
+    #[test]
+    fn jets_land_their_water_in_their_circle() {
+        for r in [[0.1, 0.0, 0.0, 0.9], [0.7, 1.0, 1.0, 0.9], [0.4, 0.5, 0.3, 0.9]] {
+            let d = lands(JetShape::Dome, 6.4, r);
+            assert!((5.6..=6.41).contains(&d), "a dome's at its edge: {d}");
+            assert!(lands(JetShape::Geyser, 1.64, r) <= 0.83, "a geyser's falls within half");
+            let s = lands(JetShape::Spray, 8.8, r);
+            assert!((7.9..=8.81).contains(&s), "a spray's at its end: {s}");
+        }
+        let inner = lands(JetShape::DualDome, 5.3, [0.2, 0.5, 0.5, 0.1]);
+        assert!(inner < 2.7, "a dual dome's inner tier: {inner}");
+        // (A spray goes ahead, +Z.)
+        let (d, ..) = jet_launch(JetShape::Spray, 2.0, [0.0, 0.5, 0.5, 0.5]);
+        assert!(d.z > 0.6 && d.x.abs() < 0.05);
+        assert_eq!(JetShape::of("fountainJet2TierMed"), Some(JetShape::DualDome));
+        assert_eq!(JetShape::of("fountainJetAngleSm"), Some(JetShape::Spray));
+        assert_eq!(JetShape::of("fountainJetUpLg"), Some(JetShape::Geyser));
+        assert_eq!(JetShape::of("fountainModern"), None);
+        let reach = JetReach { center: Vec2::new(0.0, 4.3), half: Vec2::new(0.16, 4.5) };
+        assert!((JetShape::Spray.reach(&reach) - 8.8).abs() < 1e-4);
     }
 }

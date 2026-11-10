@@ -1279,7 +1279,12 @@ installation is unreachable.
 - **Water effects**: fountains gush and fill their basins, showers spray from the head and taps
   run while someone's at them, each from the object's own effect slot (the game's RSLT slots).
   TVs show a programme on the screen (at the TV's screen slot) while anyone's watching, its
-  light flickering on the room.
+  light flickering on the room. Fountain jets (the game's `FountainJet`s, set in a fountain
+  built with the Fountain tool or a pond) play as their kind does, their water in streams landing
+  in the circle their model marks out: a geyser straight up, a dome in sixteen arcs all round, a
+  dual dome with a taller tier inside, a spray in one arc ahead; the circle itself (the game's
+  grab area, `SetGrabbableVisibility`) shows only in Buy and Build mode, and the jet stands where
+  its nozzle is, not across its whole circle.
 - **Lots' own ground**: lots keep their sculpted ground; its dips are carved back into the
   flattened world (Central Park's sunken plaza with the fountain basin set into it, hollows on
   the beaches), and ground-level paving follows the ground.
