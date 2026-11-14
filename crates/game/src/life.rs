@@ -939,6 +939,7 @@ pub enum MoodletKind {
     HygenicHooves,
     GoodDog,
     NothingButAir,
+    PumpedPony,
     TastesLikeChicken,
     NewKittensPet,
     NewPuppiesPet,
@@ -953,7 +954,7 @@ pub enum MoodletKind {
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 195] = {
+    pub const ALL: [MoodletKind; 196] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -973,7 +974,7 @@ impl MoodletKind {
             HungryPet, VeryHungryPet, StarvingPet, HasToPeePet, ReallyHasToPeePet, SleepyPet, TiredPet, ExhaustedPet, LonelyPet, DesolatePet,
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
             GoingNuts, Restless, Frustrated, ThirstyHorse, Dehydrated, SqueakyCleanPet, WellRestedPet, PregnantPet, PetSkillFatigue,
-            LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
+            LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, PumpedPony, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
             Kicked, Marked, ShreddedDignity, Kittens, Puppies,
         ]
     };
@@ -1201,6 +1202,7 @@ impl MoodletKind {
             HygenicHooves => md("Hygenic Hooves", "It's such a comfortable feeling when my hooves are all cleaned.", 15, 24.0),
             GoodDog => md("Good Dog", "Being a good dog just feels good!", 5, 3.0),
             NothingButAir => md("Nothing But Air", "Caught nothing but air on that jump! Feelin' GOOD!", 30, 2.0),
+            PumpedPony => md("Pumped Pony", "Getting pumped up and ready to gallop.", 30, 2.0),
             TastesLikeChicken => md("Tastes Like Chicken", "They say everything tastes like chicken, but with a bird... well it isn't a big stretch.", 10, 5.0),
             NewKittensPet => md("New Kittens", "Baby kittens are soft and sweet!", 80, 24.0),
             NewPuppiesPet => md("New Puppies", "Just had a litter of puppies!", 80, 24.0),
@@ -1409,6 +1411,7 @@ impl MoodletKind {
             HygenicHooves => ("HygenicHooves", true),
             GoodDog => ("GoodDog", true),
             NothingButAir => ("NothingButAir", true),
+            PumpedPony => ("PumpedPony", true),
             TastesLikeChicken => ("TastesLikeChicken", true),
             NewKittensPet => ("NewKittensPet", true),
             NewPuppiesPet => ("NewPuppiesPet", true),

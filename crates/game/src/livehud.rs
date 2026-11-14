@@ -1606,6 +1606,41 @@ struct WorkItem {
 #[derive(Component)]
 struct WorkTones(Vec<crate::careers::WorkTone>);
 
+/// The queue's tones style of item at `x` (`InteractionStyle.Tones`): its own background, the
+/// tones' box, the icon in place of the item's, the cancel cross over it, and its progress bar's
+/// width.
+fn tones_item(template: &s3bake::ui::UiWindow, x: f32) -> s3bake::ui::UiWindow {
+    let mut item = template.clone();
+    let h = QUEUE_ITEM_PROGRESS_HEIGHT;
+    item.area = [x, QUEUE_ITEM_TOP, x + TONES_WIDTH, QUEUE_ITEM_TOP + h];
+    if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
+        b.area = [0.0, 0.0, TONES_WIDTH, h];
+        if let Some(s3bake::ui::UiDrawable::Std { images, .. }) = b.drawable.as_mut() {
+            let (n, hl) = (s3pkg::fnv64("int_tone_progress_norm"), s3pkg::fnv64("int_tone_progress_hl"));
+            *images = [n, n, hl, hl, n, n, hl, hl];
+        }
+        for c in b.children.iter_mut() {
+            match c.id {
+                TONES | TONES_ICON | QUEUE_PROGRESS => c.flags |= s3bake::ui::WIN_VISIBLE,
+                QUEUE_ICON => c.flags &= !s3bake::ui::WIN_VISIBLE,
+                0 if c.area == [33.0, 4.0, 87.0, 58.0] => c.id = TONES_CANCEL,
+                _ => {}
+            }
+        }
+    }
+    for id in [QUEUE_PROGRESS_CLIP, QUEUE_PROGRESS_FILL] {
+        if let Some(p) = find_window(&mut item, id) {
+            p.area[2] = p.area[0] + TONES_PROGRESS_WIDTH;
+        }
+    }
+    item
+}
+
+/// A queued action's tones box (`trainingposts`'): its place in the queue, and its tones in the
+/// box's order.
+#[derive(Component)]
+struct ActionTones(usize, Vec<crate::trainingposts::Tone>);
+
 /// A window of a layout, by its id, to change before it's put up.
 fn find_window(w: &mut s3bake::ui::UiWindow, id: u32) -> Option<&mut s3bake::ui::UiWindow> {
     if w.id == id {
@@ -1633,19 +1668,32 @@ fn interaction_queue(
     mut state: Local<(Option<Entity>, (Option<WorkItem>, Option<TalkItem>, Vec<(String, Option<QueuePicture>, bool)>))>,
     (convs, rels_q, people, time): (Res<crate::groups::Conversations>, Query<&crate::social::Relationships>, Query<&Sim>, Res<Time>),
     mut arrows: Local<(Option<(Entity, f32)>, f32, bool, Vec<Entity>)>,
-    (mut workers, tone_boxes, clock, mut play, mut picked): (
+    (mut workers, tone_boxes, clock, mut play, mut picked, (action_boxes, horse_skills)): (
         Query<(&mut crate::careers::Job, Option<&mut crate::careers::AtWork>)>,
         Query<(Entity, &crate::layout::UiCombo, &WorkTones)>,
         Res<crate::clock::GameClock>,
         MessageWriter<crate::sound::PlaySound>,
         Local<std::collections::HashMap<Entity, usize>>,
+        (Query<(Entity, &crate::layout::UiCombo, &ActionTones)>, Query<&crate::horsejumps::HorseSkills>),
     ),
 ) {
     let (Some(mut ui), Some(root)) = (ui, hud.queue.root) else { return };
     let Ok((me, mut queue, motives)) = sel.single_mut() else { return };
     // At work: the tone picked from the work item's combo box is how they work now (once it's
     // picked: a tone set otherwise stands, the box redrawn for it).
-    picked.retain(|e, _| tone_boxes.contains(*e));
+    picked.retain(|e, _| tone_boxes.contains(*e) || action_boxes.contains(*e));
+    // (An action's tone picked from its box: it's in that tone now.)
+    for (e, combo, at) in &action_boxes {
+        let was = picked.insert(e, combo.selected);
+        if let Some(&tone) = at.1.get(combo.selected)
+            && was.is_some_and(|w| w != combo.selected)
+            && !combo.open
+            && let Some(a) = queue.0.iter_mut().filter(|a| !a.cancel).nth(at.0)
+            && crate::trainingposts::set_tone(&mut a.kind, tone)
+        {
+            play.write(crate::sound::PlaySound::ui("ui_queue"));
+        }
+    }
     if let Ok((mut job, Some(_))) = workers.get_mut(me) {
         for (e, combo, tones) in &tone_boxes {
             let was = picked.insert(e, combo.selected);
@@ -1710,21 +1758,32 @@ fn interaction_queue(
         }
     }
     let shown: Vec<&crate::interact::Action> = queue.0.iter().filter(|a| !a.cancel).collect();
+    // (Actions in a tone: their tones box, the ones they may be in and the one they are.)
+    let racing = |h: Entity| horse_skills.get(h).map_or(0, |s| s.racing_level());
+    let tones: Vec<Option<(Vec<crate::trainingposts::Tone>, crate::trainingposts::Tone)>> = shown.iter().map(|a| crate::trainingposts::queue_tones(&a.kind, racing)).collect();
     let sig: Vec<(String, Option<QueuePicture>, bool)> = shown
         .iter()
         .enumerate()
         .map(|(i, a)| {
             let pic = match &a.kind {
-                crate::interact::ActionKind::Object { target, .. } | crate::interact::ActionKind::Repair { target } | crate::interact::ActionKind::Upgrade { target, .. } => {
-                    objects.get(*target).ok().map(|o| QueuePicture::Object(o.objd))
-                }
+                crate::interact::ActionKind::Object { target, .. }
+                | crate::interact::ActionKind::Repair { target }
+                | crate::interact::ActionKind::Upgrade { target, .. }
+                | crate::interact::ActionKind::TrainForRacing { posts: target, .. }
+                | crate::interact::ActionKind::WatchTraining { posts: target, .. } => objects.get(*target).ok().map(|o| QueuePicture::Object(o.objd)),
                 crate::interact::ActionKind::Social { target, .. } | crate::interact::ActionKind::PhoneChat { target } | crate::interact::ActionKind::Invite { target } if sims.contains(*target) => {
                     Some(QueuePicture::Sim(*target))
                 }
                 crate::interact::ActionKind::GoToWork => workers.get(me).ok().map(|(j, _)| QueuePicture::Icon(j.career().icon)),
                 _ => None,
             };
-            (crate::gamenames::shown(&a.label).into_owned(), pic, i == 0 && progress(a, &objects, motives).is_some())
+            // (In a tone: it's in the label, the item drawn anew as it changes.)
+            let label = crate::gamenames::shown(&a.label).into_owned();
+            let label = match &tones[i] {
+                Some((_, t)) => format!("{label} ({})", t.name()),
+                None => label,
+            };
+            (label, pic, i == 0 && progress(a, &objects, motives).is_some())
         })
         .collect();
     // The progress of the action under way, every frame.
@@ -1793,29 +1852,7 @@ fn interaction_queue(
     arrows.3.clear();
     // (At work: the work item, as the game's `InteractionStyle.Tones`.)
     if let Some(w) = &work {
-        let mut item = template.clone();
-        let h = QUEUE_ITEM_PROGRESS_HEIGHT;
-        item.area = [0.0, QUEUE_ITEM_TOP, TONES_WIDTH, QUEUE_ITEM_TOP + h];
-        if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
-            b.area = [0.0, 0.0, TONES_WIDTH, h];
-            if let Some(s3bake::ui::UiDrawable::Std { images, .. }) = b.drawable.as_mut() {
-                let (n, hl) = (s3pkg::fnv64("int_tone_progress_norm"), s3pkg::fnv64("int_tone_progress_hl"));
-                *images = [n, n, hl, hl, n, n, hl, hl];
-            }
-            for c in b.children.iter_mut() {
-                match c.id {
-                    TONES | TONES_ICON | QUEUE_PROGRESS => c.flags |= s3bake::ui::WIN_VISIBLE,
-                    QUEUE_ICON => c.flags &= !s3bake::ui::WIN_VISIBLE,
-                    0 if c.area == [33.0, 4.0, 87.0, 58.0] => c.id = TONES_CANCEL,
-                    _ => {}
-                }
-            }
-        }
-        for id in [QUEUE_PROGRESS_CLIP, QUEUE_PROGRESS_FILL] {
-            if let Some(p) = find_window(&mut item, id) {
-                p.area[2] = p.area[0] + TONES_PROGRESS_WIDTH;
-            }
-        }
+        let mut item = tones_item(&template, 0.0);
         let tip_drawable = find_window(&mut item, TONES_TIP).and_then(|t| t.drawable.clone());
         let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &item, holder);
         if let Some(win) = s.id(TONES_ICON) {
@@ -1909,14 +1946,42 @@ fn interaction_queue(
         x += TALK_WIDTH + QUEUE_ITEM_GAP;
     }
     for (i, (label, pic, with_progress)) in sig.into_iter().enumerate() {
-        let h = if with_progress { QUEUE_ITEM_PROGRESS_HEIGHT } else { QUEUE_ITEM_HEIGHT };
-        let mut item = template.clone();
-        item.area = [x, QUEUE_ITEM_TOP, x + QUEUE_ITEM_WIDTH, QUEUE_ITEM_TOP + h];
-        if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
-            b.area = [0.0, 0.0, QUEUE_ITEM_WIDTH, h];
-        }
-        x += QUEUE_ITEM_WIDTH + QUEUE_ITEM_GAP;
+        // (In a tone: the tones style of item, its box of them, as the work item's.)
+        let toned = tones[i].clone();
+        let mut tip_drawable = None;
+        let item = match &toned {
+            Some(_) => {
+                let mut item = tones_item(&template, x);
+                tip_drawable = find_window(&mut item, TONES_TIP).and_then(|t| t.drawable.clone());
+                x += TONES_WIDTH + QUEUE_ITEM_GAP;
+                item
+            }
+            None => {
+                let h = if with_progress { QUEUE_ITEM_PROGRESS_HEIGHT } else { QUEUE_ITEM_HEIGHT };
+                let mut item = template.clone();
+                item.area = [x, QUEUE_ITEM_TOP, x + QUEUE_ITEM_WIDTH, QUEUE_ITEM_TOP + h];
+                if let Some(b) = item.children.iter_mut().find(|c| c.id == QUEUE_BUTTON) {
+                    b.area = [0.0, 0.0, QUEUE_ITEM_WIDTH, h];
+                }
+                x += QUEUE_ITEM_WIDTH + QUEUE_ITEM_GAP;
+                item
+            }
+        };
         let s = ui.spawn_under(&mut commands, &mut assets, &mut fonts, &item, holder);
+        if let (Some((list, tone)), Some(c)) = (&toned, s.id(TONES)) {
+            let items: Vec<String> = list.iter().map(|t| t.name().to_string()).collect();
+            let tips: Vec<String> = list.iter().map(|t| t.description().to_string()).collect();
+            let selected = list.iter().position(|t| t == tone).unwrap_or(0);
+            let td = tip_drawable.clone();
+            commands.entity(c).insert(ActionTones(i, list.clone())).queue(move |mut ew: EntityWorldMut| {
+                if let Some(mut combo) = ew.get_mut::<crate::layout::UiCombo>() {
+                    combo.items = items;
+                    combo.selected = selected;
+                    combo.tips = tips;
+                    combo.tip_drawable = td;
+                }
+            });
+        }
         let picture = match pic {
             // (Something with no picture of its own in the catalogue, a puddle or a stand-in: the
             // Sim's own face rather than an empty frame.)
@@ -1934,10 +1999,12 @@ fn interaction_queue(
             // (What a Sim does by themselves: their own face.)
             None => Some((portraits.portrait(&mut assets, me), Some(me))),
         };
-        if let (Some(w), Some((h, of))) = (s.id(QUEUE_ICON), picture) {
+        let icon = s.id(if toned.is_some() { TONES_ICON } else { QUEUE_ICON });
+        let position_type = if toned.is_some() { PositionType::Absolute } else { PositionType::Relative };
+        if let (Some(w), Some((h, of))) = (icon, picture) {
             commands.entity(w).despawn_children();
             commands.entity(w).with_children(|c| {
-                let mut img = c.spawn((ImageNode::new(h), Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
+                let mut img = c.spawn((ImageNode::new(h), Node { position_type, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, Pickable::IGNORE));
                 if let Some(e) = of {
                     img.insert(crate::portraits::PortraitOf(e));
                 }
@@ -1947,7 +2014,8 @@ fn interaction_queue(
             commands.entity(p).insert(if with_progress { Visibility::Inherited } else { Visibility::Hidden });
         }
         if let Some(b) = s.id(QUEUE_BUTTON) {
-            commands.entity(b).insert((QueueItem(i, s.id(QUEUE_CANCEL), s.id(QUEUE_PROGRESS_CLIP)), crate::icons::Tooltip(format!("{label}\nClick to cancel."))));
+            let cancel = s.id(if toned.is_some() { TONES_CANCEL } else { QUEUE_CANCEL });
+            commands.entity(b).insert((QueueItem(i, cancel, s.id(QUEUE_PROGRESS_CLIP)), crate::icons::Tooltip(format!("{label}\nClick to cancel."))));
         }
     }
 }

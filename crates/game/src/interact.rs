@@ -279,6 +279,9 @@ pub enum ObjectKind {
     BikeRack,
     /// A hopscotch court (Generations' `HopscotchCourt`): played on (`hopscotch`).
     Hopscotch,
+    /// Race training posts (the Pets pack's `TrainingPosts`): a horse trained for racing at them,
+    /// ridden or alone (`trainingposts`).
+    TrainingPosts,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -403,6 +406,8 @@ impl ObjectKind {
             Self::BikeRack
         } else if has("hobbiesskills.hopscotchcourt") {
             Self::Hopscotch
+        } else if has("hobbiesskills.trainingposts") {
+            Self::TrainingPosts
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -651,7 +656,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::HitchingPost | Self::PetToyCrate | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::CatWallToy | Self::PlantShreds | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump => "Misc",
+            Self::CatToy | Self::CatWallToy | Self::PlantShreds | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump | Self::TrainingPosts => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -3121,6 +3126,11 @@ pub enum ActionKind {
     Hopscotch { court: Entity, turn: bool, at: Vec2, face: Vec2, with: Option<(Entity, Vec2, Vec2)> },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
+    /// Training a horse for racing at the posts up on it, in a tone (`trainingposts`; `riding`
+    /// rides the laps).
+    TrainForRacing { posts: Entity, horse: Entity, tone: crate::trainingposts::Tone },
+    /// Watching a horse train at the posts, from beside them (`trainingposts`).
+    WatchTraining { posts: Entity, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4058,7 +4068,9 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
+                        // (Beside the training posts, 4 to 6 m off.)
+                        ActionKind::WatchTraining { at, .. } => Some((*at, floor.0)),
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4879,7 +4891,12 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
+                            // (Beside the posts, turned to them: `trainingposts` sees to the watching.)
+                            ActionKind::WatchTraining { face, .. } => {
+                                tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                                anim.pose = Pose::Stand;
+                            }
                             // (At the post: the horse called over, `hitching` ties it once it's there;
                             // or the rope untied.)
                             ActionKind::TieHorse { post, horse, part } => {
@@ -6519,7 +6536,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

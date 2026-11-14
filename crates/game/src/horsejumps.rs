@@ -219,10 +219,16 @@ impl HorseSkills {
     /// Racing points for galloping so many minutes, tiring it as it learns; the level reached if
     /// it's a new one.
     pub fn race(&mut self, points: f32, minutes: f32) -> Option<u32> {
+        self.train(points, minutes, 1.0)
+    }
+
+    /// Racing points for so many minutes' training, tiring it at the training's own rate (a
+    /// training tone's `kFatigueMotiveMultiplier`); the level reached if it's a new one.
+    pub fn train(&mut self, points: f32, minutes: f32, fatigue: f32) -> Option<u32> {
         let table = crate::interact::skill_points("Racing");
         let before = self.racing_level();
         self.racing = crate::interact::points_to_level(table, crate::interact::level_to_points(table, self.racing) + points.max(0.0));
-        self.fresh = (self.fresh - 200.0 / FATIGUE_HOURS * racing_fatigue(before) * minutes / 60.0).max(-100.0);
+        self.fresh = (self.fresh - 200.0 / FATIGUE_HOURS * racing_fatigue(before) * fatigue * minutes / 60.0).max(-100.0);
         if self.fresh <= -98.0 {
             self.worn_out = true;
         }
@@ -706,8 +712,10 @@ fn pick_up(
     }
 }
 
-/// Horses rest from jumping: fresh again over four hours.
-fn rest(delta: Res<crate::clock::SimDelta>, mut horses: Query<&mut HorseSkills, Without<HorseJumping>>) {
+/// Horses rest from jumping: fresh again over four hours (not while they're ridden or training,
+/// tiring as they learn).
+#[allow(clippy::type_complexity)]
+fn rest(delta: Res<crate::clock::SimDelta>, mut horses: Query<&mut HorseSkills, (Without<HorseJumping>, Without<crate::riding::Ridden>, Without<crate::trainingposts::Training>)>) {
     let hours = delta.0 / 60.0;
     if hours <= 0.0 {
         return;

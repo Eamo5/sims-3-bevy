@@ -43,6 +43,8 @@ pub enum PetCommand {
     GetToy(Entity),
     /// Up into the lap of a Sim sitting on a sofa (`petlap`).
     SitOnSim(Entity),
+    /// Training for racing at the posts, in a tone (`trainingposts`).
+    Train(Entity, crate::trainingposts::Tone),
 }
 
 /// An order for a pet, to be seen to.
@@ -166,6 +168,11 @@ fn obey(
                 {
                     notes.push(format!("{} can't get there.", pet.name));
                 }
+                continue;
+            }
+            PetCommand::Train(posts, tone) => {
+                commands.entity(e).insert(crate::trainingposts::TrainOrder { posts, tone, own_accord: false });
+                info!("pet control: {} told to train for racing", pet.name);
                 continue;
             }
             PetCommand::GetToy(c) => {

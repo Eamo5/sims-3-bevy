@@ -256,11 +256,37 @@ pub struct Mounted {
     throw_at: Option<f64>,
     /// To be tied up at a hitching post (`hitching`): which, at which place, the spot there.
     tie: Option<(Entity, usize, Vec2)>,
+    /// Training for racing at the posts (`trainingposts`), in a tone: its laps ridden, its own
+    /// gains in place of a ride's.
+    pub training: Option<crate::trainingposts::Tone>,
 }
 
 impl Mounted {
     pub fn new(horse: Entity, unsaddle: bool) -> Self {
-        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None, sore_at: f64::INFINITY, throw_at: None, tie: None }
+        Self { horse, stage: Stage::On(0), path: Vec::new(), gait: 0, rider: IDLES[0].1, benefit_at: 0.0, started: false, unsaddle, jump: None, compete: None, sore_at: f64::INFINITY, throw_at: None, tie: None, training: None }
+    }
+
+    /// Ridden along a way at a gait (a lap of the training posts), from where the horse stands.
+    pub fn set_route(&mut self, path: Vec<Vec2>, gait: usize) {
+        self.path = path;
+        self.gait = gait;
+        self.jump = None;
+    }
+
+    /// The way still to ride.
+    pub fn route(&self) -> &[Vec2] {
+        &self.path
+    }
+
+    /// More of the way, after what's left of it (the next lap, before this one's run out).
+    pub fn extend_route(&mut self, more: Vec<Vec2>, gait: usize) {
+        self.path.extend(more);
+        self.gait = gait;
+    }
+
+    /// Pulled up where it is.
+    pub fn halt(&mut self) {
+        self.path.clear();
     }
 
     /// Playing in step with the horse (not saddling it).
@@ -519,6 +545,8 @@ pub(crate) fn ride(
                             off = true;
                             queue.0.remove(i);
                         }
+                        // (Training at the posts: kept while it lasts, `trainingposts` riding it.)
+                        ActionKind::TrainForRacing { .. } => i += 1,
                         // (Off to the Equestrian Center: ridden off to it.)
                         ActionKind::Equestrian { lot, task } => {
                             compete = Some((lot, task));
@@ -534,6 +562,10 @@ pub(crate) fn ride(
                 }
                 if !matches!(queue.0.front(), Some(a) if matches!(a.kind, ActionKind::Ride { .. }) && !a.cancel) {
                     off = true;
+                }
+                // (Ridden elsewhere, at a jump or off: the training's over.)
+                if off || to.is_some() || jump_to.is_some() || compete.is_some() {
+                    queue.0.retain(|a| !matches!(a.kind, ActionKind::TrainForRacing { .. }));
                 }
                 // (Thrown off: a horse in a foul mood as its mood turns, a starving or exhausted
                 // one when its patience is out; not over a jump or on the way to one.)
@@ -668,8 +700,9 @@ pub(crate) fn ride(
                     // (At a gallop, the walk styles the game counts as galloping.)
                     let galloping = !m.path.is_empty() && (m.gait == 2 || (m.jump.is_some() && m.path.len() == 1));
                     riding_points = (POINTS_A_MINUTE + if galloping { POINTS_AT_SPEED } else { 0.0 }) * minutes;
-                    // (The horse's Racing at a gallop, while it's fresh for learning.)
-                    if galloping {
+                    // (The horse's Racing at a gallop, while it's fresh for learning; training's own
+                    // at the posts, `trainingposts`.)
+                    if galloping && m.training.is_none() {
                         match hskills.as_deref_mut() {
                             Some(s) if !s.worn_out => {
                                 if let Some(l) = s.race(RACING_AT_SPEED * minutes, minutes) {
@@ -701,7 +734,9 @@ pub(crate) fn ride(
                     riding_points += BENEFIT_RIDING;
                 }
                 if riding_points > 0.0 {
-                    let rate = crate::life::skill_rate(&sim.traits, "Riding") * mood.map_or(1.0, |m| m.skill_rate());
+                    // (A training tone's say in it: `kRidingSkillGainMultiplier`.)
+                    let tone = m.training.map_or(1.0, |t| t.tuning().riding);
+                    let rate = crate::life::skill_rate(&sim.traits, "Riding") * mood.map_or(1.0, |m| m.skill_rate()) * tone;
                     if let Some(l) = skills.add_points("Riding", riding_points * rate) {
                         notes.push(format!("{} reached level {l} in Riding!", sim.first));
                         life.write(crate::life::LifeEvent::new(e, crate::life::LifeEventKind::SkillUp { skill: "Riding", level: l }));

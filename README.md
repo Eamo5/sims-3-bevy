@@ -1233,6 +1233,29 @@ installation is unreachable.
   pack's kick, the bars falling with its half). `JUMP_TEST=<horse>[:<jumps>]`, `JUMP_OBSTACLE`,
   `JUMP_AT`, `JUMP_SKILL`, `JUMP_FORCE`, `JUMP_AUTO`, `JUMP_HATES`, `JUMP_PICKUP`, `JUMP_PIE`
   (tests).
+  Horses train for racing at the Dashing Training Posts (the pack's `TrainingPosts`): at a gallop
+  through each post on the lot in turn (up to twelve, `kMaxPostCount`), in at one end and out at
+  the other (its routing slots, 2.5 m further out: `RoutingSlotPos`), the nearest next, swinging
+  out and round to come back through where it would turn back on itself; lap after lap till it
+  needs a break from learning or is called away. A played horse is sent ("Train For Racing ›", in
+  a tone; greyed in need of a break or with the posts taken, "Shadow is already training on this
+  post."), and a restless one goes of its own accord. A rider up on a horse rides it ("Train
+  Freebird For Racing", from Riding 2, `kLevelForTrainForRacing`, else greyed with the game's
+  words), its tone picked from the interaction queue's tones box, as work's is. The tones are the
+  game's XML tuning: Basic Training; Jockey Training (Racing 2, ridden only: Riding 1.5 times,
+  Racing 0.6); Endurance Training (Racing 4: at a trot, half as tiring and thirsty, slower to
+  learn); Hard Gallop (Racing 6: Racing 2.25 times, twice as tiring and thirsty); Perfect Pace
+  (Racing 8: Racing 1.75 times, a little more tiring), each with its words on the box's tips. At a
+  gallop the horse learns Racing as galloping teaches it (`kHorseRacingSkillGainWhileGalloping`,
+  20 a minute ridden, 10 alone) and the training's own (`SkillRacing`, the rider's
+  `RacingSkillMultiplier` on it, a Lazy horse's 0.6, a Fast one's 1.5), exercised and thirstier
+  for it (Racing's `kThirstMultiplierPerLevel`), tiring as it learns (no rest from that while
+  ridden or training); its rider has fun and learns Riding. From Racing 5 a session leaves it a
+  Pumped Pony (+30, two hours: `kLevelForPumpedPony`). Sims about "Watch" (4 to 6 m off to the
+  side, `kMinWatchDistance`), turned to the posts, cheering as the horse comes through one
+  (`ProdWatchers`), with fun and company (Fun 30, Social 50 an hour), till it's done.
+  `TRAINING_TEST=<horse>` with `TRAINING_RIDE=1`, `TRAINING_TONE`, `TRAINING_POSTS`,
+  `TRAINING_FRESH`, `TRAINING_WATCH=<first name>`, `HORSE_RACING` (tests).
   The Equestrian Center holds competitions as the game's `EnterEquestrianCompetition` has them:
   a Sim up on a horse picks "Enter Equestrian Competition..." on the center's menu (clicking it
   on foot or ridden up to), then Racing, Show Jumping or Cross-Country and its level (Beginner,

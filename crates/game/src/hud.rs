@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1361,7 +1361,19 @@ fn world_click(
             let hits = ray_cast.cast_ray(ray, &MeshRayCastSettings::default().with_filter(&filter));
             let target = hits.first().and_then(|(e, _)| ancestor_with(*e, &parents, is_target)).or_else(|| pick_by_box(ray, &pickable)).filter(|t| is_target(*t));
             let (title, options) = match target {
-                Some(t) if objects.contains(t) => objects.get(t).map(|o| (o.name.clone(), crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok(), toycrates_q.get(t).ok()))).unwrap_or_default(),
+                Some(t) if objects.contains(t) => objects
+                    .get(t)
+                    .map(|o| {
+                        let mut opts = crate::petcontrol::object_options(pet, t, o, bowl_food_q.get(t).ok(), toycrates_q.get(t).ok());
+                        // (Training posts: trained at, in a tone, `trainingposts`.)
+                        if o.kind == ObjectKind::TrainingPosts {
+                            pie.submenus.clear();
+                            let trainee = training_q.iter().find(|(_, tr)| tr.posts.contains(&t)).and_then(|(h, _)| pets_q.get(h).ok().map(|p| (h, p.0.name.as_str())));
+                            opts.extend(crate::trainingposts::horse_options(t, pe, pet, horse_skills_q.get(pe).ok(), trainee, &mut pie.submenus, submenu_kind));
+                        }
+                        (o.name.clone(), opts)
+                    })
+                    .unwrap_or_default(),
                 Some(t) if sims.contains(t) => {
                     let (sim, member, _) = sims.get(t).unwrap();
                     let liking = bonds.map_or(if member { crate::pets::FAMILY_LIKING } else { 0.0 }, |b| b.liking(sim.id, member));
@@ -1863,6 +1875,20 @@ fn world_click(
                 let taken: Vec<usize> = here.iter().map(|x| x.1).collect();
                 let part = crate::hitching::free_part(&taken).unwrap_or(0);
                 options.extend(crate::hitching::post_options(t, part, riding, taken.len(), &free, &tied_here, &mut pie.submenus, submenu_kind));
+            }
+            // (Training posts: up on a horse, "Train <Horse> For Racing"; on foot, "Watch" a horse
+            // training there: `trainingposts`.)
+            if obj.kind == ObjectKind::TrainingPosts
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let ptf = gtf.compute_transform();
+                let riding = mounted_q.get(actor).ok().filter(|m| m.up()).and_then(|m| pets_q.get(m.horse).ok().map(|p| (m.horse, p.0, horse_skills_q.get(m.horse).ok())));
+                let trainee = training_q.iter().find(|(_, tr)| tr.posts.contains(&t)).and_then(|(h, _)| pets_q.get(h).ok().map(|p| (h, p.0.name.as_str())));
+                let here = pickable.get(actor).map_or(ptf.translation.xz(), |a| a.1.translation().xz());
+                let level = writers.get(actor).map_or(0, |w| w.1.level("Riding"));
+                let g = nav_grid.as_deref();
+                let free = |p: Vec2| g.is_none_or(|g| g.cell_of(p).is_some_and(|(x, z)| !g.is_blocked(x, z)));
+                options.extend(crate::trainingposts::sim_options(t, &ptf, actor_sim, level, riding, trainee, here, free));
             }
             // (A horse jump: "Jump" up on a horse, "Pick Up" its bars knocked down.)
             if obj.kind == ObjectKind::HorseJump
