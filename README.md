@@ -713,6 +713,26 @@ installation is unreachable.
   several, `LetCarriedSimRide`): from beside it, the toddler set on and rocked a while, then taken
   back into their arms, sometimes unhappy at it (`kChanceForToddlerSadReaction`, 0.4); fun and
   company for both. `SPRING_RIDER_TEST=<instance>`, with `SPRING_RIDER_TODDLER=1` (tests).
+  The See-Me See-You Seesaw (Generations' `Seesaw`) is played on by children and up ("Play On";
+  a Daredevil's "Play On Extreme"), from its places as the game's routing slots have them (a
+  grown-up from either end, a child from the ends or beside either seat, `mAdultSlots`): with
+  the game's `Seesaw` clips, onto the raised seat and pulling it down, or onto the low one; a
+  Daredevil, half the time the north end's up (`kPercentageGetOnAsDaredevil`), runs up the plank
+  from the low end to the high seat. Each clip is played from its own place on the seesaw (its
+  `world_offset` that place seen from the Sim), the plank playing its half in step. Alone, they sit
+  waiting for someone ("Teeter", `WaitToTeeter`: Fun 50 an hour); "Seesaw With... ›" a Sim about
+  (within 30 m, `kMaxDistanceToAsk`; greyed with nobody, "There are no other Sims on this lot to
+  play with.") has them call them over (`CallOver`, in their voice), who comes to join; anyone
+  "Join"s one waiting. The joiner gets on the raised end, the two come level (`Two People
+  Idling`), start, and teeter up and down in turn (`Teeter`: Fun 50, Social 70 an hour, liking
+  each other the more as they chat, `TryGroupTalk`) till one's had their fun, needs something or
+  is told otherwise; then they stop and both get off together (`Exit Two People`, the seesaw left
+  north end up), while one alone gets off their end and leaves it down there (`NorthSideIsUp`).
+  Told to stop midway, they finish getting off first. Children and teens short of fun go and sit
+  on one of their own accord (giving up after `kTimeToSpendOnThisObject` with nobody coming),
+  and a child, a Childish Sim or anyone bored nearby joins one waiting. `SEESAW_TEST=1` with
+  `SEESAW_WHO`, `SEESAW_NEAR`, `SEESAW_WITH`, `SEESAW_JOIN`, `SEESAW_DAREDEVIL=1`,
+  `SEESAW_MINUTES`, `SEESAW_PIE=empty|join` (tests).
 - **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
   "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
   (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players

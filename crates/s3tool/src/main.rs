@@ -1630,7 +1630,7 @@ fn main() {
             println!("{name}: {:.2}s, {} tracks", c.duration, c.tracks.len());
             for (h, t) in &c.tracks {
                 let n = names.iter().find(|n| s3pkg::fnv32(n) == *h || s3pkg::fnv32(&n.to_ascii_lowercase()) == *h).cloned().unwrap_or_default();
-                println!("  {h:08X} {n:20} t0 {:?} t1 {:?} r0 {:?}", t.translation.first().map(|x| x.1), t.translation.last().map(|x| x.1), t.rotation.first().map(|x| x.1));
+                println!("  {h:08X} {n:20} t0 {:?} t1 {:?} r0 {:?} r1 {:?}", t.translation.first().map(|x| x.1), t.translation.last().map(|x| x.1), t.rotation.first().map(|x| x.1), t.rotation.last().map(|x| x.1));
                 // (SAMPLES=<n>: its translation keys at n times along it.)
                 if let Some(k) = std::env::var("SAMPLES").ok().and_then(|v| v.parse::<usize>().ok()).filter(|k| *k > 1 && t.translation.len() > 2) {
                     for i in 0..k {

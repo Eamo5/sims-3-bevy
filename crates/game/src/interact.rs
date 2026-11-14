@@ -285,6 +285,8 @@ pub enum ObjectKind {
     /// A playground spring rider (Generations' `PlaygroundRide`s: the bronco, the rocket, the
     /// pirate ship...): ridden by children (`springriders`).
     SpringRider,
+    /// A seesaw (Generations' `Seesaw`): sat on, alone or two together (`seesaw`).
+    Seesaw,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -413,6 +415,8 @@ impl ObjectKind {
             Self::TrainingPosts
         } else if has("environment.springrider") {
             Self::SpringRider
+        } else if has("environment.seesaw") {
+            Self::Seesaw
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -623,7 +627,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -3151,6 +3155,9 @@ pub enum ActionKind {
     /// A toddler in their arms set on a spring rider and rocked on it, from beside it
     /// (`springriders`): where they stand and face.
     ToddlerRide { ride: Entity, child: Entity, at: Vec2, face: Vec2 },
+    /// On a seesaw (`seesaw`): from which of its places, first on or joining the one on it, the
+    /// daredevil's way, calling someone over to it; where that place is and the way it faces.
+    Seesaw { seesaw: Entity, spot: crate::seesaw::Spot, join: bool, daredevil: bool, call: Option<Entity>, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4090,7 +4097,7 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } => Some((*at, floor.0)),
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4917,8 +4924,9 @@ pub(crate) fn run_actions(
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Stand;
                             }
-                            // (Beside the spring rider: `springriders` sets the toddler on it.)
-                            ActionKind::ToddlerRide { face, .. } => {
+                            // (Beside the spring rider: `springriders` sets the toddler on it; at
+                            // a seesaw's place, `seesaw` gets them on.)
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6561,7 +6569,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

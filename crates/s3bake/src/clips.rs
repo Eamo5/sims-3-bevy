@@ -270,6 +270,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (Seesaws: getting on and off, waiting, calling someone over, teetering; the plank's halves.)
+    "a2o_Seesaw_",
+    "c2o_Seesaw_",
     // (Spring riders: a child up on one rocking, a toddler set on one; the ride's own halves.)
     "c2o_playgroundRide_",
     "a2p_playgroundRide_",
