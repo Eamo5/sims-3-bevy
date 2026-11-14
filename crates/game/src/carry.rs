@@ -190,6 +190,8 @@ fn with_child(kind: &ActionKind, child: Entity, age: Age) -> bool {
         ActionKind::GoHere(..) | ActionKind::Outro { .. } | ActionKind::WakeUp { .. } => true,
         ActionKind::Social { target, social } => *target == child && in_arms(crate::social::social(*social).name, age),
         ActionKind::Carry { child: c, step, .. } => *c == child && !matches!(step, CarryStep::PickUp { .. }),
+        // (Set on a spring rider from the arms: `springriders`.)
+        ActionKind::ToddlerRide { child: c, .. } => *c == child,
         _ => false,
     }
 }
@@ -586,6 +588,10 @@ fn held_idle(
         if moving || being_moved {
             continue;
         }
+        // (On a spring rider: its clips, `springriders`.)
+        if queue.0.front().is_some_and(|a| matches!(a.kind, ActionKind::ToddlerRide { child: c, .. } if c == child) && matches!(a.phase, Phase::Running(_))) {
+            continue;
+        }
         if carrying.is_none() {
             commands.entity(me).insert(carry_pose(sim.age));
         }
@@ -606,7 +612,7 @@ fn held_idle(
 #[allow(clippy::type_complexity)]
 fn follow(
     mut commands: Commands,
-    mut littles: Query<(Entity, &Carried, &Sim, &mut Transform, &mut Floor), Without<CarryMove>>,
+    mut littles: Query<(Entity, &Carried, &Sim, &mut Transform, &mut Floor), (Without<CarryMove>, Without<crate::springriders::OnRide>)>,
     carriers: Query<(&Transform, &crate::simbody::Skeleton, &Floor), (Without<Carried>, With<Sim>)>,
     joints: Query<&GlobalTransform>,
 ) {
@@ -712,6 +718,14 @@ impl CarryLook<'_, '_> {
         let Ok((_, sim, ..)) = self.littles.get(child) else { return Vec::new() };
         let tired = matches!(step, CarryStep::InCrib(_)) && self.carried.get(child).is_ok_and(|c| tired(c.2));
         vec![(label(step, &sim.first, tired), ActionKind::Carry { child, step, secs: f32::INFINITY })]
+    }
+
+    /// The toddler someone's holding, and the toddlers about free to be picked up (not in
+    /// anyone's arms nor a crib): for a ride set on (`springriders`).
+    pub fn toddlers(&self, actor: Entity) -> (Option<(Entity, String)>, Vec<(Entity, String)>) {
+        let held = self.held_by(actor).and_then(|c| self.littles.get(c).ok()).filter(|l| l.1.age == Age::Toddler).map(|l| (l.0, l.1.first.clone()));
+        let about = self.littles.iter().filter(|l| l.1.age == Age::Toddler && !l.5 && l.3.is_none() && !l.4).map(|l| (l.0, l.1.first.clone())).collect();
+        (held, about)
     }
 
     /// The ground's menu for someone holding a little one: put down there (the game's

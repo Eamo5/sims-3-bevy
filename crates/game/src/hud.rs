@@ -1876,6 +1876,17 @@ fn world_click(
                 let part = crate::hitching::free_part(&taken).unwrap_or(0);
                 options.extend(crate::hitching::post_options(t, part, riding, taken.len(), &free, &tied_here, &mut pie.submenus, submenu_kind));
             }
+            // (A spring rider: a toddler of the household set on it by a teen or grown-up,
+            // `springriders`.)
+            if obj.kind == ObjectKind::SpringRider
+                && crate::carry::can_carry(actor_sim.age)
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let rtf = gtf.compute_transform();
+                let (held, about) = carry_q.toddlers(actor);
+                let about: Vec<(Entity, String)> = about.into_iter().filter(|(c, _)| sims.get(*c).is_ok_and(|s| s.1)).collect();
+                options.extend(crate::springriders::adult_options(t, &rtf, held.as_ref().map(|(c, n)| (*c, n.as_str())), &about, &mut pie.submenus, submenu_kind));
+            }
             // (Training posts: up on a horse, "Train <Horse> For Racing"; on foot, "Watch" a horse
             // training there: `trainingposts`.)
             if obj.kind == ObjectKind::TrainingPosts

@@ -498,8 +498,8 @@ pub(crate) fn animate_objects(
     let target_of = |queue: &ActionQueue| {
         queue.0.front().and_then(|a| match a.kind {
             ActionKind::Object { target, .. } | ActionKind::Repair { target } | ActionKind::Upgrade { target, .. } | ActionKind::Outro { target, .. } => Some(target),
-            // (A tub a pet's bathed in.)
-            ActionKind::BathePet { tub, .. } => Some(tub),
+            // (A tub a pet's bathed in; a spring rider a toddler's rocked on.)
+            ActionKind::BathePet { tub, .. } | ActionKind::ToddlerRide { ride: tub, .. } => Some(tub),
             // (A crib's side let down for a little one lifted out or put in.)
             ActionKind::Carry { step: crate::carry::CarryStep::PickUp { crib: Some(c) } | crate::carry::CarryStep::InCrib(c), .. } => Some(c),
             _ => None,

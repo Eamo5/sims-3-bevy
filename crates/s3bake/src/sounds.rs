@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 16;
+pub const SOUNDS_VERSION: u32 = 17;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -232,6 +232,13 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "fireplace_fire_large_lp",
     // (A game of hopscotch won.)
     "sting_hopscotch_win",
+    // (Spring riders' tunes while they're ridden.)
+    "pground_loop_rocket",
+    "pground_loop_pirate",
+    "pground_loop_seahorse",
+    "pground_loop_bumblebee",
+    "pground_loop_future_car",
+    "pground_loop_future_bike",
     // Named by the game's scripts for what's done here (stings, the interface's sounds, the
     // equestrian competitions', Create a Sim's voice lines, fountains' and fountain jets' water).
     "fountain_run_asia_lp",

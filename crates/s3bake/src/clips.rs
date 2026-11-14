@@ -270,6 +270,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (Spring riders: a child up on one rocking, a toddler set on one; the ride's own halves.)
+    "c2o_playgroundRide_",
+    "a2p_playgroundRide_",
     // (Hopscotch: the marker tossed, the court hopped, a stumble; children's too.)
     "a2o_Hopscotch_",
     "c2o_Hopscotch_",
@@ -990,7 +993,7 @@ pub const PROP_ACTORS: &[&str] = &[
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's
 /// `_pool`, the drum kit's `_drumKit`, the waste chute's `_trashchute`).
-pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit", "trashChute", "washer", "machine"];
+pub const OBJECT_ACTORS: &[&str] = &["pool", "arcadeClaw", "bull", "drumKit", "trashChute", "washer", "machine", "springRider"];
 
 /// A pet's social of its own with a Sim or another pet (`ad2a_soc_neutral_lick_friendly_neutral_x`,
 /// `ac2ad_soc_neutral_play_start_y`): its side and the other's.

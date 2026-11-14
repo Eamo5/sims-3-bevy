@@ -282,6 +282,9 @@ pub enum ObjectKind {
     /// Race training posts (the Pets pack's `TrainingPosts`): a horse trained for racing at them,
     /// ridden or alone (`trainingposts`).
     TrainingPosts,
+    /// A playground spring rider (Generations' `PlaygroundRide`s: the bronco, the rocket, the
+    /// pirate ship...): ridden by children (`springriders`).
+    SpringRider,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -408,6 +411,8 @@ impl ObjectKind {
             Self::Hopscotch
         } else if has("hobbiesskills.trainingposts") {
             Self::TrainingPosts
+        } else if has("environment.springrider") {
+            Self::SpringRider
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -618,7 +623,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -683,6 +688,10 @@ impl ObjectKind {
     /// The routing slot (`routingSlot_N`) this kind's clips are played from, if they need one.
     pub fn route_slot(self) -> Option<u8> {
         use ObjectKind as K;
+        // (A spring rider's: a child's, its right side, the ride's clips played unmirrored.)
+        if self == K::SpringRider {
+            return Some(1);
+        }
         matches!(
             self,
             K::PoolTable
@@ -1957,6 +1966,9 @@ static DOLLHOUSE: [InteractionDef; 3] = [
 static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
 /// (Up the ladder and down the slide, once: played again and again, as children do.)
 static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
+/// (A spring rider ridden a quarter to a half hour, the game's `kTimeRangeForRiding`: Fun 100 an
+/// hour, `Ride`'s tuning.)
+static SPRING_RIDER: [InteractionDef; 1] = [def("Ride", 22.5, [0.0, 0.0, -4.0, 0.0, 0.0, 100.0], Pose::Use)];
 /// (The game's `kTimeToMopPuddle`: five minutes with the mop.)
 /// A pet bowl filled (the game's `FillBowl`, §25 a bite it's short: `petneeds`), by grown-ups of the
 /// household of their own accord once it's down to three bites; a litter box cleaned out once it
@@ -2525,6 +2537,10 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (Up the tower's ladder, about in its lookout, and down its pole at the end.)
         "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp_x"), &["c2o_JungleGymTower_loop1_x", "c2o_JungleGymTower_loop2_x"]).ending(&["c2o_JungleGymTower_slideDown_x"], 6.1),
         "Play on Slide" => A::steps("c2o_JungleGymSlide_climbUp_x", &["c2o_JungleGymSlide_breathe_x"], &["c2o_JungleGymSlide_succeed_x"]),
+        // (Up onto it, rocking on its springs, and off: the playground ride's clips, the ride
+        // rocking with its own half of them.)
+        "Ride" if kind == ObjectKind::SpringRider => A::new(Some("c2o_playgroundRide_start_x"), &["c2o_playgroundRide_loop1_x", "c2o_playgroundRide_loop2_x", "c2o_playgroundRide_loop3_x", "c2o_playgroundRide_loop4_x"])
+            .ending(&["c2o_playgroundRide_stop_x"], 4.1),
         "Play Foosball" => A::new(None, &["a2o_foosballTable_play"]),
         // (The cue fetched from the rack, then shots round the table, the balls rolling.)
         "Play Pool" => A::new(
@@ -2862,7 +2878,7 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
 
@@ -2935,6 +2951,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::DollHouse => &DOLLHOUSE,
         ObjectKind::JungleGym => &JUNGLEGYM,
         ObjectKind::Slide => &SLIDE,
+        ObjectKind::SpringRider => &SPRING_RIDER,
         ObjectKind::Puddle => &PUDDLE,
         ObjectKind::PlantShreds => &SHREDS,
         ObjectKind::Foosball => &FOOSBALL,
@@ -3131,6 +3148,9 @@ pub enum ActionKind {
     TrainForRacing { posts: Entity, horse: Entity, tone: crate::trainingposts::Tone },
     /// Watching a horse train at the posts, from beside them (`trainingposts`).
     WatchTraining { posts: Entity, at: Vec2, face: Vec2 },
+    /// A toddler in their arms set on a spring rider and rocked on it, from beside it
+    /// (`springriders`): where they stand and face.
+    ToddlerRide { ride: Entity, child: Entity, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4069,8 +4089,8 @@ pub(crate) fn run_actions(
                             continue;
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
-                        // (Beside the training posts, 4 to 6 m off.)
-                        ActionKind::WatchTraining { at, .. } => Some((*at, floor.0)),
+                        // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } => Some((*at, floor.0)),
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4896,6 +4916,11 @@ pub(crate) fn run_actions(
                             ActionKind::WatchTraining { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Stand;
+                            }
+                            // (Beside the spring rider: `springriders` sets the toddler on it.)
+                            ActionKind::ToddlerRide { face, .. } => {
+                                tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                                anim.pose = Pose::Use;
                             }
                             // (At the post: the horse called over, `hitching` ties it once it's there;
                             // or the rope untied.)
@@ -6536,7 +6561,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

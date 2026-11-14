@@ -702,6 +702,17 @@ installation is unreachable.
   by free will only for the Evil, Grumpy, Inappropriate and Hot-Headed; eight minutes of
   kicking it in, a child's eighteen, with the game's clips), left in its own smashed state (the model's
   `dollhouseSmashed` geometry, baked alongside) till it's thrown away. Kept in saves.
+  Spring riders (Generations' `PlaygroundRide`s: the Bust R Bronco, the Rockin' Rocket, the High
+  Seas Hijinks pirate ship, the Snappin' Seahorse, the Busy Bee Bouncing Bobble, the future's
+  Springy Speeder and BoingBike) are ridden by children ("Ride": Fun 100 an hour, a quarter to
+  half an hour, `kTimeRangeForRiding`): up onto it from its side, rocking on its springs with the
+  ride rocking under them (its own half of the game's `playgroundRide` clips) and off, playing its
+  tune while it's ridden (`GetMusicLoopName`: the rocket's, the pirate ship's...; the bronco has
+  none in the game's sounds). A teen or grown-up sets a toddler of the household on one ("Let
+  Dakota Ride", picked up first if they're not in their arms; "Let Toddler Ride... ›" for one of
+  several, `LetCarriedSimRide`): from beside it, the toddler set on and rocked a while, then taken
+  back into their arms, sometimes unhappy at it (`kChanceForToddlerSadReaction`, 0.4); fun and
+  company for both. `SPRING_RIDER_TEST=<instance>`, with `SPRING_RIDER_TODDLER=1` (tests).
 - **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
   "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
   (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players
