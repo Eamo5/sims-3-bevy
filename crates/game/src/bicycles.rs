@@ -43,6 +43,15 @@ pub struct BikeOut {
     home: Transform,
 }
 
+/// Where a bike ridden home is parked: in the nearest bike rack with room (its slot: the rack's
+/// own place and facing), the one it stood in first if it did; else where it stood.
+pub fn rack_spot(racks: &[Transform], home: Transform, taken: impl Fn(Vec3) -> bool) -> Transform {
+    if racks.iter().any(|r| r.translation.distance(home.translation) < 0.3) {
+        return home;
+    }
+    racks.iter().filter(|r| !taken(r.translation)).min_by(|a, b| a.translation.distance(home.translation).total_cmp(&b.translation.distance(home.translation))).copied().unwrap_or(home)
+}
+
 /// A bike out of sight down the street with its rider.
 #[derive(Component)]
 pub struct BikeAway;
@@ -207,12 +216,23 @@ fn come_back(
     mut sims: Query<(Entity, &Sim, &mut Transform, &mut SimAnim), (Without<AtRabbitHole>, Without<crate::interact::AtWork>, Without<crate::visit::OnLot>, Without<BikeRide>, Without<GameObject>)>,
     mut bikes: Query<(Entity, &GameObject, &BikeOut, &mut Transform), Without<Sim>>,
     (grid, exit): (Option<Res<crate::nav::NavGrid>>, Option<Res<crate::interact::LotExit>>),
+    (racks, parked): (Query<(&GameObject, &Transform), (Without<Sim>, Without<BikeOut>, Without<crate::visit::LotObject>)>, Query<(&GameObject, &Transform), (Without<Sim>, Without<BikeOut>, Without<BikeAway>)>),
 ) {
     let (Some(grid), Some(exit)) = (grid, exit) else { return };
+    let mut taken: Vec<Vec3> = Vec::new();
     for (b, o, out, mut btf) in &mut bikes {
         let Ok((e, sim, mut tf, mut anim)) = sims.get_mut(out.rider) else { continue };
         let child = o.kind == ObjectKind::ChildBicycle;
         let c = clips(child);
+        // (Parked in the lot's bike rack, where there's one with room: the game's
+        // `TryParkBikeInRack`; else back where it stood.)
+        let racks_here: Vec<Transform> = racks.iter().filter(|(r, _)| r.kind == ObjectKind::BikeRack).map(|(_, t)| *t).collect();
+        let home = rack_spot(&racks_here, out.home, |p| taken.iter().any(|t| t.distance(p) < 0.3) || parked.iter().any(|(g, t)| matches!(g.kind, ObjectKind::Bicycle | ObjectKind::ChildBicycle) && t.translation.distance(p) < 0.3));
+        if home.translation.distance(out.home.translation) > 0.01 {
+            info!("bicycles: {}'s bike to be parked in the bike rack at {:.1}", sim.first, home.translation);
+        }
+        taken.push(home.translation);
+        let out = BikeOut { rider: out.rider, home };
         // (In from the street to just behind where it stands, the last of it straight on.)
         let fwd = (out.home.rotation * Vec3::Z).xz().normalize_or(Vec2::Y);
         let stop = out.home.translation.xz() - fwd * c.roll_off;
@@ -380,6 +400,14 @@ fn bike_test(
                 let p = tf.translation + Vec3::new(2.0, 0.0, 1.0);
                 crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, p, 0.0);
                 info!("bike test: a bike at {p}");
+                // (BIKE_RACK=1: a bike rack beside it, to be parked in coming home.)
+                if std::env::var_os("BIKE_RACK").is_some()
+                    && let Some(rack) = data.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case("BicycleRack")).map(|c| c.objd)
+                {
+                    let r = p + Vec3::new(2.5, 0.0, 0.0);
+                    crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, rack, r, 0.0);
+                    info!("bike test: a bike rack at {r}");
+                }
             }
             stage.0 = 1;
         }
@@ -415,5 +443,15 @@ mod tests {
         assert!((facing - Vec2::new(-1.0, 0.0)).length() < 1e-4, "facing the bike");
         let along = (f.rotation * Vec3::X).xz();
         assert!((along - Vec2::new(0.0, 1.0)).length() < 1e-4, "its forward the clips' +x");
+    }
+
+    #[test]
+    fn a_bike_home_goes_in_the_nearest_rack_with_room() {
+        let home = Transform::from_xyz(0.0, 0.0, 0.0);
+        let racks = [Transform::from_xyz(5.0, 0.0, 0.0), Transform::from_xyz(2.0, 0.0, 0.0)];
+        assert_eq!(rack_spot(&racks, home, |_| false).translation, Vec3::new(2.0, 0.0, 0.0));
+        assert_eq!(rack_spot(&racks, home, |p| p.x == 2.0).translation, Vec3::new(5.0, 0.0, 0.0), "that one's taken");
+        assert_eq!(rack_spot(&racks, home, |_| true).translation, Vec3::ZERO, "no room: where it stood");
+        assert_eq!(rack_spot(&[], home, |_| false).translation, Vec3::ZERO);
     }
 }

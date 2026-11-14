@@ -275,6 +275,8 @@ pub enum ObjectKind {
     CatWallToy,
     /// What's left of a plant a horse ate (the pack's `HarvestableShreds`): cleaned up (`petgarden`).
     PlantShreds,
+    /// A bike rack (the game's `BikeRack`): a bike ridden home parked in it (`bicycles`).
+    BikeRack,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -395,6 +397,8 @@ impl ObjectKind {
             Self::PicnicTable
         } else if s.starts_with("sims3.gameplay.objects.vehicles.car") && !["service", "taxi", "bus", "police", "limo"].iter().any(|x| s.contains(x)) {
             Self::Car
+        } else if s.starts_with("sims3.gameplay.objects.vehicles.bikerack") {
+            Self::BikeRack
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -630,7 +634,7 @@ impl ObjectKind {
             | Self::Drums
             | Self::LaserHarp => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
-            Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle => "Outdoors",
+            Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
             Self::Phone => "Electronics",
             Self::HotTub => "Plumbing",

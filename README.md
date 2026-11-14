@@ -1524,8 +1524,10 @@ installation is unreachable.
   push off with the pack's `bicycle_getOn` (the bike rolling forward as the clip rolls it), and
   ride off the lot to the street, wheels and pedals turning at the riding cycle's pace, Saving
   the Environment as they go (the game's moodlet, +10); the bike's gone till they're back, and
-  then they ride in from the street, roll up to where it stood and get off (`getOff`).
-  `BIKE_TEST=1`, `BIKE_DIST` (tests).
+  then they ride in from the street, roll up to where it stood and get off (`getOff`). With a
+  bike rack on the lot (the Vertistation Bike Rack, the game's `BikeRack`), a bike ridden home
+  is parked in it, in the nearest with room (`TryParkBikeInRack`), else where it stood.
+  `BIKE_TEST=1`, `BIKE_RACK=1`, `BIKE_DIST` (tests).
 - **Collecting and fishing**: the world builders' spawners leave gems, metals and space rocks
   about the community lots (from the game's own tables, with their odds and prices); Sims
   crouch to collect them, catch the butterflies flitting about by day and the beetles in the
