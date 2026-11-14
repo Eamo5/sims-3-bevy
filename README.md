@@ -713,9 +713,10 @@ installation is unreachable.
   game's: half, and the hopscotch skill's say (−20 to +25) and the Athletic skill's (a child's
   own athletics, up to +20), from its XML tuning; a stumble sets the others laughing. Once
   everyone's had a turn, those who hopped both cleanly win (with others to beat): the game's
-  notice and `sting_hopscotch_win`, the winners cheering (`Hopscotch_win_react`), the rest
-  cheering them, or booing and sulking for the Grumpy, Mean-Spirited, Snobs and Hot-Headed; with
-  no winner, round again. Hopping is Athletic (a child's athletics), hopscotch and fun practice
+  notice and `sting_hopscotch_win`, the winners cheering (`Hopscotch_win_react`, a child's own)
+  and a winner's children with them, the rest taking it as the game's `EndGame` has them: the
+  Over-Emotional in tears, the Hot-Headed, Inappropriate, Losers and Perfectionists booing or
+  fuming, everyone else cheering the winners; with no winner, round again. Hopping is Athletic (a child's athletics), hopscotch and fun practice
   (the turn's tuning: 100, 25, 175 and Fun 50 an hour), company with others there and a little
   liking between them each turn (`kLTRimprovementForPlayingWithSomeone`). Hopscotch and a
   child's athletics are the game's hidden skills: kept, never shown. Children and teens short of

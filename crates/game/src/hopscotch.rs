@@ -309,6 +309,7 @@ fn turns(
     mut notes: ResMut<crate::interact::Notifications>,
     mut play: MessageWriter<crate::sound::PlaySound>,
     court_tfs: Query<&Transform, (With<GameObject>, Without<Sim>)>,
+    family: Res<crate::family::Genealogy>,
 ) {
     let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed].min(3.0);
     let hours = delta.0 / 60.0;
@@ -436,13 +437,19 @@ fn turns(
             play.write(crate::sound::PlaySound::ui("sting_hopscotch_win"));
         }
         info!("hopscotch: game over, won by {}", join(&names));
+        let winner_ids: Vec<u64> = winners.iter().filter_map(|w| sims.get(*w).ok().map(|s| s.1.id)).collect();
         for p in players {
             let Ok((_, sim, ..)) = sims.get(p) else { continue };
-            let kind = if winners.contains(&p) {
+            use crate::life::Trait as T;
+            // (The game's `EndGame`: a winner's child celebrates with them; the Over-Emotional
+            // cry; the Hot-Headed, Inappropriate, Losers and Perfectionists boo or fume; the
+            // rest cheer the winners.)
+            let parent_won = family.0.get(&sim.id).is_some_and(|me| me.parents.iter().any(|p| winner_ids.contains(p)));
+            let kind = if winners.contains(&p) || parent_won {
                 WIN
-            } else if sim.traits.contains(&crate::life::Trait::HotHeaded) {
-                "Angry"
-            } else if sim.traits.iter().any(|t| matches!(t, crate::life::Trait::Grumpy | crate::life::Trait::MeanSpirited | crate::life::Trait::Snob)) {
+            } else if sim.traits.contains(&T::OverEmotional) {
+                "Cry"
+            } else if sim.traits.iter().any(|t| matches!(t, T::HotHeaded | T::Inappropriate | T::Loser | T::Perfectionist)) {
                 if rng.random_bool(0.5) { "Boo" } else { "Angry" }
             } else {
                 "Cheer"
