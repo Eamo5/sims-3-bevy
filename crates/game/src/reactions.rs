@@ -336,7 +336,7 @@ fn on_moodlets(mut commands: Commands, clock: Res<GameClock>, mut had: Local<Has
 }
 
 /// A reaction's clips for a Sim of an age (a child's are the `c_` ones), if the game has them.
-fn clips_for(table: &[(String, Vec<s3bake::gamedata::IdleAnim>)], kind: &str, sim: &Sim, seated: bool, known: &HashSet<String>, rng: &mut impl Rng) -> Option<Vec<String>> {
+pub(crate) fn clips_for(table: &[(String, Vec<s3bake::gamedata::IdleAnim>)], kind: &str, sim: &Sim, seated: bool, known: &HashSet<String>, rng: &mut impl Rng) -> Option<Vec<String>> {
     let letter = crate::idles::age_letter(sim.age)?;
     let child = sim.age == Age::Child;
     // (Sitting down: the game's seated version, `_sitting_x` for a standing one's `_x` or

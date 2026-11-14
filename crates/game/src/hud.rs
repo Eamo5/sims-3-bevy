@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1823,6 +1823,21 @@ fn world_click(
                 let here = pickable.get(actor).map_or(ttf.translation.xz(), |a| a.1.translation().xz());
                 let slot = crate::walldancer::nearer_slot(&ttf, here);
                 options.extend(crate::walldancer::options(t, slot, actor_sim.age == crate::sim::Age::Child, &cats, &mut pie.submenus, submenu_kind));
+            }
+            // (A hopscotch court: practice, join a game, or play with someone about: `hopscotch`.)
+            if obj.kind == ObjectKind::Hopscotch
+                && crate::hopscotch::can_play(actor_sim.age)
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let ctf = gtf.compute_transform();
+                let n = courts_res.queue_len(t);
+                let others: Vec<(Entity, String, (Vec2, Vec2))> = company_q
+                    .iter()
+                    .filter(|(o, s, ..)| *o != actor && crate::hopscotch::can_play(s.age) && !courts_res.has(t, *o))
+                    .filter(|(o, ..)| pickable.get(*o).is_ok_and(|p| p.1.translation().distance(ctf.translation) < 30.0))
+                    .map(|(o, s, ..)| (o, s.full_name(), crate::hopscotch::wait_spot(&ctf, n + 1)))
+                    .collect();
+                options.extend(crate::hopscotch::options(t, &courts_res, actor, crate::hopscotch::wait_spot(&ctf, n), &others, &mut pie.submenus, submenu_kind));
             }
             // (A pet toy crate: its toys lying about put away: `toycrate`.)
             if obj.kind == ObjectKind::PetToyCrate && !actor_sim.age.is_little() {
@@ -4102,7 +4117,7 @@ fn update_skill_icons(
     mut last: Local<(Vec<(&'static str, u32)>, bool)>,
 ) {
     let (Ok(r), Ok((sim, skills))) = (row.single(), sel.single()) else { return };
-    let mut list: Vec<(&'static str, u32)> = skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, v)| (*k, *v as u32)).collect();
+    let mut list: Vec<(&'static str, u32)> = skills.0.iter().filter(|(k, v)| **v >= 1.0 && !crate::interact::hidden_skill(k)).map(|(k, v)| (*k, *v as u32)).collect();
     list.sort();
     if last.0 == list && last.1 == ui.is_some() {
         return;

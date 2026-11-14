@@ -254,7 +254,7 @@ fn tab_content(
     let ui = ui.as_deref_mut();
     commands.entity(root).with_children(|p| match *tab {
         SimTab::Skills => {
-            let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
+            let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(k, v)| **v > 0.01 && !crate::interact::hidden_skill(k)).map(|(k, v)| (*k, *v)).collect();
             list.sort_by(|a, b| b.1.total_cmp(&a.1));
             // (Just the open journal: the skills are in the game's panel.)
             if only_journal.0 {

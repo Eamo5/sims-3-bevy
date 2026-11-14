@@ -1421,7 +1421,13 @@ pub(crate) fn apply_loaded_game(
         floor.0 = s.floor.max(1);
         motives.0 = s.motives;
         // (And the packs' skills: Alchemy, Bot Building, Arcade Machine...)
-            skills.0 = s.skills.iter().filter_map(|(k, v)| SKILLS.iter().find(|x| *x == k).copied().or_else(|| crate::interact::known_skill(k).then(|| crate::pets::intern(k.clone()))).map(|x| (x, *v))).collect();
+            skills.0 = s
+                .skills
+                .iter()
+                .filter_map(|(k, v)| {
+                    SKILLS.iter().chain(crate::interact::HIDDEN_SKILLS.iter()).find(|x| *x == k).copied().or_else(|| crate::interact::known_skill(k).then(|| crate::pets::intern(k.clone()))).map(|x| (x, *v))
+                })
+                .collect();
         moodlets.0.clear();
         for (name, until) in &s.moodlets {
             if let Some(k) = MoodletKind::from_name(name) {

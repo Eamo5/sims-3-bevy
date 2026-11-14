@@ -1405,7 +1405,7 @@ fn skills_panel(
     // (A Sim's skills; a pet's its own: a dog's Tricks, a horse's Jumping and Racing, a cat's or
     // dog's Hunting, as the game's panel lists them for a pet.)
     let (mut list, first, female, age): (Vec<(&'static str, f32)>, String, bool, Option<crate::sim::Age>) = match (sel.single(), pet_sel.single()) {
-        (Ok((sim, skills)), _) => (skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect(), sim.first.clone(), sim.female, Some(sim.age)),
+        (Ok((sim, skills)), _) => (skills.0.iter().filter(|(k, v)| **v > 0.01 && !crate::interact::hidden_skill(k)).map(|(k, v)| (*k, *v)).collect(), sim.first.clone(), sim.female, Some(sim.age)),
         (_, Ok((pet, tricks, horse, hunting))) => (pet_skills(tricks, horse, hunting).into_iter().filter(|(_, v)| *v > 0.01).collect(), pet.name.clone(), pet.female, None),
         _ => return,
     };

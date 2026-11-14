@@ -201,9 +201,9 @@ pub struct ClipPlayer {
 const WORLD_OFFSET: u32 = 0x0EB4_037B;
 
 /// The clips whose travel is played: up the jungle gym's ladder, down its pole and the slide,
-/// where nothing else moves the body.
+/// hopping a hopscotch court (a stumble leaves them off it), where nothing else moves the body.
 fn travels(name: &str) -> bool {
-    name.starts_with("c2o_JungleGym") || name.get(1..).is_some_and(|n| n.starts_with("2o_waterSlide_"))
+    name.starts_with("c2o_JungleGym") || name.get(1..).is_some_and(|n| n.starts_with("2o_waterSlide_") || n.starts_with("2o_Hopscotch_"))
 }
 
 /// A rider's clip (`riding`: on a horse, getting on and off it): its body drawn back from the

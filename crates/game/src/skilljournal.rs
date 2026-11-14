@@ -108,7 +108,7 @@ fn journal_dialog(
             return;
         }
     }
-    let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(_, v)| **v > 0.01).map(|(k, v)| (*k, *v)).collect();
+    let mut list: Vec<(&'static str, f32)> = skills.0.iter().filter(|(k, v)| **v > 0.01 && !crate::interact::hidden_skill(k)).map(|(k, v)| (*k, *v)).collect();
     list.sort_by(|a, b| b.1.total_cmp(&a.1));
     let measures = crate::journal::Measures { journal, rels, cooking: skills.level("Cooking"), recipes, chess, author, data: gu.as_deref().map(|g| &*g.data), sim: Some((sim, skills)) };
     let stats: Vec<String> = crate::journal::statistics(skill).iter().map(|(label, m)| format!("{label}: {}", crate::journal::shown(*m, measures.value(*m)))).collect();

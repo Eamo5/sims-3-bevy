@@ -270,6 +270,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (Hopscotch: the marker tossed, the court hopped, a stumble; children's too.)
+    "a2o_Hopscotch_",
+    "c2o_Hopscotch_",
     // (Horses and dogs eating at the garden's plants.)
     "ah2o_harvestable_vine_eat_",
     "ad2o_harvestable_vine_eat_",
@@ -915,6 +918,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
 pub const PROP_ACTORS: &[&str] = &[
     // (An activity table's block.)
     "block",
+    // (Hopscotch's marker.)
+    "marker",
     "hoofPick",
     "hairDryer",
     "ropeFK",

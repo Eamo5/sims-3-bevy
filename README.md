@@ -702,6 +702,25 @@ installation is unreachable.
   by free will only for the Evil, Grumpy, Inappropriate and Hot-Headed; eight minutes of
   kicking it in, a child's eighteen, with the game's clips), left in its own smashed state (the model's
   `dollhouseSmashed` geometry, baked alongside) till it's thrown away. Kept in saves.
+- **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
+  "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
+  (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players
+  reached.", "No one to invite."). The players line up beside the court ("Waiting", three to
+  four metres off, now and then cheering or excited, `kWaitReactions`); at their turn they go to
+  its end ("Hop"), toss the marker to the three and hop it, and hopped cleanly, toss it to the
+  six and hop again (the game's `Hopscotch_throw`, `_success`, `_fail`, `_failReturning`, a
+  child's `c2o_` own, the clips carrying them along the court). A clean hop's chance is the
+  game's: half, and the hopscotch skill's say (−20 to +25) and the Athletic skill's (a child's
+  own athletics, up to +20), from its XML tuning; a stumble sets the others laughing. Once
+  everyone's had a turn, those who hopped both cleanly win (with others to beat): the game's
+  notice and `sting_hopscotch_win`, the winners cheering (`Hopscotch_win_react`), the rest
+  cheering them, or booing and sulking for the Grumpy, Mean-Spirited, Snobs and Hot-Headed; with
+  no winner, round again. Hopping is Athletic (a child's athletics), hopscotch and fun practice
+  (the turn's tuning: 100, 25, 175 and Fun 50 an hour), company with others there and a little
+  liking between them each turn (`kLTRimprovementForPlayingWithSomeone`). Hopscotch and a
+  child's athletics are the game's hidden skills: kept, never shown. Children and teens short of
+  fun go and play of their own accord. `HOPSCOTCH_TEST=1`, `HOPSCOTCH_WITH=<first name>`,
+  `HOPSCOTCH_SKILL=<level>` (tests).
 - **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).

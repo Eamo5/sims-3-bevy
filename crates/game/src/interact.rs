@@ -277,6 +277,8 @@ pub enum ObjectKind {
     PlantShreds,
     /// A bike rack (the game's `BikeRack`): a bike ridden home parked in it (`bicycles`).
     BikeRack,
+    /// A hopscotch court (Generations' `HopscotchCourt`): played on (`hopscotch`).
+    Hopscotch,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -399,6 +401,8 @@ impl ObjectKind {
             Self::Car
         } else if s.starts_with("sims3.gameplay.objects.vehicles.bikerack") {
             Self::BikeRack
+        } else if has("hobbiesskills.hopscotchcourt") {
+            Self::Hopscotch
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -609,7 +613,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SlippySlide | Self::DollHouse | Self::StuffedToy => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -3112,6 +3116,9 @@ pub enum ActionKind {
     PetHeldPet { pet: Entity },
     /// A horse fed produce from their hand (`horsetreats`).
     FeedProduce { horse: Entity, at: Vec2, key: String, quality: u8 },
+    /// Hopscotch at a court: waiting beside it, or hopping (its turn); bringing someone along to
+    /// play, where they'll wait (`hopscotch`).
+    Hopscotch { court: Entity, turn: bool, at: Vec2, face: Vec2, with: Option<(Entity, Vec2, Vec2)> },
     /// Over a horse jump, up on a horse (`horsejumps`; `riding` rides at it).
     HorseJump { obstacle: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -3261,6 +3268,14 @@ impl Skills {
     pub fn points(&self, skill: &str) -> f32 {
         level_to_points(skill_points(skill), self.0.get(skill).copied().unwrap_or(0.0))
     }
+}
+
+/// The game's hidden skills, kept but never shown: hopscotch, and a child's own athletics
+/// (`SkillNames.Hopscotch`, `ChildAthletic`: `hopscotch`).
+pub const HIDDEN_SKILLS: [&str; 2] = ["Hopscotch", "ChildAthletic"];
+
+pub fn hidden_skill(k: &str) -> bool {
+    HIDDEN_SKILLS.contains(&k)
 }
 
 /// The skill points it takes to reach each level (running totals, level 1 first), as the game's
@@ -3935,6 +3950,8 @@ pub(crate) fn run_actions(
                             Some((*at + (mine - *at).normalize_or(Vec2::X) * crate::petcarry::APART, floor.0))
                         }
                         ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } => Some((tf.translation.xz(), floor.0)),
+                        // (Beside a hopscotch court, or at its end.)
+                        ActionKind::Hopscotch { court, at, .. } => objects.get(*court).ok().map(|(_, _, _, of)| (*at, of.map_or(1, |f| f.0))),
                         // (Before the horse, as far off as its socials stand them.)
                         ActionKind::FeedProduce { at, .. } => {
                             let mine = Vec2::new(tf.translation.x, tf.translation.z);
@@ -4897,6 +4914,11 @@ pub(crate) fn run_actions(
                                 anim.pose = Pose::Use;
                             }
                             ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } => anim.pose = Pose::Use,
+                            // (Beside the court waiting, or at its end to hop: `hopscotch`.)
+                            ActionKind::Hopscotch { face, turn, .. } => {
+                                tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
+                                anim.pose = if *turn { Pose::Use } else { Pose::Stand };
+                            }
                             // (Facing the horse: `horsetreats` feeds it from here.)
                             ActionKind::FeedProduce { at, .. } => {
                                 let to = *at - tf.translation.xz();
@@ -6497,7 +6519,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

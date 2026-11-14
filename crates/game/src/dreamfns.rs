@@ -496,7 +496,7 @@ pub fn check(f: &str, p: &DnpPrimitive, n: &DnpNode, subject: &mut Subject, cx: 
         "LogicAndHandinesL10MajorDreamCheckFunction" => two_skills(cx, "Logic", "Handiness"),
         "LogicAndAthleticL10MajorDreamCheckFunction" => two_skills(cx, "Logic", "Athletic"),
         "ReachLevel10InNSkillsMajorDreamCheckFunction" => {
-            if cx.skills.0.iter().filter(|(_, v)| **v >= 10.0).count() as f32 >= number { AutoSatisfy } else { Active }
+            if cx.skills.0.iter().filter(|(k, v)| **v >= 10.0 && !crate::interact::hidden_skill(k)).count() as f32 >= number { AutoSatisfy } else { Active }
         }
         "LogicL10AndChessMasterRankMajorDreamCheckFunction" => {
             if cx.level("Logic") >= 10 && cx.facts.chess.is_some_and(|c| c.rank as usize >= crate::chess::WINS_FOR_RANK.len()) { AutoSatisfy } else { Active }
@@ -1557,8 +1557,8 @@ pub fn start(f: &str, n: &DnpNode, cx: &Ctx) -> Vec<Subject> {
     let at = |test: &dyn Fn(&Relationship) -> bool| -> Vec<Subject> { cx.rels.0.iter().filter(|(_, r)| test(r)).filter_map(|(e, _)| cx.ids.get(e)).map(|id| Subject::Sim(*id)).collect() };
     let number = n.input_number;
     match f {
-        "LearnSkillStartFunction" => cx.skills.0.iter().filter(|(_, v)| **v >= 1.0).map(|(k, _)| Subject::Skill(k.to_string())).collect(),
-        "HaveASkillLevelStartFunction" => cx.skills.0.iter().filter(|(_, v)| (**v as u32).min(10) as f32 == number.max(1.0)).map(|(k, _)| Subject::Skill(k.to_string())).collect(),
+        "LearnSkillStartFunction" => cx.skills.0.iter().filter(|(k, v)| **v >= 1.0 && !crate::interact::hidden_skill(k)).map(|(k, _)| Subject::Skill(k.to_string())).collect(),
+        "HaveASkillLevelStartFunction" => cx.skills.0.iter().filter(|(k, v)| (**v as u32).min(10) as f32 == number.max(1.0) && !crate::interact::hidden_skill(k)).map(|(k, _)| Subject::Skill(k.to_string())).collect(),
         "HaveACareerStartFunction" => cx.career_key().map(|k| Subject::Career(k.to_string())).into_iter().collect(),
         "HaveACareerLevelStartFunction" => cx.job.filter(|j| (j.level + 1) as f32 == number).map(|j| Subject::Career(j.career().key.to_string())).into_iter().collect(),
         "KnowASimStartFunction" => at(&|r| r.friendship.abs() >= 1.0 || r.romance > 0.0),

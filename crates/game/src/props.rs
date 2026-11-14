@@ -102,6 +102,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("ropeFK", "accessoryToyRopeFK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("ropeIK", "accessoryToyRopeIK", "b__L_Hand_slot", [0.0; 3], [0.0; 3]),
     ("wand", "magicWandClassic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (Hopscotch's marker, tossed onto the court: its clip carries it from the Sim's root.)
+    ("marker", "accessoryMarkerHopscotch", "b__ROOT__", [0.0; 3], [0.0; 3]),
     // (The packs' games and instruments.)
     ("cue", "PoolCue", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("mic", "accessoryMic", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
