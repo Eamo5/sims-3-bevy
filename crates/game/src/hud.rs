@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1564,6 +1564,9 @@ fn world_click(
                 // (What they do for who they are: talking to themselves, freaking out, a fake
                 // faint, a TaDa!)
                 options.extend(crate::traitacts::offered(sim, moods_q.get(actor).ok()));
+                // (Dressed up: playing pretend, `costumes`.)
+                let dressed = costume_q.get(actor).ok().and_then(|(w, k)| crate::costumes::dressed_up(w, k));
+                options.extend(crate::costumes::self_options(dressed, queues_q.get(actor).is_ok_and(crate::costumes::pretending)));
                 // (A werewolf under the full moon howls at it.)
                 if sim.occult == Some(crate::sim::Occult::Werewolf) && crate::supernatural::full_moon_night(opp_q.2.minutes) {
                     options.push((
@@ -1611,6 +1614,13 @@ fn world_click(
                 let related = (member && target_member) || rel.friendship >= crate::carry::STRANGER_LIKING;
                 let at = postures.get(actor).map_or(Vec3::ZERO, |p| p.1.translation());
                 options.extend(carry_q.on_little(actor, actor_sim.age, at, t, related));
+            }
+            // (Playing pretend: another child asked to play too, `costumes`.)
+            if queues_q.get(actor).is_ok_and(crate::costumes::pretending) {
+                let dressed = costume_q.get(t).ok().and_then(|(w, k)| crate::costumes::dressed_up(w, k)).is_some();
+                let busy = queues_q.get(t).is_ok_and(|q| crate::costumes::pretending(q) || q.0.front().is_some_and(|a| matches!(a.kind, ActionKind::PutOnCostume { .. })));
+                let chest = objects.iter().any(|o| o.kind == ObjectKind::CostumeChest);
+                options.extend(crate::costumes::ask_option(t, sim, dressed, busy, chest));
             }
             // (Talking in a group: someone they know called over to join it.)
             if convs.group(actor).is_some() && !convs.together(actor, t) && rels.0.contains_key(&t) && !sim.age.is_little() {
@@ -1865,6 +1875,22 @@ fn world_click(
                     .map(|(o, s, ..)| (o, s.full_name()))
                     .collect();
                 options.extend(crate::seesaw::options(t, &stf, &seesaws_res, actor, actor_sim, here, &others, &mut pie.submenus, submenu_kind));
+            }
+            // (The costume chest: dress up, play pretend, ask another child to join: `costumes`.)
+            if obj.kind == ObjectKind::CostumeChest
+                && crate::costumes::can_play(actor_sim.age)
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let ctf = gtf.compute_transform();
+                let spot = crate::costumes::chest_spot(obj, &ctf);
+                let dressed = costume_q.get(actor).ok().and_then(|(w, k)| crate::costumes::dressed_up(w, k));
+                let playing = queues_q.get(actor).is_ok_and(crate::costumes::pretending);
+                let others: Vec<(Entity, String)> = company_q
+                    .iter()
+                    .filter(|(o, s, ..)| *o != actor && s.age == crate::sim::Age::Child && !queues_q.get(*o).is_ok_and(crate::costumes::pretending))
+                    .map(|(o, s, ..)| (o, s.full_name()))
+                    .collect();
+                options.extend(crate::costumes::chest_options(t, spot, dressed, playing, &others, &mut pie.submenus, submenu_kind));
             }
             // (A pet toy crate: its toys lying about put away: `toycrate`.)
             if obj.kind == ObjectKind::PetToyCrate && !actor_sim.age.is_little() {
@@ -3084,6 +3110,12 @@ fn pie_buttons(
         return;
     }
     if let ActionKind::BuyReward(_) = kind {
+        return;
+    }
+    // (Another child asked to play pretend, there and then: the game's `AskToJoin` is immediate.)
+    if let (ActionKind::AskToPretend { child }, Some(a)) = (&kind, actor) {
+        let child = *child;
+        commands.queue(move |w: &mut World| crate::costumes::ask(w, a, child));
         return;
     }
     if label == PHONE_LABEL {

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 178;
+pub const GAMEDATA_VERSION: u32 = 180;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1344,9 +1344,9 @@ pub fn social_topics(xml: &str) -> Vec<(String, String, bool)> {
         let Some(b) = rest[a..].find("</TAA>") else { break };
         let row = &rest[a..a + b];
         rest = &rest[a + b..];
+        // (A topic's row may name its socials too: Generations' "HasWornCostumeForLongTime".)
         if let Some(cat) = field(row, "Cat") {
             topic = cat;
-            continue;
         }
         if topic.is_empty() {
             continue;
@@ -2976,6 +2976,37 @@ fn detail_layer(pkgs: &PackageSet, key: crate::types::Key, max: u32) -> Option<V
     Some(crate::ddsw::encode_dds(&img))
 }
 
+/// The costume chest's costumes (Generations' `kCostumeUniformNames`): the T-Rex, the astronaut,
+/// the prince and the princess, three of each.
+pub const COSTUME_OUTFITS: [&str; 12] = [
+    "cuBodyEP4DinosaurVar1",
+    "cuBodyEP4DinosaurVar2",
+    "cuBodyEP4DinosaurVar3",
+    "cuBodyEP4AstronautVar1",
+    "cuBodyEP4AstronautVar2",
+    "cuBodyEP4AstronautVar3",
+    "cuBodyEP4PrinceVar1",
+    "cuBodyEP4PrinceVar2",
+    "cuBodyEP4PrinceVar3",
+    "cuBodyEP4DressPrincessVar1",
+    "cuBodyEP4DressPrincessVar2",
+    "cuBodyEP4DressPrincessVar3",
+];
+
+/// What children playing pretend think of (`kCostumeTumbnailNames`): dinosaur eggs, mammoths and
+/// cavemen; aliens, planets and spaceships; dragons, castles and crown jewels.
+pub const PRETEND_BALLOONS: [&str; 9] = [
+    "ep4_balloon_dinosaureggs",
+    "ep4_balloon_mammoths",
+    "ep4_balloon_caveman",
+    "ep4_balloon_alien",
+    "balloon_planet",
+    "balloon_spaceship",
+    "balloon_dragon",
+    "ep4_balloon_castle",
+    "ep4_balloon_crownjewels",
+];
+
 /// The CAS parts of the town's service uniforms, by name.
 pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
 
@@ -2984,8 +3015,9 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
     use s3formats::sim::{CasPart, SimOutfit, T_OUTFIT};
     let g = root.global_dir();
     let mut names: Vec<String> = careers.iter().flat_map(|c| c.levels.iter().flat_map(|l| l.outfits.iter().cloned())).filter(|n| !n.is_empty()).collect();
-    // (And the service Sims' own: the repo man's.)
+    // (And the service Sims' own: the repo man's; and the costume chest's costumes.)
     names.extend(["MaleRepo", "FemaleRepo"].map(String::from));
+    names.extend(COSTUME_OUTFITS.iter().map(|s| s.to_string()));
     names.sort_by_key(|n| n.to_ascii_lowercase());
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     let cas: CasBaked = read_value(&g.join("cas.bin")).map_err(|e| format!("cas.bin: {e}"))?;
@@ -5185,7 +5217,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
     }
 
     // Balloon pictures are textures: decoded and stored as PNG beside the interface icons.
-    let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().chain(SKY_TEXTURES).map(|s| s.to_string()).collect();
+    let mut balloon_icons: BTreeSet<String> = BALLOON_FRAMES.iter().chain(SKY_TEXTURES).chain(PRETEND_BALLOONS.iter()).map(|s| s.to_string()).collect();
     for t in [&out.balloons.idle, &out.balloons.social, &out.balloons.topic, &out.balloons.random] {
         for e in t.values().flatten() {
             balloon_icons.insert(e.icon.clone());
@@ -5427,7 +5459,8 @@ mod tests {
     #[test]
     fn social_topics_offer_their_actions_to_the_sim_with_them_or_others() {
         let xml = "<X><TAA><Cat></Cat><Gr></Gr><FPA></FPA></TAA><TAA><FPA>Stray</FPA></TAA><TAA><Cat>Evil Trait</Cat></TAA><TAA><Gr>Default</Gr></TAA>\
-            <TAA><FPA>Mastermind Plot</FPA><SPA>Accuse of Being Evil</SPA></TAA><TAA><Cat>Buff Fired</Cat></TAA><TAA><SPA>Ask About Work</SPA></TAA></X>";
+            <TAA><FPA>Mastermind Plot</FPA><SPA>Accuse of Being Evil</SPA></TAA><TAA><Cat>Buff Fired</Cat></TAA><TAA><SPA>Ask About Work</SPA></TAA>\
+            <TAA><Cat>HasWornCostumeForLongTime</Cat><Gr>Default</Gr><SPA>Ask To Remove Costume</SPA></TAA></X>";
         let t = social_topics(xml);
         assert_eq!(
             t,
@@ -5435,6 +5468,7 @@ mod tests {
                 ("Evil Trait".to_string(), "Mastermind Plot".to_string(), true),
                 ("Evil Trait".to_string(), "Accuse of Being Evil".to_string(), false),
                 ("Buff Fired".to_string(), "Ask About Work".to_string(), false),
+                ("HasWornCostumeForLongTime".to_string(), "Ask To Remove Costume".to_string(), false),
             ]
         );
     }

@@ -33,7 +33,7 @@ use crate::baked::Baked;
 use crate::horsejumps::HorseSkills;
 use crate::interact::{Action, ActionKind, ActionQueue, GameObject, ObjectKind, Phase};
 use crate::pets::{Pet, PetAnim, PetBusy};
-use crate::sim::{Pose, Sim};
+use crate::sim::Sim;
 
 pub struct TrainingPostsPlugin;
 

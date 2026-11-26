@@ -2720,6 +2720,7 @@ fn auto_screenshot(
         1 if t - s > args.shot_delay + 2.0 => {
             *state = 2;
             if args.exit_after {
+                info!("autotest: exiting");
                 exit.write(AppExit::Success);
             }
         }

@@ -753,6 +753,29 @@ installation is unreachable.
   child's athletics are the game's hidden skills: kept, never shown. Children and teens short of
   fun go and play of their own accord. `HOPSCOTCH_TEST=1`, `HOPSCOTCH_WITH=<first name>`,
   `HOPSCOTCH_SKILL=<level>` (tests).
+- **Dressing up**, as Generations' Dreamer's Costume Chest (`CostumeChest`): a child at it
+  "Transform[s] Into... ›" a Tyrannosaurus Rex, an astronaut, a prince or a princess, each in its
+  three colours by the game's words (Red Roaring T-Rex, Moon Walker White, Royal Red, Regal
+  Rose...): the lid lifted and the costume taken out (`c2o_childCostumeChest_openCloseBox`, the
+  chest's own half with it, `costume_chest_get`), a spin into it (the game's own costume outfits,
+  `kCostumeUniformNames`, over their own look, the hood or crown with them), and a moment in
+  character. Dressed up, they "Play Pretend" (from the chest, from their own menu, or of their own
+  accord when short of fun): wandering three to five metres at a time in the room they're in
+  (`kMinRouteDistance`) in the costume's own walk (the T-Rex's stomp, the astronaut's bounce, the
+  prince's march, the princess's glide: the game's `RequestWalkStyle`), thinking of dinosaur
+  eggs, mammoths and cavemen, aliens, planets and spaceships, dragons, castles and crown jewels
+  (`kCostumeTumbnailNames`), playing the part with its idles and voice (`vo_costume_*`); fun, a
+  hundred an hour, till they've had their fill. Those about with nothing to do (within 5 m, three
+  times in four, `kReactToPlayPretendBroadcasterTuning`, `kChanceReact`) stop to watch: a cheer,
+  a laugh or excitement from those who like them, a boo, a pointed laugh or a yawn from those who
+  don't and from the Childless at heart, the humourless and the mean (`ReactToPretender`). One
+  playing can "Ask To Join ›" (or "Ask To Play Pretend With") another child, who dresses up as
+  something of their own (`PickRandomCostumeType`: a girl's crown a princess's) and comes to play
+  two or three metres off. A costume stays on till it's time for other clothes; after four hours
+  in it (`kTimeToAddChangeSocial`, the XML's) a grown-up may "Ask to Change Out of Costume"
+  (`AskToRemoveCostume`, the game's `admonishChild` clips), and the child spins back into their
+  everyday clothes. `COSTUME_TEST=<kind>[:<colour>]` with `COSTUME_WHO`, `COSTUME_JOIN`,
+  `COSTUME_REMOVE=<first name>` (tests).
 - **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).

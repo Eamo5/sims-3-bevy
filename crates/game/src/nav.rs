@@ -869,6 +869,11 @@ pub enum WalkStyle {
     FastRun,
     Jog,
     OnFire,
+    /// A child dressed up and playing pretend (the costume chest's walks: `costumes`).
+    Dinosaur,
+    Astronaut,
+    Prince,
+    Princess,
 }
 
 impl WalkStyle {
@@ -877,6 +882,11 @@ impl WalkStyle {
     pub fn speed(self, child: bool, female: bool) -> f32 {
         use WalkStyle::*;
         match (self, child) {
+            // (Dressed up: the costumes' own walks' paces.)
+            (Dinosaur, _) => 0.57,
+            (Astronaut, _) => 1.06,
+            (Prince, _) => 0.97,
+            (Princess, _) => 0.6,
             (Walk, true) => 1.25,
             (_, true) => 3.7,
             (Walk, false) if female => 1.7,
@@ -895,6 +905,10 @@ impl WalkStyle {
         use WalkStyle::*;
         Some(match (self, child) {
             (Walk, _) => return None,
+            (Dinosaur, _) => &["c_childCostumeChest_dinosaur_walk_x"],
+            (Astronaut, _) => &["c_childCostumeChest_astronaut_walk_x"],
+            (Prince, _) => &["c_childCostumeChest_prince_walk_x"],
+            (Princess, _) => &["c_childCostumeChest_princess_walk_x"],
             (_, true) => &["c_run"],
             (FastWalk, _) => &["a_male_walk_fast"],
             (FastJog, _) => &["a_male_fastjog"],
@@ -910,7 +924,11 @@ impl WalkStyle {
 /// The ground speed of a walk cycle (metres a second, feet planted), for playing it in step with
 /// the Sim's pace.
 pub fn cycle_speed(clip: &str) -> Option<f32> {
-    const CYCLES: [(&str, f32); 12] = [
+    const CYCLES: [(&str, f32); 16] = [
+        ("c_childCostumeChest_dinosaur_walk_x", 0.57),
+        ("c_childCostumeChest_astronaut_walk_x", 1.06),
+        ("c_childCostumeChest_prince_walk_x", 0.97),
+        ("c_childCostumeChest_princess_walk_x", 0.6),
         ("a_male_walk", 1.82),
         ("a_female_walk", 1.7),
         ("a_female_walk_pregnant", 1.73),

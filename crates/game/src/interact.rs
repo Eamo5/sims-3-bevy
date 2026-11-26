@@ -287,6 +287,9 @@ pub enum ObjectKind {
     SpringRider,
     /// A seesaw (Generations' `Seesaw`): sat on, alone or two together (`seesaw`).
     Seesaw,
+    /// The Dreamer's Costume Chest (Generations' `CostumeChest`): children dress up from it and
+    /// play pretend (`costumes`).
+    CostumeChest,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -417,6 +420,8 @@ impl ObjectKind {
             Self::SpringRider
         } else if has("environment.seesaw") {
             Self::Seesaw
+        } else if has("toys.costumechest") {
+            Self::CostumeChest
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -627,7 +632,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::CostumeChest | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -695,6 +700,10 @@ impl ObjectKind {
         // (A spring rider's: a child's, its right side, the ride's clips played unmirrored.)
         if self == K::SpringRider {
             return Some(1);
+        }
+        // (A costume chest's: before its lid, `PutOnCostume`'s.)
+        if self == K::CostumeChest {
+            return Some(0);
         }
         matches!(
             self,
@@ -2882,7 +2891,7 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle),
-            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
+            _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
 
@@ -3158,6 +3167,13 @@ pub enum ActionKind {
     /// On a seesaw (`seesaw`): from which of its places, first on or joining the one on it, the
     /// daredevil's way, calling someone over to it; where that place is and the way it faces.
     Seesaw { seesaw: Entity, spot: crate::seesaw::Spot, join: bool, daredevil: bool, call: Option<Entity>, at: Vec2, face: Vec2 },
+    /// Into a costume from the costume chest (`costumes`): which one, who asked them to join in
+    /// playing pretend; where they stand at it and face.
+    PutOnCostume { chest: Entity, costume: crate::costumes::Costume, asker: Option<Entity>, at: Vec2, face: Vec2 },
+    /// Playing pretend dressed up (`costumes`): asked to join someone, near whom they start.
+    PlayPretend { asker: Option<Entity>, at: Option<Vec2> },
+    /// Another child asked to play pretend (never queued: `costumes::ask`).
+    AskToPretend { child: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4095,9 +4111,15 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } => Some((*at, floor.0)),
+                        // (Playing pretend where they are: `costumes` walks them about.)
+                        ActionKind::PlayPretend { at: None, .. } => {
+                            action.phase = Phase::Running(0.0);
+                            anim.pose = Pose::Use;
+                            continue;
+                        }
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -4918,7 +4940,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => finished = true,
                             // (Beside the posts, turned to them: `trainingposts` sees to the watching.)
                             ActionKind::WatchTraining { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -4926,10 +4948,12 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
+                            // (Come to play pretend near the one who asked: `costumes`.)
+                            ActionKind::PlayPretend { .. } => anim.pose = Pose::Use,
                             // (At the post: the horse called over, `hitching` ties it once it's there;
                             // or the rope untied.)
                             ActionKind::TieHorse { post, horse, part } => {
@@ -5903,6 +5927,12 @@ pub(crate) fn run_actions(
                                                 }
                                             });
                                         }
+                                        // (A child asked out of their costume: into everyday clothes,
+                                        // `costumes`.)
+                                        SocialEffect::RemoveCostume => {
+                                            let child = *target;
+                                            commands.queue(move |w: &mut World| crate::costumes::take_off(w, child));
+                                        }
                                         SocialEffect::DeliverOpportunity => {
                                             debug!("{} delivered to {tname}", sim.first);
                                             life.write(LifeEvent::new(me, LifeEventKind::Delivered { other: *target }));
@@ -6569,7 +6599,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

@@ -470,7 +470,7 @@ fn grow_up_now(
 fn rebuild_bodies(
     mut commands: Commands,
     sims: Query<
-        (Entity, &Sim, &Children, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Option<&crate::simbody::ServiceUniform>, Has<crate::supernatural::WolfForm>),
+        (Entity, &Sim, &Children, Option<&crate::simbody::Wearing>, Option<&crate::careers::Job>, Option<&crate::simbody::ServiceUniform>, (Has<crate::supernatural::WolfForm>, Option<&crate::costumes::WornCostume>)),
         With<NeedsNewBody>,
     >,
     parts: Query<(), With<crate::simbody::SimModelPart>>,
@@ -484,11 +484,16 @@ fn rebuild_bodies(
     ),
 ) {
     let (Some(data), Some(cas)) = (data, cas) else { return };
-    for (e, sim, children, wearing, job, service, wolf) in &sims {
+    for (e, sim, children, wearing, job, service, (wolf, costume)) in &sims {
         commands.entity(e).remove::<NeedsNewBody>();
         let kind = wearing.map_or(crate::simbody::OutfitKind::Everyday, |w| w.0);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(sim.look);
-        let uniform = job.and_then(|j| j.uniform(sim)).filter(|_| kind == crate::simbody::OutfitKind::Career);
+        // (Their career's uniform at work; a costume from the costume chest, dressed up.)
+        let uniform = match kind {
+            crate::simbody::OutfitKind::Career => job.and_then(|j| j.uniform(sim)),
+            crate::simbody::OutfitKind::Costume => costume.map(|c| c.0.outfit()),
+            _ => None,
+        };
         let mut outfit = match (service, uniform.and_then(|u| crate::simbody::uniform(&cas, sim, u, &mut rng.clone()))) {
             (Some(s), _) => crate::simbody::service_outfit(&cas, sim, *s, &mut rng),
             (None, Some(o)) => o,

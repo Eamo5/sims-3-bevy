@@ -203,6 +203,8 @@ pub enum OutfitKind {
     Outerwear,
     /// Nothing on, for a bath or a shower (the game's naked outfit, under its censor).
     Naked,
+    /// A child's dressing-up costume from the costume chest (`costumes`: which one, theirs).
+    Costume,
 }
 
 impl OutfitKind {
@@ -218,13 +220,14 @@ impl OutfitKind {
             Self::Career => "Career",
             Self::Outerwear => "Outerwear",
             Self::Naked => "Naked",
+            Self::Costume => "Costume",
         }
     }
 
     /// The CAS parts' category flag for clothes of this outfit.
     pub fn category(self) -> u32 {
         match self {
-            Self::Everyday | Self::Career => s3formats::sim::CAT_EVERYDAY,
+            Self::Everyday | Self::Career | Self::Costume => s3formats::sim::CAT_EVERYDAY,
             Self::Swimwear => s3formats::sim::CAT_SWIM,
             Self::Sleepwear => s3formats::sim::CAT_SLEEP,
             Self::Athletic => s3formats::sim::CAT_ATHLETIC,
@@ -301,8 +304,8 @@ pub fn pick_outfit(cas: &CasData, sim: &Sim, rng: &mut impl Rng) -> Outfit {
 /// What a Sim wears: everyday clothes, swimwear or sleepwear (everyday clothes when there's
 /// nothing of the kind for them).
 pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: OutfitKind) -> Outfit {
-    // (A uniform is worn over the everyday look: see `uniform`.)
-    if kind == OutfitKind::Career {
+    // (A uniform is worn over the everyday look: see `uniform`; a costume too.)
+    if matches!(kind, OutfitKind::Career | OutfitKind::Costume) {
         return pick_outfit_for(cas, sim, rng, OutfitKind::Everyday);
     }
     // (Bathing: their own look, with the game's naked parts for clothes, and glasses off.)
@@ -453,7 +456,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
         // (Snowsuits now and then; mostly a coat.)
         OutfitKind::Outerwear => !fulls.is_empty() && rng.random_bool(0.25),
-        OutfitKind::Career | OutfitKind::Naked => use_full,
+        OutfitKind::Career | OutfitKind::Naked | OutfitKind::Costume => use_full,
     };
     if let Some(f) = cf {
         body.push(f);

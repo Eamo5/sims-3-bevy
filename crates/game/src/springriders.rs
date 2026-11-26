@@ -18,7 +18,7 @@ use rand::Rng;
 
 use crate::anim::{ActionClip, ClipLibrary};
 use crate::interact::{Action, ActionKind, ActionQueue, GameObject, ObjectKind, Phase};
-use crate::sim::{Age, Sim};
+use crate::sim::Sim;
 
 pub struct SpringRidersPlugin;
 

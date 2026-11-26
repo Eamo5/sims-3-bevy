@@ -311,6 +311,9 @@ pub enum SocialEffect {
     /// A fortune teller's private reading (the game's "Perform Private Reading":
     /// `OnPrivateReadingAccept`): `careermetrics`.
     PrivateReading,
+    /// A child asked out of their costume, into everyday clothes (the game's "Ask To Remove
+    /// Costume": `OnAskToRemoveCostume`): `costumes`.
+    RemoveCostume,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -342,6 +345,7 @@ const GAME_EFFECTS: &[(&str, SocialEffect)] = &[
     ("Interview", SocialEffect::Interview),
     ("Promote Upcoming Game", SocialEffect::PromoteGame),
     ("Perform Private Reading", SocialEffect::PrivateReading),
+    ("Ask To Remove Costume", SocialEffect::RemoveCostume),
 ];
 
 pub struct SocialDef {
@@ -810,6 +814,8 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             "TestRequestDoYourHomework" if effect == SocialEffect::RequestHomework => None,
             "TestDeliverOpportunity" if effect == SocialEffect::DeliverOpportunity => None,
             "TestMoochMoney" | "TestMoochFood" | "TestAskForRecipe" => None,
+            // (Offered under its topic, which a child has only while in costume: `costumes`.)
+            "AskToRemoveCostumeProceduralTest" => None,
             "TestThankForCooking" | "TestWorryAboutGrades" | "TestThankForTutoring" => Some(GameTest::About),
             "TestActorHasWork" => Some(GameTest::ActorWorks),
             "TestActorAndTargetHasWork" => Some(GameTest::BothWork),
@@ -841,7 +847,10 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
         }
         // (Asking traits not known here, left out.)
         let (target_traits, required) = (traits(&a.target_traits), traits(&a.required));
-        if target_traits.len() < a.target_traits.len() || (required.is_empty() && !a.required.is_empty()) {
+        // (Asking a child out of their costume: a grown-up's, as Generations has it, whatever the
+        // nanny plumbot's chip later added to it.)
+        let required_unknown = required.is_empty() && !a.required.is_empty() && a.key != "Ask To Remove Costume";
+        if target_traits.len() < a.target_traits.len() || required_unknown {
             continue;
         }
         let (cat, minutes, social, fun, friendship, romance) = match a.tone.as_str() {
@@ -865,6 +874,18 @@ pub fn game_socials(actions: &[s3bake::gamedata::SocialAction], clip_names: &[St
             .filter(|base| clip_names.iter().any(|m| m.strip_suffix("_y") == Some(*base)))
             .map(leak)
             .collect();
+        // (A grown-up's to a child alone, its clips only theirs, `a2c_`: kept under the grown-ups'
+        // name, as `interact::child_social_clips` finds a child's.)
+        if clips.is_empty() {
+            clips = clip_names
+                .iter()
+                .filter(|n| n.starts_with("a2c_soc_") && n.to_ascii_lowercase().contains(&suite))
+                .filter_map(|n| n.strip_suffix("_x"))
+                .filter(|base| clip_names.iter().any(|m| m.strip_suffix("_y") == Some(*base)))
+                .filter_map(|base| base.strip_prefix("a2c_"))
+                .map(|rest| leak(&format!("a2a_{rest}")))
+                .collect();
+        }
         clips.sort();
         clips.dedup();
         // (Taken well, unless it's meant to go down badly; in its own tone, where there are those.)

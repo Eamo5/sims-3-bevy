@@ -55,6 +55,13 @@ pub fn start(commands: &mut Commands, sim: Entity, to: Option<OutfitKind>, chose
     commands.entity(sim).insert((ClothesSpin { to, chosen, t: 0.0, sparkled: false, swapped: false }, ActionClip::new(None, &["a_clothesChange"])));
 }
 
+/// Starts a spin, from the world (a social's outcome, applied as it ends).
+pub fn start_in(w: &mut World, sim: Entity, to: Option<OutfitKind>, chosen: bool) {
+    if let Ok(mut e) = w.get_entity_mut(sim) {
+        e.insert((ClothesSpin { to, chosen, t: 0.0, sparkled: false, swapped: false }, ActionClip::new(None, &["a_clothesChange"])));
+    }
+}
+
 /// Puts an outfit on there and then (none: everyday clothes).
 pub fn put_on(e: &mut EntityCommands, to: Option<OutfitKind>, chosen: bool) {
     match to {
