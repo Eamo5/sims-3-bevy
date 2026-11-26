@@ -52,6 +52,10 @@ pub enum Stat {
     HeaviestFish,
     /// Gems they've had cut (the Collecting skill's `GemCut`: the finer cuts come with it).
     GemsCut,
+    /// Oak boards and tougher broken (Martial Arts' `mBoardsBrokenToBeAdvancedBoardBreaker`).
+    HardBoardsBroken,
+    /// Boards of every kind broken.
+    BoardsBroken,
 }
 
 impl Stat {
@@ -80,6 +84,8 @@ impl Stat {
             Stat::TutoringHours => "tutoring_hours",
             Stat::HeaviestFish => "heaviest_fish",
             Stat::GemsCut => "gems_cut",
+            Stat::HardBoardsBroken => "hard_boards_broken",
+            Stat::BoardsBroken => "boards_broken",
         }
     }
 }
@@ -124,6 +130,8 @@ pub enum Deed {
     Caught(String, f64),
     /// A painting finished: its worth, and how good (0 normal, 1 brilliant, 2 a masterpiece).
     Painted(i64, u8),
+    /// A best kept (the most of something at once: a board breaker's stack of a kind of board).
+    Most(String, f64),
 }
 
 impl Did {
@@ -204,7 +212,16 @@ impl SkillJournal {
                 *heaviest = heaviest.max(*w);
             }
             Deed::Painted(..) => {}
+            Deed::Most(key, n) => {
+                let best = self.tally.entry(key.clone()).or_default();
+                *best = best.max(*n);
+            }
         }
+    }
+
+    /// The most of something kept (`Deed::Most`).
+    pub fn most(&self, key: &str) -> f64 {
+        self.tally.get(key).copied().unwrap_or(0.0)
     }
 }
 

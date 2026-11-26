@@ -957,10 +957,12 @@ pub enum MoodletKind {
     Splinter,
     /// A pet rock dropped on their foot (`petstones`).
     HurtFoot,
+    /// A board that wouldn't break (`boardbreaker`).
+    HurtHand,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 199] = {
+    pub const ALL: [MoodletKind; 200] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -981,7 +983,7 @@ impl MoodletKind {
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
             GoingNuts, Restless, Frustrated, ThirstyHorse, Dehydrated, SqueakyCleanPet, WellRestedPet, PregnantPet, PetSkillFatigue,
             LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, PumpedPony, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
-            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot,
+            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot, HurtHand,
         ]
     };
 
@@ -1221,6 +1223,7 @@ impl MoodletKind {
             HadAGoodStroll => md("Had a Good Stroll", "Fresh air, beautiful sights, and some exercise...what could be better than a good stroll?", 10, 3.0),
             Splinter => md("Splinter", "Ouch! Some frisky fun in the great outdoors is just the thing to spice up the love life, but splinters are a real pain in the rear.", -5, 1.0),
             HurtFoot => md("Hurt Foot", "Ouch! I just dropped that stone on my foot.", -25, 3.0),
+            HurtHand => md("Hurt Hand!", "A wise Sim learns from a hurt hand, while others only feel pain.", -25, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1433,6 +1436,7 @@ impl MoodletKind {
             HadAGoodStroll => ("HadAGoodStroll", true),
             Splinter => ("Splinter", true),
             HurtFoot => ("HurtFoot", true),
+            HurtHand => ("HurtHand", true),
         }
     }
 }

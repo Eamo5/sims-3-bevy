@@ -1041,6 +1041,32 @@ installation is unreachable.
   have fun of it (`kDisciplinedTraitMartialArtsFun`), and the Fatigued can't ("Jack is too
   fatigued to practice"). `DUMMY_TEST=1` with `DUMMY_WHO`, `DUMMY_LEVEL`, `DUMMY_NO_FAIL=1`,
   `DUMMY_BELT=<seconds>`, `DUMMY_STOP=<seconds>` (tests).
+- **The board breaker**, as World Adventures' `BoardBreaker`: martial artists of level two and
+  up (`UnlockBoardBreaker`), teens and older, "Practice... ›" breaking a Foam Board, a Balsa Wood
+  Board, an Oak Board, a Thin Stone Block or a Space Rock Block (the board's own material state for
+  each, `Board.GetMaterialStateName`; the space rock a model of its own), from whichever of its
+  two sides is nearer. In their gi they bow in, set the boards out at its slots
+  (`a2o_boardBreaker_swipe`, at its `Board_appear`: as many as they've managed of that kind
+  before, another after every few broken, `kBoardBreaksToIncreaseStackSize`, five at most), step
+  up (`_start`), ready themselves (the `_loop`s, ten minutes, twenty for a space rock) and strike.
+  The chance it goes wrong is the game's (`ComputeChanceOfFailure`, the XML's tuning): thirty in a
+  hundred at the board's level, falling away past it (`kFailureDecayConstant`) and rising towards
+  a hundred short of it, more in a low mood, less for the Disciplined and a Timber Terminator;
+  past the board's mark (`kEpicFailureChance`) it's a hurt hand (`_epicFail`, Hurt Hand!, and
+  they're done), else a miss (`_fail`, the board's thud, `bbreaker_fail_...`) or the boards split
+  to bits with the game's crack (`_break` at its `Board_break`, `fx_bbreaker_break_...`). Martial
+  Arts comes as the board's tough (`kSkillGainRateToPractice`), and Athletic, Hygiene going down;
+  the most broken at once of each kind, and the boards broken, are kept in their journal, and
+  fifty Oak boards or tougher make them a Timber Terminator, who now and then finds a gem
+  splitting a space rock. "Change Board... ›" swaps to another kind there and then ("...is
+  currently breaking this type of board."); the Fatigued, those with a hurt hand and those not
+  skilled enough can't ("Jack Bunch is not skilled enough to break boards."). Others about may
+  "Watch Martial Artist" (Fun 30 an hour, liking 2 every quarter hour), clapping or cheering a
+  break and laughing or booing a miss as the game has them (the Friendly, Daredevil and Athletic
+  keener to cheer, the Mean-Spirited and Evil to boo, liking either way); the skilled practise of
+  their own accord. `BOARDS_TEST=1` with `BOARDS_WHO`, `BOARDS_LEVEL`, `BOARDS_BOARD=<1-5>`,
+  `BOARDS_WATCH=<first name>`, `BOARDS_RESULT=success|miss|hurt`, `BOARDS_CHANGE=<1-5>`,
+  `BOARDS_STOP=<seconds>`, `BOARDS_PIE=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

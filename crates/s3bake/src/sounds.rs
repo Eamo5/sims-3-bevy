@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 23;
+pub const SOUNDS_VERSION: u32 = 24;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -81,6 +81,29 @@ pub const SEATS: [&str; 4] = ["cloth", "leath", "wood", "cment"];
 pub const EXTRA_SOUNDS: &[&str] = &[
     // A pet rock dropped and broken.
     "sting_pet_stone_sad",
+    // A board breaker's boards: a miss's thud, a break's crack (by the stack), a space rock's.
+    "bbreaker_fail_foam",
+    "bbreaker_fail_balsa",
+    "bbreaker_fail_oak",
+    "bbreaker_fail_stonea",
+    "bbreaker_fail_stoneb",
+    "fx_bbreaker_break_foam_a",
+    "fx_bbreaker_break_foam_b",
+    "fx_bbreaker_break_foam_c",
+    "fx_bbreaker_break_foam_d",
+    "fx_bbreaker_break_balsa_a",
+    "fx_bbreaker_break_balsa_b",
+    "fx_bbreaker_break_balsa_c",
+    "fx_bbreaker_break_balsa_d",
+    "fx_bbreaker_break_oak_a",
+    "fx_bbreaker_break_oak_b",
+    "fx_bbreaker_break_oak_c",
+    "fx_bbreaker_break_oak_d",
+    "fx_bbreaker_break_stone_a",
+    "fx_bbreaker_break_stone_b",
+    "fx_bbreaker_break_stone_c",
+    "fx_bbreaker_break_stone_d",
+    "fx_bbreaker_break_stone",
     // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
     "thouse_pretend_castle_loop",
     "thouse_pretend_castle_plist",

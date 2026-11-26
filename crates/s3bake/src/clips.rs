@@ -277,6 +277,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_MA2neutral",
     // (A new belt shown off.)
     "a_react_newMartialArtsBelt",
+    // (Boards broken on a board breaker, and those watching.)
+    "a2o_boardBreaker_",
+    "a_fire_watch",
+    "c_fire_watch",
     // (A lawn flamingo or a gnome kicked over and stood up, its own half too.)
     "a2o_flamingo_",
     "c2o_flamingo_",

@@ -210,7 +210,7 @@ fn run(
             }
             continue;
         };
-        let Ok((obj, stf, unshown)) = stones.get(stone) else {
+        let Ok((obj, _, unshown)) = stones.get(stone) else {
             q.0.pop_front();
             commands.entity(e).remove::<(Playing, Swiping, ActionClip)>();
             continue;

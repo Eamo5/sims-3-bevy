@@ -25,7 +25,8 @@ impl Plugin for EffectsPlugin {
         app.init_resource::<WaterLooks>()
             .add_message::<SpinSparkle>()
             .add_message::<Pour>()
-            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, jet_circles, emit, pour, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
+            .add_message::<Chips>()
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, jet_circles, emit, pour, fall, chips, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -818,6 +819,86 @@ fn fall(
                 tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;
             }
             _ => {}
+        }
+    }
+}
+
+/// Something broken to bits (a board breaker's board, the game's `ep1BoardBreaker...` effects):
+/// `n` pieces of a colour flung out from `at` away from `toward`, falling to `floor` and lying a
+/// moment before they're gone.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Chips {
+    pub at: Vec3,
+    pub away: Vec3,
+    pub color: Color,
+    pub n: u32,
+    pub size: f32,
+    pub floor: f32,
+}
+
+/// A piece of something broken: its flight, spin, how long it's lain, and the floor.
+#[derive(Component)]
+struct Chip {
+    vel: Vec3,
+    spin: Vec3,
+    floor: f32,
+    age: f32,
+    landed: Option<f32>,
+}
+
+/// How long a piece lies once landed (seconds), and how long it may fly.
+const CHIP_REST: f32 = 1.2;
+const CHIP_LIFE: f32 = 3.0;
+
+/// Pieces flung out, and their flight and fall.
+fn chips(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut asked: MessageReader<Chips>,
+    mut flying: Query<(Entity, &mut Chip, &mut Transform)>,
+    (mut meshes, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<StandardMaterial>>),
+    mut cube: Local<Option<Handle<Mesh>>>,
+) {
+    let mut rng = rand::rng();
+    for c in asked.read() {
+        let mesh = cube.get_or_insert_with(|| meshes.add(Cuboid::new(1.0, 1.0, 1.0))).clone();
+        let mat = mats.add(StandardMaterial { base_color: c.color, perceptual_roughness: 0.9, ..default() });
+        let away = c.away.with_y(0.0).normalize_or(Vec3::X);
+        for _ in 0..c.n {
+            let side = Vec3::new(-away.z, 0.0, away.x) * rng.random_range(-1.2..1.2);
+            let vel = (away * rng.random_range(0.6..2.2) + side + Vec3::Y * rng.random_range(0.5..2.0)) * 1.0;
+            let s = c.size * rng.random_range(0.5..1.3);
+            let shape = Vec3::new(s * rng.random_range(1.0..3.0), s * 0.35, s);
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(c.at + Vec3::new(rng.random_range(-0.08..0.08), rng.random_range(-0.03..0.03), rng.random_range(-0.08..0.08)))
+                    .with_rotation(Quat::from_euler(EulerRot::XYZ, rng.random_range(0.0..6.28), rng.random_range(0.0..6.28), rng.random_range(0.0..6.28)))
+                    .with_scale(shape),
+                Chip { vel, spin: Vec3::new(rng.random_range(-12.0..12.0), rng.random_range(-12.0..12.0), rng.random_range(-12.0..12.0)), floor: c.floor, age: 0.0, landed: None },
+                DespawnOnExit(AppState::InGame),
+            ));
+        }
+    }
+    let dt = time.delta_secs().min(0.1);
+    for (e, mut c, mut tf) in &mut flying {
+        c.age += dt;
+        match c.landed {
+            Some(t) if c.age - t > CHIP_REST => {
+                commands.entity(e).try_despawn();
+            }
+            Some(_) => {}
+            None => {
+                c.vel.y -= GRAVITY * dt;
+                tf.translation += c.vel * dt;
+                tf.rotate(Quat::from_scaled_axis(c.spin * dt));
+                if tf.translation.y <= c.floor + tf.scale.y * 0.5 || c.age > CHIP_LIFE {
+                    tf.translation.y = c.floor + tf.scale.y * 0.5;
+                    let (yaw, _, _) = tf.rotation.to_euler(EulerRot::YXZ);
+                    tf.rotation = Quat::from_rotation_y(yaw);
+                    c.landed = Some(c.age);
+                }
+            }
         }
     }
 }

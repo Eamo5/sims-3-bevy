@@ -318,6 +318,25 @@ pub const STATE_DIRTY: u32 = 0xEEAB4327;
 pub const STATE_VERY_DIRTY: u32 = 0x2E5DF9BB;
 pub const STATE_CLOGGED: u32 = 0x257FB026;
 pub const STATE_BURNT: u32 = 0xC3867C32;
+/// A board breaker's board as one of its kinds (`Board.GetMaterialStateName`: foam, balsa wood,
+/// oak, thin stone).
+pub const STATE_FOAM: u32 = state_hash("Foam");
+pub const STATE_BALSA: u32 = state_hash("Balsa");
+pub const STATE_OAK: u32 = state_hash("Oak");
+pub const STATE_STONE: u32 = state_hash("Stone");
+
+/// A material state's name hashed as `SetMaterial` hashes it (the lower-case FNV-32).
+pub const fn state_hash(name: &str) -> u32 {
+    let b = name.as_bytes();
+    let mut h: u32 = 0x811C9DC5;
+    let mut i = 0;
+    while i < b.len() {
+        h = h.wrapping_mul(0x01000193);
+        h ^= b[i].to_ascii_lowercase() as u32;
+        i += 1;
+    }
+    h
+}
 
 /// A dirty material's dirt, drawn over its diffuse (an RGBA mask in the object's UV space).
 pub const P_DIRT_OVERLAY: u32 = 0x48372E62;
@@ -334,7 +353,7 @@ fn state_textures(rcol: &Rcol, raw: u32, default: &Material) -> Vec<(u32, Resour
     let base = default.texture(P_DIFFUSE_MAP);
     (0..n.min(32))
         .filter_map(|_| Some((r.u32().ok()?, r.u32().ok()?)))
-        .filter(|(_, state)| matches!(*state, STATE_DIRTY | STATE_VERY_DIRTY | STATE_CLOGGED | STATE_BURNT))
+        .filter(|(_, state)| matches!(*state, STATE_DIRTY | STATE_VERY_DIRTY | STATE_CLOGGED | STATE_BURNT | STATE_FOAM | STATE_BALSA | STATE_OAK | STATE_STONE))
         .filter_map(|(chunk, state)| {
             let m = resolve_material(rcol, chunk, 1)?;
             match m.texture(P_DIFFUSE_MAP) {
@@ -728,4 +747,16 @@ pub fn tgi_table_at(d: &[u8], off_pos: usize) -> R<Vec<ResourceKey>> {
         out.push(ResourceKey::new(ty, g, i));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn material_states_are_hashed_as_the_game_names_them() {
+        assert_eq!(state_hash("Dirty"), STATE_DIRTY);
+        assert_eq!(state_hash("VeryDirty"), STATE_VERY_DIRTY);
+        assert_eq!(state_hash("Burnt"), STATE_BURNT);
+    }
 }

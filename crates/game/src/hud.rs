@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q)))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res)))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>)),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>)),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1904,6 +1904,18 @@ fn world_click(
                 let here = pickable.get(actor).map_or(gtf.translation().xz(), |p| p.1.translation().xz());
                 let what = baked.0.catalog.iter().find(|c| c.objd == obj.objd).map_or(crate::ornaments::Ornament::Gnome, |c| crate::ornaments::Ornament::of(&c.script));
                 options.extend(crate::ornaments::options(t, &gtf.compute_transform(), what, &obj.name, knocked_q.get(t).ok().copied(), actor_sim.age, here));
+            }
+            // (A board breaker: its boards to break, another kind while at it, someone at it
+            // watched: `boardbreaker`.)
+            if obj.kind == ObjectKind::BoardBreaker
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let here = pickable.get(actor).map_or(gtf.translation().xz(), |p| p.1.translation().xz());
+                let level = writers.get(actor).map_or(0.0, |w| w.1.0.get("MartialArts").copied().unwrap_or(0.0));
+                let moods = moods_q.get(actor).ok();
+                let has = |k: crate::life::MoodletKind| moods.is_some_and(|m| m.has(k));
+                let unwell = (has(crate::life::MoodletKind::Fatigued), has(crate::life::MoodletKind::HurtHand));
+                options.extend(crate::boardbreaker::options(t, &gtf.compute_transform(), (actor, actor_sim), level, unwell, here, &breakers_res, &mut pie.submenus, submenu_kind));
             }
             // (A treehouse: in, out, playing, pretending and sleeping in it, calling the children
             // down: `treehouse`.)
@@ -3194,6 +3206,12 @@ fn pie_buttons(
     if let (ActionKind::TreehouseNow { house, now }, Some(a)) = (&kind, actor) {
         let (house, now) = (*house, *now);
         commands.queue(move |w: &mut World| crate::treehouse::now(w, a, house, now));
+        return;
+    }
+    // (Another kind of board to break: there and then, `ChangeBoard`'s immediate.)
+    if let (ActionKind::ChangeBoard { breaker, board }, Some(a)) = (&kind, actor) {
+        let (breaker, board) = (*breaker, *board);
+        commands.queue(move |w: &mut World| crate::boardbreaker::change(w, a, breaker, board));
         return;
     }
     if label == PHONE_LABEL {

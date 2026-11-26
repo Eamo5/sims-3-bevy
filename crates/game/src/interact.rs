@@ -308,6 +308,9 @@ pub enum ObjectKind {
     /// A martial artist's training dummy (World Adventures' `TrainingDummy`): practised on
     /// (`martialarts`).
     TrainingDummy,
+    /// A board breaker (World Adventures' `BoardBreaker`): boards broken on it, watched
+    /// (`boardbreaker`).
+    BoardBreaker,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -358,6 +361,8 @@ impl ObjectKind {
             Self::PetStone
         } else if has("objects.hobbiesskills.trainingdummy") {
             Self::TrainingDummy
+        } else if has("objects.hobbiesskills.boardbreaker") {
+            Self::BoardBreaker
         } else if has("objects.decorations.flamingo")
             || has("objects.environment.gardengnome")
             || has("objects.environment.magicgnome")
@@ -691,7 +696,8 @@ impl ObjectKind {
             | Self::Keyboard
             | Self::Drums
             | Self::LaserHarp
-            | Self::TrainingDummy => "Hobbies",
+            | Self::TrainingDummy
+            | Self::BoardBreaker => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -2938,7 +2944,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
@@ -3242,6 +3248,13 @@ pub enum ActionKind {
     /// A lawn ornament kicked over, or stood up (`ornaments`): from which side (the far one's
     /// clips mirrored), where they stand for it and the way they face.
     Ornament { thing: Entity, kick: bool, mirrored: bool, at: Vec2, face: Vec2 },
+    /// Boards broken on a board breaker (`boardbreaker`): which kind, from which of its sides (its
+    /// far one, `_route_0_S`, `true`), where they stand and the way they face.
+    BoardBreak { breaker: Entity, board: crate::boardbreaker::Board, side: bool, at: Vec2, face: Vec2 },
+    /// Watching someone break boards (`boardbreaker`'s `Watch Martial Artist`), from a few metres.
+    WatchBoardBreak { breaker: Entity, at: Vec2, face: Vec2 },
+    /// Another kind of board to break, there and then (never queued: `boardbreaker::change`).
+    ChangeBoard { breaker: Entity, board: crate::boardbreaker::Board },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -3397,6 +3410,18 @@ pub const HIDDEN_SKILLS: [&str; 2] = ["Hopscotch", "ChildAthletic"];
 
 pub fn hidden_skill(k: &str) -> bool {
     HIDDEN_SKILLS.contains(&k)
+}
+
+/// A skill's name in words, from the game's key for it ("MartialArts": "Martial Arts").
+pub fn skill_title(k: &str) -> String {
+    let mut out = String::with_capacity(k.len() + 2);
+    for (i, c) in k.chars().enumerate() {
+        if i > 0 && c.is_ascii_uppercase() {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// The skill points it takes to reach each level (running totals, level 1 first), as the game's
@@ -4181,9 +4206,9 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::TreehouseNow { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::TreehouseNow { .. } | ActionKind::ChangeBoard { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } | ActionKind::Ornament { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } | ActionKind::Ornament { at, .. } | ActionKind::BoardBreak { at, .. } | ActionKind::WatchBoardBreak { at, .. } => Some((*at, floor.0)),
                         // (Playing on the playground: `playground` turns it into the object's own
                         // play before it's begun.)
                         ActionKind::PlayOnPlayground { .. } => continue,
@@ -5013,7 +5038,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::PlayOnPlayground { .. } | ActionKind::TreehouseNow { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::PlayOnPlayground { .. } | ActionKind::TreehouseNow { .. } | ActionKind::ChangeBoard { .. } => finished = true,
                             // (Beside the posts, turned to them: `trainingposts` sees to the watching.)
                             ActionKind::WatchTraining { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -5021,7 +5046,7 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } | ActionKind::Ornament { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } | ActionKind::Ornament { face, .. } | ActionKind::BoardBreak { face, .. } | ActionKind::WatchBoardBreak { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -5183,7 +5208,7 @@ pub(crate) fn run_actions(
                                     let rate = crate::life::skill_rate(&sim.traits, sk) * crate::wishes::reward_skill_rate(wishes) * mood_learning * computer_chess;
                                     let points = if d.special == Special::Perform { PERFORM_POINTS } else { practice_points(d.name) };
                                     if let Some(level) = skills.add_points(sk, dt / 60.0 * points * rate) {
-                                        notes.push(format!("{} reached level {level} in {sk}!", sim.first));
+                                        notes.push(format!("{} reached level {level} in {}!", sim.first, skill_title(sk)));
                                         life.write(LifeEvent::new(me, LifeEventKind::SkillUp { skill: sk, level }));
                                     }
                                     // (Hours of games played, a game developer's: `careermetrics`.)
@@ -6677,7 +6702,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } | ActionKind::BoardBreak { .. } | ActionKind::WatchBoardBreak { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

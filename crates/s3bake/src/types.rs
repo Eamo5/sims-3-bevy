@@ -24,8 +24,9 @@ pub fn is_hat(name: &str) -> bool {
 pub const T_HAT_LAYER: u32 = 0x0CA5_4A70;
 /// The objects' models and textures (the global bake's, beside its packs' `BAKE_VERSION`): 1,
 /// cut-outs drawn from bled copies of their textures; 2, the wardrobe in a fixed order; 3, the
-/// packs' objects whose patches name their models without the pack's byte.
-pub const OBJECTS_VERSION: u32 = 3;
+/// packs' objects whose patches name their models without the pack's byte; 4, the board
+/// breaker's boards' kinds (their material states).
+pub const OBJECTS_VERSION: u32 = 4;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
 pub const WORLD_VERSION: u32 = 81;
 

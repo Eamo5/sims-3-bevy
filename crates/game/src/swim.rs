@@ -73,6 +73,8 @@ fn pyjamas(
             (ActionKind::Jog { .. }, Phase::Running(_)) => Some(OutfitKind::Athletic),
             // (A new belt shown off in the gi: `CheckOutMyAwesomeBelt`'s spin into it.)
             (ActionKind::Outro { clips, .. }, _) if clips.first() == Some(&crate::martialarts::NEW_BELT) => Some(OutfitKind::MartialArts),
+            // (Breaking boards in it too.)
+            (ActionKind::BoardBreak { .. }, Phase::Running(_)) => Some(OutfitKind::MartialArts),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
                 outfit_for_use(o.kind, interactions_for(o.kind).get(*def)?)
