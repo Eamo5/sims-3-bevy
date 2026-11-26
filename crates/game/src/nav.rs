@@ -874,6 +874,8 @@ pub enum WalkStyle {
     Astronaut,
     Prince,
     Princess,
+    /// Pushing a stroller (`strollers`: the game's `StrollerWalk`).
+    Stroller,
 }
 
 impl WalkStyle {
@@ -887,6 +889,7 @@ impl WalkStyle {
             (Astronaut, _) => 1.06,
             (Prince, _) => 0.97,
             (Princess, _) => 0.6,
+            (Stroller, _) => 1.68,
             (Walk, true) => 1.25,
             (_, true) => 3.7,
             (Walk, false) if female => 1.7,
@@ -909,6 +912,7 @@ impl WalkStyle {
             (Astronaut, _) => &["c_childCostumeChest_astronaut_walk_x"],
             (Prince, _) => &["c_childCostumeChest_prince_walk_x"],
             (Princess, _) => &["c_childCostumeChest_princess_walk_x"],
+            (Stroller, _) => &["a2o_stroller_walk_x"],
             (_, true) => &["c_run"],
             (FastWalk, _) => &["a_male_walk_fast"],
             (FastJog, _) => &["a_male_fastjog"],
@@ -924,7 +928,8 @@ impl WalkStyle {
 /// The ground speed of a walk cycle (metres a second, feet planted), for playing it in step with
 /// the Sim's pace.
 pub fn cycle_speed(clip: &str) -> Option<f32> {
-    const CYCLES: [(&str, f32); 16] = [
+    const CYCLES: [(&str, f32); 17] = [
+        ("a2o_stroller_walk_x", 1.68),
         ("c_childCostumeChest_dinosaur_walk_x", 0.57),
         ("c_childCostumeChest_astronaut_walk_x", 1.06),
         ("c_childCostumeChest_prince_walk_x", 0.97),

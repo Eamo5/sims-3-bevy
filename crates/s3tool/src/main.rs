@@ -961,9 +961,11 @@ fn main() {
         return;
     }
     if args[1] == "skin" {
-        // skin <root> <objd instance hex>: each mesh's joints and blend data, and the rig.
+        // skin <root> <objd instance hex> [group hex]: each mesh's joints and blend data, and the
+        // rig.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
-        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let group = args.get(4).map_or(0, |g| parse_hex(g) as u32);
+        let k = s3pkg::ResourceKey::new(types::OBJD, group, parse_hex(&args[3]));
         let objd = set.read(&k).expect("no OBJD");
         let objk = s3formats::object::objd_objk(&set, &objd).expect("no OBJK");
         let mk = objk.model_key.expect("no model");

@@ -1876,6 +1876,16 @@ fn world_click(
                     .collect();
                 options.extend(crate::seesaw::options(t, &stf, &seesaws_res, actor, actor_sim, here, &others, &mut pie.submenus, submenu_kind));
             }
+            // (A stroller: out for a stroll with a little one of theirs, `strollers`.)
+            if obj.kind == ObjectKind::Stroller
+                && crate::strollers::can_push(actor_sim.age)
+                && !queues_q.iter().any(|q| q.0.iter().any(|a| matches!(a.kind, ActionKind::Stroll { stroller, .. } if stroller == t)))
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let stf = gtf.compute_transform();
+                let littles: Vec<(Entity, String)> = carry_q.strollable(actor).into_iter().filter(|(c, _)| sims.get(*c).is_ok_and(|s| s.1)).collect();
+                options.extend(crate::strollers::options(t, &stf, &littles, &mut pie.submenus, submenu_kind));
+            }
             // (The costume chest: dress up, play pretend, ask another child to join: `costumes`.)
             if obj.kind == ObjectKind::CostumeChest
                 && crate::costumes::can_play(actor_sim.age)

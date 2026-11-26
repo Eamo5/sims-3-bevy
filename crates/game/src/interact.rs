@@ -290,6 +290,9 @@ pub enum ObjectKind {
     /// The Dreamer's Costume Chest (Generations' `CostumeChest`): children dress up from it and
     /// play pretend (`costumes`).
     CostumeChest,
+    /// A stroller (Generations' `Stroller`: the Twinbrook Roller, the Air-Strol LX): a baby or
+    /// toddler taken out for a stroll in it (`strollers`).
+    Stroller,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -422,6 +425,8 @@ impl ObjectKind {
             Self::Seesaw
         } else if has("toys.costumechest") {
             Self::CostumeChest
+        } else if has("vehicles.stroller") {
+            Self::Stroller
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -632,7 +637,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::CostumeChest | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::CostumeChest | Self::Stroller | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -3174,6 +3179,9 @@ pub enum ActionKind {
     PlayPretend { asker: Option<Entity>, at: Option<Vec2> },
     /// Another child asked to play pretend (never queued: `costumes::ask`).
     AskToPretend { child: Entity },
+    /// Out for a stroll with a baby or toddler in the stroller (`strollers`): from behind it,
+    /// where they stand and face.
+    Stroll { stroller: Entity, child: Entity, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4113,7 +4121,7 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } => Some((*at, floor.0)),
                         // (Playing pretend where they are: `costumes` walks them about.)
                         ActionKind::PlayPretend { at: None, .. } => {
                             action.phase = Phase::Running(0.0);
@@ -4948,7 +4956,7 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6599,7 +6607,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

@@ -776,6 +776,27 @@ installation is unreachable.
   (`AskToRemoveCostume`, the game's `admonishChild` clips), and the child spins back into their
   everyday clothes. `COSTUME_TEST=<kind>[:<colour>]` with `COSTUME_WHO`, `COSTUME_JOIN`,
   `COSTUME_REMOVE=<first name>` (tests).
+- **Strollers**, as Generations' `Stroller` (the Twinbrook Roller, the Air-Strol LX): a teen or
+  grown-up "Go[es] on Stroll With... ›" a baby or toddler of the household (the one in their
+  arms, or one about, picked up first, out of their crib if need be: `GetValidFollowers`). From
+  behind the stroller (its `_route_adult` slot) they put the little one in with the game's own
+  clips (`holdBaby2stroller`, a toddler's `holdTodder2stroller` and its second part): a baby
+  handed from the hand to the seat (`_ctnm_baby`) as the clips' parent events have it, out of
+  sight a moment as the game fades them, a toddler lifted into the footwell (`_ctnm_toddler`).
+  Then they push it in the stroller walk (`StrollerWalk`, hands on the handles, the stroller
+  playing its own half of each step, wheels turning) out to the street and up and down its
+  sidewalk (about the lot when away from home), the little one breathing and looking about in
+  it, fretting while a need of theirs is going badly (`happy_idle`, `unhappy_idle`: the game's
+  `Cry`). After two hours (`kTimeToStrollInMinutes`), a pressing need, or told to stop (they
+  come home first rather than drop the little one), they take the little one back into their
+  arms (`holdStroller2baby`, `holdStroller2toddler`) and leave the stroller where it stood. It's
+  fun and company for the one pushing (`GoOnStrollSocial`: Fun 200, Social 200 an hour) and for
+  the little one (`kToddlerCommodityDeltas`, the XML's: Social 50, Fun 50, Energy 5), and brings
+  them closer (`kRelationshipDeltaLTR`); three quarters of an hour of it
+  (`kTimeToAddBuffInMinutes`) and the little one's Had a Good Stroll (+10 for three hours). By
+  day, one of the household short of fun goes of their own accord now and then.
+  `STROLLER_TEST=<instance>` with `STROLLER_WHO`, `STROLLER_CHILD=<first name>|@baby` (with
+  `--do Baby`), `STROLLER_MINUTES`, `STROLLER_LOOK=1` (tests).
 - **Grime**: toilets, showers, tubs and sinks get dirtier with every use (the game's numbers:
   less after Neat Sims, more after slobs) and look it: the model's own Dirty and Very Dirty
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).

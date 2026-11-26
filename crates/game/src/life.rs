@@ -951,10 +951,12 @@ pub enum MoodletKind {
     ShreddedDignity,
     Kittens,
     Puppies,
+    /// A baby or toddler taken out in the stroller (`strollers`).
+    HadAGoodStroll,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 196] = {
+    pub const ALL: [MoodletKind; 197] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -975,7 +977,7 @@ impl MoodletKind {
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
             GoingNuts, Restless, Frustrated, ThirstyHorse, Dehydrated, SqueakyCleanPet, WellRestedPet, PregnantPet, PetSkillFatigue,
             LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, PumpedPony, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
-            Kicked, Marked, ShreddedDignity, Kittens, Puppies,
+            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll,
         ]
     };
 
@@ -1212,6 +1214,7 @@ impl MoodletKind {
             ShreddedDignity => md("Shredded Dignity", "Attacked by a cat.", -20, 3.0),
             Kittens => md("Kittens!", "Awww ... kittens are so cute and cuddly!", 10, 1.0),
             Puppies => md("Puppies!", "Awww ... aren't puppies adorable?", 10, 1.0),
+            HadAGoodStroll => md("Had a Good Stroll", "Fresh air, beautiful sights, and some exercise...what could be better than a good stroll?", 10, 3.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1421,6 +1424,7 @@ impl MoodletKind {
             ShreddedDignity => ("ShreddedDignity", true),
             Kittens => ("Kittens", true),
             Puppies => ("Puppies", true),
+            HadAGoodStroll => ("HadAGoodStroll", true),
         }
     }
 }

@@ -270,6 +270,14 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (Strollers: a little one put in and taken out, the stroller pushed along with its own half,
+    // a baby's and a toddler's idles in it.)
+    "a2o_stroller_",
+    "a2o_Stroller_",
+    "a2b_stroller_",
+    "a2p_stroller_",
+    "b2o_Stroller_",
+    "p2o_Stroller_",
     // (The costume chest: its lid opened and a costume taken; dressed up, the costumes' walks and
     // idles.)
     "c2o_childCostumeChest_",

@@ -61,6 +61,32 @@ impl ObjectRig {
     pub fn bone(&self, hash: u32) -> Option<(Entity, Transform)> {
         self.rigs.iter().find_map(|inst| inst.rig.hashes.iter().position(|h| *h == hash).and_then(|i| Some((*inst.bones.get(i)?, *inst.rig.bind.get(i)?))))
     }
+
+    /// Where a bone is in the model as a clip of the object's has it at `t` (at rest with none):
+    /// its parents' places composed with its own (a stroller's seat as it's pushed along).
+    pub fn bone_in_model(&self, clip: Option<&s3formats::sim::Clip>, t: f32, hash: u32) -> Option<Mat4> {
+        let inst = self.rigs.iter().find(|inst| inst.rig.hashes.contains(&hash))?;
+        let local = |i: usize| {
+            let mut tf = inst.rig.bind[i];
+            if let Some(track) = clip.and_then(|c| c.tracks.get(&inst.rig.hashes[i])) {
+                if let Some(p) = sample_track_vec(&track.translation, t) {
+                    tf.translation = p;
+                }
+                if let Some(r) = sample_track_quat(&track.rotation, t) {
+                    tf.rotation = r;
+                }
+            }
+            tf.to_matrix()
+        };
+        let mut i = inst.rig.hashes.iter().position(|h| *h == hash)?;
+        let mut m = local(i);
+        for _ in 0..64 {
+            let Some(p) = inst.rig.parent(i) else { break };
+            m = local(p) * m;
+            i = p;
+        }
+        Some(m)
+    }
 }
 
 /// A model's rig: its bones' name hashes, parents and rest poses, and inverse bind poses.

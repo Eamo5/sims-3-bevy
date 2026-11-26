@@ -176,7 +176,7 @@ fn carry_pose(age: Age) -> Carrying {
 }
 
 /// Whether a little one wants something badly enough to cry for it (as `little`'s).
-fn crying(m: &crate::sim::Motives) -> bool {
+pub(crate) fn crying(m: &crate::sim::Motives) -> bool {
     use crate::sim::{BLADDER, HUNGER, SOCIAL};
     [HUNGER, BLADDER, SOCIAL].iter().any(|k| m.0[*k] < -40.0)
 }
@@ -190,8 +190,8 @@ fn with_child(kind: &ActionKind, child: Entity, age: Age) -> bool {
         ActionKind::GoHere(..) | ActionKind::Outro { .. } | ActionKind::WakeUp { .. } => true,
         ActionKind::Social { target, social } => *target == child && in_arms(crate::social::social(*social).name, age),
         ActionKind::Carry { child: c, step, .. } => *c == child && !matches!(step, CarryStep::PickUp { .. }),
-        // (Set on a spring rider from the arms: `springriders`.)
-        ActionKind::ToddlerRide { child: c, .. } => *c == child,
+        // (Set on a spring rider from the arms: `springriders`; in a stroller, `strollers`.)
+        ActionKind::ToddlerRide { child: c, .. } | ActionKind::Stroll { child: c, .. } => *c == child,
         _ => false,
     }
 }
@@ -588,8 +588,8 @@ fn held_idle(
         if moving || being_moved {
             continue;
         }
-        // (On a spring rider: its clips, `springriders`.)
-        if queue.0.front().is_some_and(|a| matches!(a.kind, ActionKind::ToddlerRide { child: c, .. } if c == child) && matches!(a.phase, Phase::Running(_))) {
+        // (On a spring rider, in a stroller: their clips, `springriders`, `strollers`.)
+        if queue.0.front().is_some_and(|a| matches!(a.kind, ActionKind::ToddlerRide { child: c, .. } | ActionKind::Stroll { child: c, .. } if c == child) && matches!(a.phase, Phase::Running(_))) {
             continue;
         }
         if carrying.is_none() {
@@ -612,7 +612,7 @@ fn held_idle(
 #[allow(clippy::type_complexity)]
 fn follow(
     mut commands: Commands,
-    mut littles: Query<(Entity, &Carried, &Sim, &mut Transform, &mut Floor), (Without<CarryMove>, Without<crate::springriders::OnRide>)>,
+    mut littles: Query<(Entity, &Carried, &Sim, &mut Transform, &mut Floor), (Without<CarryMove>, Without<crate::springriders::OnRide>, Without<crate::strollers::InStroller>)>,
     carriers: Query<(&Transform, &crate::simbody::Skeleton, &Floor), (Without<Carried>, With<Sim>)>,
     joints: Query<&GlobalTransform>,
 ) {
@@ -726,6 +726,20 @@ impl CarryLook<'_, '_> {
         let held = self.held_by(actor).and_then(|c| self.littles.get(c).ok()).filter(|l| l.1.age == Age::Toddler).map(|l| (l.0, l.1.first.clone()));
         let about = self.littles.iter().filter(|l| l.1.age == Age::Toddler && !l.5 && l.3.is_none() && !l.4).map(|l| (l.0, l.1.first.clone())).collect();
         (held, about)
+    }
+
+    /// The babies and toddlers to take out in a stroller (`GetValidFollowers`): the one in their
+    /// arms first, then those about not in anyone's arms (in a crib or not).
+    pub fn strollable(&self, actor: Entity) -> Vec<(Entity, String)> {
+        let held = self.held_by(actor);
+        let mut out: Vec<(Entity, String)> = held.and_then(|c| self.littles.get(c).ok()).map(|l| (l.0, l.1.first.clone())).into_iter().collect();
+        out.extend(self.littles.iter().filter(|l| l.1.age.is_little() && !l.5 && Some(l.0) != held).map(|l| (l.0, l.1.first.clone())));
+        out
+    }
+
+    /// The way a little one's picked up where they are (out of their crib, if they're in one).
+    pub fn pick_up(&self, child: Entity) -> CarryStep {
+        CarryStep::PickUp { crib: self.crib_of(child) }
     }
 
     /// The ground's menu for someone holding a little one: put down there (the game's
