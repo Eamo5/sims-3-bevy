@@ -123,6 +123,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("bucket", "accessoryBucket", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
+    // (Whichever pet rock is played with.)
+    ("petStone", ANY, "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
 ];
 
 /// A prop that's the object being used itself, whatever it is.
@@ -213,6 +215,8 @@ fn hold_props(
         // The object being used, when the Sim holds its copy (shown again afterwards).
         let target = queue.0.front().and_then(|a| match a.kind {
             crate::interact::ActionKind::Object { target, .. } => Some(target),
+            // (A pet rock played with: the rock itself, `petstones`.)
+            crate::interact::ActionKind::PetStone { stone, .. } => Some(stone),
             _ => None,
         });
         // (A pet being played with: what's thrown for it goes to it.)

@@ -210,6 +210,11 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     if s.kind == ItemKind::Journal {
         out.push(("Read".to_string(), ItemButton::Read));
     }
+    // (A pet rock: played with, or put down at their feet, `petstones`.)
+    if s.kind == ItemKind::Object && crate::petstones::is_stone(&s.key) && crate::petstones::plays(sim.age) {
+        out.push((crate::petstones::play_with(&s.name), ItemButton::PlayStone));
+        out.push((crate::petstones::put_down(&s.name), ItemButton::PutDownStone));
+    }
     if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
         out.push(("Place on the Lot".to_string(), ItemButton::Hang));
     }
@@ -239,6 +244,9 @@ pub enum ItemButton {
     /// (`petpresent`).
     PresentTo(Entity),
     DropSomewhere,
+    /// A pet rock played with, or put down at their feet (`petstones`).
+    PlayStone,
+    PutDownStone,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -512,6 +520,16 @@ fn inventory_buttons(
             }
             // (A pet's, never a Sim's.)
             ItemButton::PresentTo(_) | ItemButton::DropSomewhere => {}
+            // (A pet rock out of the inventory: put down at their feet, and played with there or
+            // left, `petstones`.)
+            ItemButton::PlayStone | ItemButton::PutDownStone => {
+                if away.contains(me) {
+                    continue;
+                }
+                let Some(worth) = inv.take_one(k) else { continue };
+                commands.entity(me).insert(crate::petstones::FromPocket { item: Stack { count: 1, worth, ..s.clone() }, play: *b == ItemButton::PlayStone });
+                chosen.reconcile(&inv);
+            }
             ItemButton::GiveTo(to) => {
                 if *to == me {
                     continue;

@@ -270,6 +270,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (A pet rock played with: picked up, cuddled, kissed, talked to, tossed up, dropped.)
+    "a2o_petStone_",
+    "c2o_petStone_",
     // (A cat's catch taken up in its mouth, carried and put down; one on the floor eaten.)
     "ac2o_prey_",
     "ac2o_eatfish_",
@@ -1020,6 +1023,8 @@ pub const PROP_ACTORS: &[&str] = &[
     "spyglass",
     "alienScanner",
     "bucket",
+    // (A pet rock played with.)
+    "petStone",
 ];
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's

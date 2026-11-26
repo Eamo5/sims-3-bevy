@@ -1890,6 +1890,13 @@ fn world_click(
                     options.push((crate::playground::PLAY_ON_PLAYGROUND.to_string(), ActionKind::PlayOnPlayground { target: t }));
                 }
             }
+            // (A pet rock: played with or picked up, by its name: `petstones`.)
+            if obj.kind == ObjectKind::PetStone
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let here = pickable.get(actor).map_or(gtf.translation().xz(), |p| p.1.translation().xz());
+                options.extend(crate::petstones::options(t, &gtf.compute_transform(), &obj.name, actor_sim.age, here));
+            }
             // (A treehouse: in, out, playing, pretending and sleeping in it, calling the children
             // down: `treehouse`.)
             if obj.kind == ObjectKind::Treehouse

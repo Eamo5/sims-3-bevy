@@ -1241,6 +1241,18 @@ installation is unreachable.
   Away" by a cat into its inventory again (`PetPutInInventory`). Kept in saves.
   `PRESENT_TEST=<cat>` with `PRESENT_TO=<first name>|drop|pie`, `PRESENT_NEAR=1`, `PRESENT_PREY`,
   `PRESENT_THEN=eat|away|pocket:<first name>` (tests).
+  Pet rocks, the pack's `PetStone` (the Essence of Pure Love Rock, Sir Bricks-a-lot Jr., the Gonk
+  Rock): children and older "Play with" one (Fun 50 an hour): it's picked up (`a2o_petStone_play_start`,
+  a child's `c2o_`), cuddled, kissed, talked to and tossed up (the pack's loops), its picture in
+  their thoughts, till they've had their fun or are told to stop, then kept in their inventory
+  (`stop_normal`). Every minute of it there's a one-in-ten chance it slips (`kPercentChanceDrop`)
+  and breaks on their foot (`stop_drop`): Hurt Foot (-25 for three hours), the sad sting
+  (`sting_pet_stone_sad`), and bits of rock left on the floor by its name (`PetStoneBits`), cleaned
+  up as ash is. "Pick up {name}" puts one in their inventory with the game's swipe; from there it's
+  played with ("Play with {name}") or put down at their feet ("Put down {name}"). Bored, a Sim may
+  play with one about of their own accord, a Loner sooner (`TraitLoner`'s 200).
+  `PETSTONE_TEST=<instance>` with `PETSTONE_WHO`, `PETSTONE_DO=play|pickup|pocket`,
+  `PETSTONE_NO_DROP=1`, `PETSTONE_MINUTES`, `PETSTONE_PIE=1` (tests).
   Pets have moodlets and a mood as Sims do, the pack's own buffs: their needs' by the game's
   `Motives` triggers for each species (Hungry from -36, Very Hungry -40 from -61, Starving -80
   from -81; Has To Pee, Sleepy, Tired, Exhausted, Lonely, Desolate; Grungy and Smelly for the
