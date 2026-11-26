@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 20;
+pub const SOUNDS_VERSION: u32 = 21;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -79,6 +79,13 @@ pub const SEATS: [&str; 4] = ["cloth", "leath", "wood", "cment"];
 
 /// Sounds the game plays outside animations.
 pub const EXTRA_SOUNDS: &[&str] = &[
+    // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
+    "thouse_pretend_castle_loop",
+    "thouse_pretend_castle_plist",
+    "thouse_pretend_pirates_loop",
+    "thouse_pretend_pirates_plist",
+    "thouse_pretend_space_loop",
+    "thouse_pretend_space_plist",
     // A shower's water, and singing in it (the shower's script starts them).
     "shower_running_lp",
     "vo_shower_singA",

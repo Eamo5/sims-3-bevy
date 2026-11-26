@@ -43,7 +43,7 @@ const MAX_TRIES: u8 = 3;
 
 /// The playground things (Generations' `PlayGroundObject`s).
 pub fn is_playground(kind: ObjectKind) -> bool {
-    matches!(kind, ObjectKind::SwingSet | ObjectKind::JungleGym | ObjectKind::Slide | ObjectKind::SpringRider | ObjectKind::Seesaw | ObjectKind::Sandbox)
+    matches!(kind, ObjectKind::SwingSet | ObjectKind::JungleGym | ObjectKind::Slide | ObjectKind::SpringRider | ObjectKind::Seesaw | ObjectKind::Sandbox | ObjectKind::Treehouse)
 }
 
 /// Who plays on the playground: children (the tuning's `AgeSpeciesAvail` C).
@@ -55,6 +55,8 @@ pub fn can_play(age: Age) -> bool {
 pub fn minutes_on(kind: ObjectKind) -> f64 {
     match kind {
         ObjectKind::SpringRider | ObjectKind::JungleGym => 15.0,
+        // (A treehouse's `kPlayOnPlaygroundDuration`.)
+        ObjectKind::Treehouse => 40.0,
         _ => 20.0,
     }
 }
@@ -71,9 +73,14 @@ pub struct Candidate {
     pub needs_players: bool,
 }
 
-/// How a thing stands for a child: who's using it (`UsedBy`), the seesaws, and how many others
-/// have it in their queues.
-pub fn candidate(me: Entity, e: Entity, kind: ObjectKind, used: Option<Entity>, boards: &Boards, others: usize) -> Candidate {
+/// How a thing stands for a child: who's using it (`UsedBy`), the seesaws, who's up the
+/// treehouses, and how many others have it in their queues.
+pub fn candidate(me: Entity, e: Entity, kind: ObjectKind, used: Option<Entity>, boards: &Boards, houses: &crate::treehouse::Houses, others: usize) -> Candidate {
+    // (A treehouse: room for them, four at most counting those on their way.)
+    if kind == ObjectKind::Treehouse {
+        let free = houses.room(e, me, false) && houses.get(e).inside.iter().filter(|x| x.0 != me).count() + others < crate::treehouse::OCCUPANTS;
+        return Candidate { e, kind, free, needs_players: false };
+    }
     if kind == ObjectKind::Seesaw {
         let b = boards.0.get(&e);
         let empty = b.is_none_or(|b| b.riders.is_empty() && b.joining.is_none() && b.part == Part::Empty);
@@ -113,6 +120,10 @@ pub fn action_for(e: Entity, kind: ObjectKind, tf: &Transform, here: Vec2, sim: 
         let label = if daredevil { crate::seesaw::PLAY_ON_EXTREME } else { crate::seesaw::PLAY_ON };
         return (label.to_string(), crate::seesaw::sit(e, tf, spot, extreme, None));
     }
+    // (Up the treehouse to play in it, the game's `PlayIn` as playground play.)
+    if kind == ObjectKind::Treehouse {
+        return (PLAY_ON_PLAYGROUND.to_string(), crate::treehouse::act(e, tf, crate::treehouse::Act::Play));
+    }
     let name = crate::interact::interactions_for(kind).first().map_or(PLAY_ON_PLAYGROUND, |d| d.name);
     (name.to_string(), ActionKind::Object { target: e, def: 0 })
 }
@@ -137,6 +148,8 @@ fn target_of(a: &Action, kind_of: &impl Fn(Entity) -> Option<ObjectKind>) -> Opt
         ActionKind::Object { target, .. } if kind_of(target).is_some_and(is_playground) => Some(target),
         ActionKind::Seesaw { seesaw, .. } => Some(seesaw),
         ActionKind::PlayOnPlayground { target } => Some(target),
+        // (Up, in and down a treehouse, all its play.)
+        ActionKind::Treehouse { house, .. } => Some(house),
         _ => None,
     }
 }
@@ -157,13 +170,13 @@ fn claims<'a>(queues: impl Iterator<Item = (Entity, &'a ActionQueue)>, kind_of: 
 type Objects<'w, 's> = Query<'w, 's, (Entity, &'static GameObject, &'static Transform, Option<&'static crate::visit::LotObject>, Option<&'static UsedBy>), Without<Sim>>;
 
 /// The playground things on a lot (none: the household's own) as a child sees them.
-fn on_lot(me: Entity, age: Age, lot: Option<usize>, objects: &Objects, boards: &Boards, claimed: &HashMap<Entity, Vec<Entity>>) -> Vec<Candidate> {
+fn on_lot(me: Entity, age: Age, lot: Option<usize>, objects: &Objects, (boards, houses): (&Boards, &crate::treehouse::Houses), claimed: &HashMap<Entity, Vec<Entity>>) -> Vec<Candidate> {
     objects
         .iter()
         .filter(|(_, o, _, l, _)| is_playground(o.kind) && o.kind.usable_by(age) && l.map(|l| l.0) == lot)
         .map(|(e, o, _, _, used)| {
             let others = claimed.get(&e).map_or(0, |v| v.iter().filter(|c| **c != me).count());
-            candidate(me, e, o.kind, used.and_then(|u| u.0), boards, others)
+            candidate(me, e, o.kind, used.and_then(|u| u.0), boards, houses, others)
         })
         .collect()
 }
@@ -176,10 +189,10 @@ fn done(m: &crate::sim::Motives) -> bool {
 /// "Play on Playground" begun: made the first thing's own play; and a stop asked of a child
 /// playing (any of their playground goes cancelled, not by the switching): done after this one.
 #[allow(clippy::type_complexity)]
-fn begin(
+pub(crate) fn begin(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    boards: Res<Boards>,
+    (boards, houses): (Res<Boards>, Res<crate::treehouse::Houses>),
     mut sims: Query<(Entity, &Sim, &mut ActionQueue, &Transform, Option<&mut OnPlayground>, Option<&crate::visit::OnLot>)>,
     objects: Objects,
 ) {
@@ -201,7 +214,7 @@ fn begin(
             continue;
         }
         let lot = lot.map(|l| l.0);
-        let cands = on_lot(e, sim.age, lot, &objects, &boards, &claimed);
+        let cands = on_lot(e, sim.age, lot, &objects, (&boards, &houses), &claimed);
         let kind = kind_of(target).unwrap_or(ObjectKind::Other);
         // (Taken meanwhile: somewhere else free.)
         let first = cands.iter().find(|c| c.e == target && c.free).map(|c| c.e).or_else(|| pick(target, kind, &cands, true, &mut rng));
@@ -227,7 +240,7 @@ fn begin(
 fn rotate(
     mut commands: Commands,
     clock: Res<crate::clock::GameClock>,
-    boards: Res<Boards>,
+    (boards, houses): (Res<Boards>, Res<crate::treehouse::Houses>),
     mut sims: Query<(Entity, &Sim, &mut ActionQueue, &crate::sim::Motives, &Transform, Option<&mut OnPlayground>, Option<&crate::visit::OnLot>)>,
     objects: Objects,
 ) {
@@ -271,7 +284,7 @@ fn rotate(
                     pg.stopped = true;
                     continue;
                 }
-                let cands = on_lot(e, sim.age, lot, &objects, &boards, &claimed);
+                let cands = on_lot(e, sim.age, lot, &objects, (&boards, &houses), &claimed);
                 match pick(o, kind, &cands, true, &mut rng).and_then(|n| set_to(n, &mut rng).map(|x| (n, x))) {
                     Some((n, (label, next))) => {
                         info!("playground: {} goes from {:?} on to {label} ({:?})", sim.first, kind, kind_of(n));
@@ -306,7 +319,7 @@ fn rotate(
                 pg.tries += 1;
                 let kind = kind_of(pg.object).unwrap_or(ObjectKind::Other);
                 let time_up = now - pg.since >= minutes_on(kind);
-                let cands = on_lot(e, sim.age, lot, &objects, &boards, &claimed);
+                let cands = on_lot(e, sim.age, lot, &objects, (&boards, &houses), &claimed);
                 let again = cands.iter().any(|c| c.e == pg.object && c.free).then_some(pg.object);
                 let next = pick(pg.object, kind, &cands, time_up, &mut rng).or(again).or_else(|| pick(pg.object, kind, &cands, true, &mut rng));
                 match next.and_then(|n| set_to(n, &mut rng)) {
@@ -326,7 +339,7 @@ fn rotate(
 #[allow(clippy::type_complexity)]
 fn autonomy(
     clock: Res<crate::clock::GameClock>,
-    boards: Res<Boards>,
+    (boards, houses): (Res<Boards>, Res<crate::treehouse::Houses>),
     mut sims: Query<(Entity, &Sim, &mut ActionQueue, &crate::sim::Motives, &Transform, Option<&crate::visit::OnLot>, (Has<crate::sim::HouseholdMember>, Has<OnPlayground>))>,
     objects: Objects,
     mut next: Local<f64>,
@@ -347,7 +360,7 @@ fn autonomy(
         if !member || playing || !can_play(sim.age) || !q.0.is_empty() || !bored || !rng.random_bool(if childish { 0.6 } else { 0.35 }) {
             continue;
         }
-        let cands = on_lot(e, sim.age, lot.map(|l| l.0), &objects, &boards, &claimed);
+        let cands = on_lot(e, sim.age, lot.map(|l| l.0), &objects, (&boards, &houses), &claimed);
         let here = tf.translation;
         let near = cands
             .iter()
@@ -508,21 +521,30 @@ mod tests {
     #[test]
     fn a_seesaw_with_one_waiting_needs_a_playmate() {
         let mut boards = Boards::default();
+        let mut houses = crate::treehouse::Houses::default();
         let me = e(10);
         let s = e(1);
-        let empty = candidate(me, s, ObjectKind::Seesaw, None, &boards, 0);
+        let empty = candidate(me, s, ObjectKind::Seesaw, None, &boards, &houses, 0);
         assert!(empty.free && !empty.needs_players);
-        assert!(!candidate(me, s, ObjectKind::Seesaw, None, &boards, 1).free, "someone on their way to it");
+        assert!(!candidate(me, s, ObjectKind::Seesaw, None, &boards, &houses, 1).free, "someone on their way to it");
         let mut b = crate::seesaw::Board::default();
         b.riders.push(crate::seesaw::Rider { sim: e(11), north: true, spot: crate::seesaw::Spot::N, daredevil: false, child: true });
         b.part = Part::Wait;
         boards.0.insert(s, b);
-        let waiting = candidate(me, s, ObjectKind::Seesaw, None, &boards, 1);
+        let waiting = candidate(me, s, ObjectKind::Seesaw, None, &boards, &houses, 1);
         assert!(waiting.free && waiting.needs_players, "the one sat on it has it queued");
-        assert!(!candidate(me, s, ObjectKind::Seesaw, None, &boards, 2).free, "another already on their way to join");
-        assert!(!candidate(me, e(2), ObjectKind::SwingSet, Some(e(11)), &boards, 0).free);
-        assert!(candidate(me, e(2), ObjectKind::SwingSet, Some(me), &boards, 0).free);
+        assert!(!candidate(me, s, ObjectKind::Seesaw, None, &boards, &houses, 2).free, "another already on their way to join");
+        assert!(!candidate(me, e(2), ObjectKind::SwingSet, Some(e(11)), &boards, &houses, 0).free);
+        assert!(candidate(me, e(2), ObjectKind::SwingSet, Some(me), &boards, &houses, 0).free);
         assert_eq!(minutes_on(ObjectKind::SpringRider), 15.0);
         assert_eq!(minutes_on(ObjectKind::Seesaw), 20.0);
+        // (A treehouse: room for four children, none with a grown-up up there.)
+        let t = e(3);
+        assert!(candidate(me, t, ObjectKind::Treehouse, None, &boards, &houses, 2).free);
+        houses.0.insert(t, crate::treehouse::House { inside: vec![(e(12), false), (e(13), false)], ..Default::default() });
+        assert!(!candidate(me, t, ObjectKind::Treehouse, None, &boards, &houses, 2).free, "two in it and two on their way");
+        houses.0.insert(t, crate::treehouse::House { inside: vec![(e(12), true)], ..Default::default() });
+        assert!(!candidate(me, t, ObjectKind::Treehouse, None, &boards, &houses, 0).free);
+        assert_eq!(minutes_on(ObjectKind::Treehouse), 40.0);
     }
 }

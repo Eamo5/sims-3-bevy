@@ -293,6 +293,9 @@ pub enum ObjectKind {
     /// A stroller (Generations' `Stroller`: the Twinbrook Roller, the Air-Strol LX): a baby or
     /// toddler taken out for a stroll in it (`strollers`).
     Stroller,
+    /// A treehouse (Generations' `Treehouse`: the castle, the clubhouse, the space-age hideaway):
+    /// climbed into, played and slept in (`treehouse`).
+    Treehouse,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -427,6 +430,8 @@ impl ObjectKind {
             Self::CostumeChest
         } else if has("vehicles.stroller") {
             Self::Stroller
+        } else if has("environment.treehouse") {
+            Self::Treehouse
         } else if s.starts_with("sims3.gameplay.objects.vehicles.adultbicycle") {
             Self::Bicycle
         } else if s.starts_with("sims3.gameplay.objects.vehicles.childbicycle") {
@@ -637,7 +642,7 @@ impl ObjectKind {
             Self::Bookshelf | Self::Mirror | Self::Easel | Self::Guitar | Self::Treadmill | Self::WorkoutBench | Self::Chess | Self::Telescope | Self::Foosball => {
                 "Hobbies"
             }
-            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::CostumeChest | Self::Stroller | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
+            Self::SwingSet | Self::JungleGym | Self::Slide | Self::SpringRider | Self::Seesaw | Self::CostumeChest | Self::Stroller | Self::Treehouse | Self::SlippySlide | Self::DollHouse | Self::StuffedToy | Self::Hopscotch => "Kids",
             Self::Puddle => "Misc",
             Self::Sprinkler => "Outdoors",
             Self::DivingBoard => "Outdoors",
@@ -3185,6 +3190,10 @@ pub enum ActionKind {
     /// Playing on the playground, starting at this object (`playground`: made the object's own
     /// play before it begins, then on from one thing to the next).
     PlayOnPlayground { target: Entity },
+    /// At a treehouse (`treehouse`): climbing in or out, playing, pretending or sleeping in it,
+    /// calling those in it down; where they go for it first and the way they face there (inside
+    /// already, nowhere).
+    Treehouse { house: Entity, act: crate::treehouse::Act, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4124,7 +4133,7 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } => Some((*at, floor.0)),
                         // (Playing on the playground: `playground` turns it into the object's own
                         // play before it's begun.)
                         ActionKind::PlayOnPlayground { .. } => continue,
@@ -4962,7 +4971,7 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6613,7 +6622,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

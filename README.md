@@ -747,6 +747,32 @@ installation is unreachable.
   on the playground of their own accord, the Childish keener (`TraitChildish`'s 200).
   `PLAYGROUND_TEST=1` with `PLAYGROUND_WHO`, `PLAYGROUND_WITH`, `PLAYGROUND_OBJECTS`,
   `PLAYGROUND_FUN`, `PLAYGROUND_PIE=1` (tests).
+- **Treehouses**, as Generations' `Treehouse` (The Princess and the Pauper Castle, the Kid's
+  Clubhouse, the Sci-Fi Hideaway): anyone may "Get in" one, up its ladder with the game's climb
+  (a child's `c2o_treehouse_getIn`, a teen or grown-up's `a2o_treehouse_woohoo_getIn`), out of
+  sight once inside (the clip's `disappear_sim`) at one of its four places, their plumbob floating
+  over its roof (its plumbob slots). Four at most (`kNumberOfOccupants`), and never children and
+  grown-ups together: a grown-up getting in calls any children down first ("Ask Everyone to Come
+  Down", `AskToComeDown`, from a few metres off with the game's call-over; a Heavy Sleeper asleep
+  up there half the time stays put) and waits for them. Children "Play in" it (Fun 60 an hour):
+  at one of its windows looking out (the castle's, the clubhouse's with its spyglass, the
+  hideaway's with its alien scanner: `Look Out`, in, looping and out, seen at the window), then
+  another, a quarter to half an hour at each (`kPlayWithPartDuration...`), never the same twice
+  running nor one another child's at; out on the balcony only with another child beside them on
+  the second (`RequestBalconyB`, the first played mirrored as the game's `isMirrored`). Its pretend
+  game ("Hold Great Feast", "Fight Pirate Invaders", "Explore New Worlds", Fun 60) is played inside
+  with its voices, the treehouse sparkling and sounding with it (`thouse_pretend_..._loop` and
+  `_plist`), and the children playing up there join in (`AddNext`). Playing together they chat
+  (`TryGroupTalk`: company and liking). A child may "Sleep" up there (Energy 21.33 an hour) till
+  rested, woken by pretending there. Anything asked of them outside it gets them out first (the
+  posture's standing transition): children slide down the clubhouse's slide, the castle's pole, or
+  are beamed down from the hideaway (`Repoman.FireTeleportEffect`, a swirl of sparkles); grown-ups
+  climb down the ladder (`a2o_treehouse_woohoo_getOut`); told to stop with nothing else up there to
+  do, down they come. It's one of the playground's things (forty minutes in it on "Play on
+  Playground", `kPlayOnPlaygroundDuration`), and children short of fun go and play in it of their
+  own accord. `TREEHOUSE_TEST=<instance>` with `TREEHOUSE_WHO`, `TREEHOUSE_DO=play|pretend|sleep|getin`,
+  `TREEHOUSE_WITH`, `TREEHOUSE_MINUTES`, `TREEHOUSE_CALL=<first name>`, `TREEHOUSE_PIE=out|in`
+  (tests).
 - **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
   "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
   (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players

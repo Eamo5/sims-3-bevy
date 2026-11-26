@@ -713,17 +713,27 @@ fn fall(
 }
 
 /// A change of clothes' swirl of sparkles round a Sim (the game's `clothesChangeAdult`): how
-/// tall they are.
+/// tall they are. With `at`, a swirl at a fixed place instead (a treehouse at play, a Sim beamed
+/// down from one), `spread` times as wide.
 #[derive(Message)]
 pub struct SpinSparkle {
     pub sim: Entity,
     pub height: f32,
+    pub at: Option<Vec3>,
+    pub spread: f32,
 }
 
-/// One of a swirl's sparkles: round its Sim and up, fading out.
+impl SpinSparkle {
+    pub fn on(sim: Entity, height: f32) -> Self {
+        Self { sim, height, at: None, spread: 1.0 }
+    }
+}
+
+/// One of a swirl's sparkles: round its Sim (or its place) and up, fading out.
 #[derive(Component)]
 struct Sparkle {
     sim: Entity,
+    at: Option<Vec3>,
     angle: f32,
     turn: f32,
     radius: f32,
@@ -785,7 +795,7 @@ fn sparkle(
                 )
             })
             .clone();
-        let Ok(at) = sims.get(s.sim) else { continue };
+        let Some(at) = s.at.or_else(|| sims.get(s.sim).ok().map(|g| g.translation())) else { continue };
         let look = mats.get(&mat).cloned().unwrap_or_default();
         for _ in 0..70 {
             let life = rng.random_range(0.7..1.3);
@@ -793,12 +803,13 @@ fn sparkle(
                 Mesh3d(quad.clone()),
                 // (Each its own material, to fade on its own.)
                 MeshMaterial3d(mats.add(look.clone())),
-                Transform::from_translation(at.translation()).with_scale(Vec3::ZERO),
+                Transform::from_translation(at).with_scale(Vec3::ZERO),
                 Sparkle {
                     sim: s.sim,
+                    at: s.at,
                     angle: rng.random_range(0.0..std::f32::consts::TAU),
                     turn: rng.random_range(5.0..9.0),
-                    radius: rng.random_range(0.22..0.42),
+                    radius: rng.random_range(0.22..0.42) * s.spread,
                     y: rng.random_range(-0.1..0.35) * s.height,
                     rise: s.height * rng.random_range(0.8..1.25) / life,
                     age: 0.0,
@@ -815,7 +826,7 @@ fn sparkle(
     let cam = cams.single().ok().map(|c| c.translation());
     for (e, mut s, mut tf, m) in &mut q {
         s.age += dt;
-        let Ok(at) = sims.get(s.sim) else {
+        let Some(at) = s.at.or_else(|| sims.get(s.sim).ok().map(|g| g.translation())) else {
             commands.entity(e).try_despawn();
             continue;
         };
@@ -829,7 +840,7 @@ fn sparkle(
         // (In quickly, twinkling, and out.)
         let fade = (f * 14.0).min(1.0) * (1.0 - f).powf(0.6) * (0.75 + 0.25 * (s.age * 40.0 + s.angle).sin());
         let r = s.radius * (1.0 - 0.35 * f);
-        tf.translation = at.translation() + Vec3::new(s.angle.cos() * r, s.y, s.angle.sin() * r);
+        tf.translation = at + Vec3::new(s.angle.cos() * r, s.y, s.angle.sin() * r);
         tf.scale = Vec3::splat(s.size * (0.6 + 0.8 * fade));
         if let Some(c) = cam {
             tf.rotation = Transform::from_translation(tf.translation).looking_at(c, Vec3::Y).rotation;

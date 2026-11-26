@@ -99,7 +99,7 @@ fn spin(
         s.t += dt;
         if !s.sparkled && s.t >= SPARKLE_AT {
             s.sparkled = true;
-            sparkles.write(crate::effects::SpinSparkle { sim: e, height: if sim.age == Age::Child { 1.15 } else { 1.75 } });
+            sparkles.write(crate::effects::SpinSparkle::on(e, if sim.age == Age::Child { 1.15 } else { 1.75 }));
         }
         if !s.swapped && s.t >= SWAP_AT {
             s.swapped = true;

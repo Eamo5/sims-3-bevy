@@ -116,6 +116,11 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("arcadeWhackAGnomeMallet", "arcadeWhackAGnomeMallet", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (A block from the activity table, played with and stacked.)
     ("block", "activityTableSingleBlock", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (Looking out of a treehouse's window: the clubhouse's spyglass, the hideaway's alien
+    // scanner; a bucket of water tipped out of one.)
+    ("spyglass", "accessorySpyglass", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("alienScanner", "accessoryAlienScanner", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("bucket", "accessoryBucket", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
 ];

@@ -449,6 +449,11 @@ pub struct SimBody {
 #[derive(Component)]
 pub struct PlumbobRef(pub Entity);
 
+/// A Sim out of sight in something (a treehouse) whose plumbob floats over it there instead
+/// (the game's plumbob slots), shown though they're hidden.
+#[derive(Component, Clone, Copy)]
+pub struct PlumbobOver(pub Vec3);
+
 #[derive(Component)]
 struct PlumbobTint {
     from: Color,
@@ -982,20 +987,28 @@ fn plumbob_color(mood: f32) -> Color {
 #[allow(clippy::type_complexity)]
 fn update_plumbobs(
     time: Res<Time>,
-    sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>, Option<&crate::simbody::Skeleton>, &GlobalTransform)>,
+    sims: Query<(&PlumbobRef, &crate::life::Mood, Has<Selected>, Option<&crate::simbody::Skeleton>, &GlobalTransform, Option<&PlumbobOver>)>,
     joints: Query<&GlobalTransform, Without<PlumbobTint>>,
     mut q: Query<(&mut Transform, &mut Visibility, &MeshMaterial3d<StandardMaterial>, &mut PlumbobTint)>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (plumbob, mood, selected, skel, sim_tf) in &sims {
+    for (plumbob, mood, selected, skel, sim_tf, over) in &sims {
         if let Ok((mut tf, mut vis, mat, mut tint)) = q.get_mut(plumbob.0) {
-            *vis = if selected { Visibility::Inherited } else { Visibility::Hidden };
+            // (Out of sight in a treehouse: over it, shown all the same.)
+            *vis = match (selected, over) {
+                (false, _) => Visibility::Hidden,
+                (true, Some(_)) => Visibility::Visible,
+                (true, None) => Visibility::Inherited,
+            };
             tf.rotation = Quat::from_rotation_y(time.elapsed_secs() * 1.5);
             // Over their head, wherever the clip has it (sat down, lying in the bath, a child's
             // lower), as the game's: eased there, so it doesn't sway with every nod.
-            let head = skel
-                .and_then(|s| s.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(*s.joints.get(i)?).ok()))
-                .map(|h| sim_tf.affine().inverse().transform_point3(h.translation()) + Vec3::Y * 0.5);
+            let head = match over {
+                Some(p) => Some(sim_tf.affine().inverse().transform_point3(p.0)),
+                None => skel
+                    .and_then(|s| s.rig.bones.iter().position(|b| b.name == "b__Head__").and_then(|i| joints.get(*s.joints.get(i)?).ok()))
+                    .map(|h| sim_tf.affine().inverse().transform_point3(h.translation()) + Vec3::Y * 0.5),
+            };
             let at = head.unwrap_or(Vec3::new(0.0, 2.15, 0.0)) + Vec3::Y * (time.elapsed_secs() * 2.0).sin() * 0.03;
             let ease = (time.delta_secs() * 6.0).min(1.0);
             tf.translation = if tf.translation.distance(at) > 1.5 { at } else { tf.translation.lerp(at, ease) };

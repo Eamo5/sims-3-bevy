@@ -3750,6 +3750,9 @@ fn building_visibility(
             Without<LotImposter>,
             Without<crate::world::Tree>,
             Without<WallFace>,
+            // (In a treehouse, or climbing in or out: shown as `treehouse` has them.)
+            Without<crate::treehouse::InTreehouse>,
+            Without<crate::treehouse::Climbing>,
         ),
     >,
 ) {

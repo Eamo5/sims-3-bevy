@@ -270,6 +270,13 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (Treehouses: climbing in and out, looking out of the windows, sitting on the balcony,
+    // pretending, dumping water, asking up; a grown-up's climb and WooHoo, the treehouse's shake.)
+    "c2o_treehouse_",
+    "a2o_treehouse_",
+    "a2a_treehouse_",
+    "c2c_treehouse_",
+    "o_treehouse_",
     // (Strollers: a little one put in and taken out, the stroller pushed along with its own half,
     // a baby's and a toddler's idles in it.)
     "a2o_stroller_",
@@ -1004,6 +1011,10 @@ pub const PROP_ACTORS: &[&str] = &[
     "horseShoe",
     "puckInHand",
     "arcadeWhackAGnomeMallet",
+    // (A treehouse window's spyglass and alien scanner; the bucket of water tipped out.)
+    "spyglass",
+    "alienScanner",
+    "bucket",
 ];
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's
