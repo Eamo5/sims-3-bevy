@@ -270,6 +270,13 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (A training dummy practised on, its own half spinning; into and out of the martial
+    // artist's stance.)
+    "a2o_trainingDummy_",
+    "a_neutral2MA",
+    "a_MA2neutral",
+    // (A new belt shown off.)
+    "a_react_newMartialArtsBelt",
     // (A lawn flamingo or a gnome kicked over and stood up, its own half too.)
     "a2o_flamingo_",
     "c2o_flamingo_",

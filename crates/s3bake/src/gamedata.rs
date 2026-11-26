@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 180;
+pub const GAMEDATA_VERSION: u32 = 181;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -3007,6 +3007,21 @@ pub const PRETEND_BALLOONS: [&str; 9] = [
     "ep4_balloon_crownjewels",
 ];
 
+/// The Martial Arts levels with a karate gi of their own (the `Skills` table's `MartialArts`
+/// rows' `OutfitName...`: none at five or seven, where the last one's kept).
+pub const GI_LEVELS: [u8; 8] = [1, 2, 3, 4, 6, 8, 9, 10];
+
+/// Every karate gi's outfit name (`amMartialArts01`...: teen, adult and elder, men's and women's).
+pub fn martial_arts_gis() -> Vec<String> {
+    let mut out = Vec::new();
+    for age in ["t", "a", "e"] {
+        for g in ["m", "f"] {
+            out.extend(GI_LEVELS.iter().map(|l| format!("{age}{g}MartialArts{l:02}")));
+        }
+    }
+    out
+}
+
 /// The CAS parts of the town's service uniforms, by name.
 pub const SERVICE_UNIFORMS: [&str; 5] = ["BodyFrenchMaid", "HairFrenchMaidBunLoose", "BodyRepair", "BodyMailCarrier", "BodyPizzaDeliveryOutfit"];
 
@@ -3018,6 +3033,8 @@ fn bake_outfits(root: &BakeRoot, pkgs: &PackageSet, careers: &[CareerInfo]) -> R
     // (And the service Sims' own: the repo man's; and the costume chest's costumes.)
     names.extend(["MaleRepo", "FemaleRepo"].map(String::from));
     names.extend(COSTUME_OUTFITS.iter().map(|s| s.to_string()));
+    // (And the martial artists' karate gis, a belt for each level that has one.)
+    names.extend(martial_arts_gis());
     names.sort_by_key(|n| n.to_ascii_lowercase());
     names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     let cas: CasBaked = read_value(&g.join("cas.bin")).map_err(|e| format!("cas.bin: {e}"))?;

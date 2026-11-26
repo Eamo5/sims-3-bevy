@@ -1692,7 +1692,8 @@ fn life_events(
                 "Sit" => ml.add(K::Comfy, now),
                 "Dance" => ml.add(K::EnjoyingMusic, now),
                 "Read a Book" | "Read Book" if has(Trait::Bookworm) => ml.add(K::EnjoyingAGoodBook, now),
-                "Work Out" => {
+                // (A workout, or practice at a training dummy: cardio, as the game counts it.)
+                "Work Out" | "Practice" => {
                     if has(Trait::Athletic) {
                         ml.add(K::Pumped, now)
                     } else if has(Trait::Lazy) {

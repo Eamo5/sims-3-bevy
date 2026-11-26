@@ -71,6 +71,8 @@ fn pyjamas(
         let want = queue.0.front().and_then(|a| match (&a.kind, a.phase) {
             (ActionKind::GoToWork, _) if uniform => Some(OutfitKind::Career),
             (ActionKind::Jog { .. }, Phase::Running(_)) => Some(OutfitKind::Athletic),
+            // (A new belt shown off in the gi: `CheckOutMyAwesomeBelt`'s spin into it.)
+            (ActionKind::Outro { clips, .. }, _) if clips.first() == Some(&crate::martialarts::NEW_BELT) => Some(OutfitKind::MartialArts),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
                 outfit_for_use(o.kind, interactions_for(o.kind).get(*def)?)
@@ -107,7 +109,7 @@ fn pyjamas(
 
 /// What's worn to use something: pyjamas to sleep, nothing in the shower or the bath (the game's
 /// `GoingToBathe`; not to clean them), swimwear for a swim or the hot tub (`GoingToSwim`),
-/// workout clothes to work out.
+/// workout clothes to work out, a gi to practise martial arts (`GoingToSparOrTrain`).
 pub fn outfit_for_use(kind: crate::interact::ObjectKind, d: &crate::interact::InteractionDef) -> Option<crate::simbody::OutfitKind> {
     use crate::interact::ObjectKind as K;
     use crate::simbody::OutfitKind;
@@ -119,6 +121,9 @@ pub fn outfit_for_use(kind: crate::interact::ObjectKind, d: &crate::interact::In
         Some(OutfitKind::Swimwear)
     } else if d.pose == crate::sim::Pose::Exercise {
         Some(OutfitKind::Athletic)
+    } else if kind == K::TrainingDummy {
+        // (A martial artist's karate gi: `ChangeIntoKarateGi`.)
+        Some(OutfitKind::MartialArts)
     } else {
         None
     }

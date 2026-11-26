@@ -401,7 +401,7 @@ fn look_rows(
         OutfitKind::Formal => "Formal",
         OutfitKind::Sleepwear => "Sleepwear",
         OutfitKind::Swimwear => "Swimwear",
-        OutfitKind::Athletic => "Exercise",
+        OutfitKind::Athletic | OutfitKind::MartialArts => "Exercise",
         OutfitKind::Outerwear => "Outerwear",
     };
     let title = ui.localize(&format!("Ui/Caption/CAS/Clothing:{title}")).unwrap_or_else(|| p.wear.label().to_string());

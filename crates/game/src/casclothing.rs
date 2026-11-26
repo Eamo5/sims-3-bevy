@@ -321,7 +321,7 @@ fn clothing_panel(
         OutfitKind::Formal => "Formal",
         OutfitKind::Sleepwear => "Sleepwear",
         OutfitKind::Swimwear => "Swimwear",
-        OutfitKind::Athletic => "Exercise",
+        OutfitKind::Athletic | OutfitKind::MartialArts => "Exercise",
         OutfitKind::Outerwear => "Outerwear",
     };
     let title = ui.localize(&format!("Ui/Caption/CAS/Clothing:{state}")).unwrap_or_else(|| wear.label().to_string());

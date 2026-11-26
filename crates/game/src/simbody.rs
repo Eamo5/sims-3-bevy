@@ -205,6 +205,8 @@ pub enum OutfitKind {
     Naked,
     /// A child's dressing-up costume from the costume chest (`costumes`: which one, theirs).
     Costume,
+    /// A martial artist's karate gi, its belt their level's (`martialarts`).
+    MartialArts,
 }
 
 impl OutfitKind {
@@ -221,6 +223,7 @@ impl OutfitKind {
             Self::Outerwear => "Outerwear",
             Self::Naked => "Naked",
             Self::Costume => "Costume",
+            Self::MartialArts => "Martial Arts",
         }
     }
 
@@ -230,7 +233,7 @@ impl OutfitKind {
             Self::Everyday | Self::Career | Self::Costume => s3formats::sim::CAT_EVERYDAY,
             Self::Swimwear => s3formats::sim::CAT_SWIM,
             Self::Sleepwear => s3formats::sim::CAT_SLEEP,
-            Self::Athletic => s3formats::sim::CAT_ATHLETIC,
+            Self::Athletic | Self::MartialArts => s3formats::sim::CAT_ATHLETIC,
             Self::Formal => s3formats::sim::CAT_FORMAL,
             Self::Outerwear => s3formats::sim::CAT_OUTERWEAR,
             Self::Naked => s3formats::sim::CAT_NAKED,
@@ -451,7 +454,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Everyday => use_full,
         OutfitKind::Swimwear => sim.female && rng.random_bool(0.5) && !fulls.is_empty(),
         OutfitKind::Sleepwear => !fulls.is_empty() && rng.random_bool(0.7),
-        OutfitKind::Athletic => !fulls.is_empty() && rng.random_bool(0.3),
+        OutfitKind::Athletic | OutfitKind::MartialArts => !fulls.is_empty() && rng.random_bool(0.3),
         // (Suits and dresses as often as separates.)
         OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
         // (Snowsuits now and then; mostly a coat.)

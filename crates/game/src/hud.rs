@@ -2077,6 +2077,11 @@ fn world_click(
                         continue;
                     }
                 }
+                // (A training dummy: not while worn out from it, `Practice`'s test.)
+                if obj.kind == ObjectKind::TrainingDummy && moods_q.get(actor).is_ok_and(|m| m.has(crate::life::MoodletKind::Fatigued)) {
+                    options.push((d.name.to_string(), ActionKind::Greyed(crate::martialarts::too_fatigued(&actor_sim.first))));
+                    continue;
+                }
                 // (Being sick in it's never asked for: `nausea`; nor a book put back.)
                 if matches!(d.special, Special::Vomit | Special::ReturnBook) {
                     continue;

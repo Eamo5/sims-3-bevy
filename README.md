@@ -1023,6 +1023,24 @@ installation is unreachable.
   a level of Athletic can "Jog Here" (the game's `JogHere`: the fast jog from level five), for
   the same exercise on the way; and somewhere a good way off, "Go Here With ›" brings others
   of the household along (one, or everyone).
+- **The training dummy and Martial Arts**, as World Adventures' `TrainingDummy` and
+  `MartialArts`: teens and up "Practice" on the Sheng Hai Training Dummy (Martial Arts, Fun 45
+  and Hygiene -40 an hour, Athletic as they go, `kAthleticSkillGainRateDuringPractice`, and
+  shaping up as a workout does), from before it (its `_route_0_N`), into the stance
+  (`a_neutral2MA`) and at it as their skill has them, the beginner's loops below level four, the
+  intermediate's below seven and the expert's after (`kSkillLevelForIntermediate`,
+  `kSkillLevelForExpert`), the dummy spinning to their blows with its half of each clip. Every
+  five minutes (`kMinutesPerFailureDiceRoll`) a blow may go wrong, more likely the less skilled
+  and the worse their mood (`kChanceOfFailureAtMinMaxSkillLevel`, `...MoodLevel`: nine in ten
+  down to one in ten, half each), and they take a tumble (`epicFail`), up again and back into
+  the stance. They practise in their karate gi (`ChangeIntoKarateGi`, with a spin), its belt
+  their level's (the `Skills` table's outfits, `amMartialArts01`..., none at five or seven, where
+  the last is kept; workout clothes before the first level), and a level with a new belt is
+  shown off once they're done ("Through tireless training and determination, Jack Bunch has
+  earned a new belt!", `CheckOutMyAwesomeBelt`'s `a_react_newMartialArtsBelt`). The Disciplined
+  have fun of it (`kDisciplinedTraitMartialArtsFun`), and the Fatigued can't ("Jack is too
+  fatigued to practice"). `DUMMY_TEST=1` with `DUMMY_WHO`, `DUMMY_LEVEL`, `DUMMY_NO_FAIL=1`,
+  `DUMMY_BELT=<seconds>`, `DUMMY_STOP=<seconds>` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for
