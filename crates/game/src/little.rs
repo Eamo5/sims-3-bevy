@@ -103,6 +103,9 @@ impl Plugin for LittlePlugin {
 pub struct Conceive {
     pub a: Entity,
     pub b: Entity,
+    /// How likely it takes, where the try's had its own odds already (a treehouse's); none, the
+    /// usual.
+    pub chance: Option<f64>,
 }
 
 /// A pregnant Sim: when it started (game minutes), the other parent, how far along (`stage`:
@@ -216,7 +219,7 @@ fn conceive(
             continue;
         }
         // Not every try succeeds (most do, with a Fertility Treatment).
-        let chance = if crate::wishes::has(aw, "FertilityTreatment") || crate::wishes::has(bw, "FertilityTreatment") { 0.9 } else { 0.6 };
+        let chance = ev.chance.unwrap_or(if crate::wishes::has(aw, "FertilityTreatment") || crate::wishes::has(bw, "FertilityTreatment") { 0.9 } else { 0.6 });
         if !rand::rng().random_bool(chance) {
             info!("conceive: {} and {} tried for a baby, no luck this time", a.first, b.first);
             continue;

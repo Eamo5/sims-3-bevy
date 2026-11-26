@@ -3194,6 +3194,8 @@ pub enum ActionKind {
     /// calling those in it down; where they go for it first and the way they face there (inside
     /// already, nowhere).
     Treehouse { house: Entity, act: crate::treehouse::Act, at: Vec2, face: Vec2 },
+    /// Done from a treehouse's menu there and then (never queued: `treehouse::now`).
+    TreehouseNow { house: Entity, now: crate::treehouse::Now },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4131,7 +4133,7 @@ pub(crate) fn run_actions(
                             commands.entity(me).insert(clip);
                             continue;
                         }
-                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => None,
+                        ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::TreehouseNow { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
                         ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } => Some((*at, floor.0)),
                         // (Playing on the playground: `playground` turns it into the object's own
@@ -4963,7 +4965,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::PlayOnPlayground { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::PlayOnPlayground { .. } | ActionKind::TreehouseNow { .. } => finished = true,
                             // (Beside the posts, turned to them: `trainingposts` sees to the watching.)
                             ActionKind::WatchTraining { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -5223,7 +5225,7 @@ pub(crate) fn run_actions(
                                                 w.write_message(crate::dreams::DreamEvent { other: Some(other), ..crate::dreams::DreamEvent::new(me, "kWooHooed") });
                                             });
                                             if d.special == Special::TryForBaby && used.0 == Some(me) {
-                                                conceive.write(crate::little::Conceive { a: me, b: other });
+                                                conceive.write(crate::little::Conceive { a: me, b: other, chance: None });
                                             }
                                         }
                                     }
@@ -5998,7 +6000,7 @@ pub(crate) fn run_actions(
                                             notes.push(format!("{} moved in with the household!", tname));
                                         }
                                         SocialEffect::TryForBaby => {
-                                            conceive.write(crate::little::Conceive { a: me, b: *target });
+                                            conceive.write(crate::little::Conceive { a: me, b: *target, chance: None });
                                         }
                                         SocialEffect::PutToBed => {
                                             commands.entity(*target).try_insert(crate::little::Bedtime);

@@ -111,6 +111,18 @@ pub struct Doused(pub f64);
 /// How long the put out don't catch fire again.
 const DOUSED_MINUTES: f64 = 60.0;
 
+/// A burning Sim put out by water thrown over them (a treehouse's bucket: `FirefighterSituation.
+/// PutFireOnSimOut`).
+pub fn douse(w: &mut World, sim: Entity) {
+    let now = w.resource::<GameClock>().minutes;
+    if let Ok(mut e) = w.get_entity_mut(sim)
+        && e.contains::<OnFire>()
+    {
+        e.remove::<(OnFire, BeingHelped)>();
+        e.insert((ActionClip::new(Some("a_fire_onFire_putOut_start_x"), &["a_fire_onFire_putOut_stop_x"]), Doused(now + DOUSED_MINUTES)));
+    }
+}
+
 /// The firefighter come to put the fires out.
 #[derive(Component)]
 pub struct Firefighter {

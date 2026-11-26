@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<&crate::treehouse::HouseInfo>, Query<&crate::treehouse::InTreehouse>)),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>)),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1878,7 +1878,8 @@ fn world_click(
             }
             // (A playground thing: playing on the playground, from one thing to the next, with
             // another free on the lot: `playground`.)
-            if crate::playground::is_playground(obj.kind) && crate::playground::can_play(actor_sim.age) {
+            // (Not from up a treehouse: they're playing there already.)
+            if crate::playground::is_playground(obj.kind) && crate::playground::can_play(actor_sim.age) && !in_tree_q.contains(actor) {
                 let lot = playground_q.get(t).ok().and_then(|p| p.2).map(|l| l.0);
                 let cands: Vec<crate::playground::Candidate> = playground_q
                     .iter()
@@ -1892,10 +1893,30 @@ fn world_click(
             // (A treehouse: in, out, playing, pretending and sleeping in it, calling the children
             // down: `treehouse`.)
             if obj.kind == ObjectKind::Treehouse
-                && let (Ok(info), Ok((_, gtf, ..))) = (house_info_q.get(t), pickable.get(t))
+                && let (Ok((info, rules)), Ok((_, gtf, ..))) = (house_info_q.get(t), pickable.get(t))
             {
                 let htf = gtf.compute_transform();
-                options.extend(crate::treehouse::options(t, &htf, info, &treehouses_res, actor, actor_sim.age, in_tree_q.get(actor).ok()));
+                // (Those about it, and whom they'd WooHoo or try for a baby with up there.)
+                let near = |o: Entity| pickable.get(o).is_ok_and(|p| p.1.translation().xz().distance(htf.translation.xz()) < 40.0);
+                let mut about = crate::treehouse::About::default();
+                let wi = crate::social::social_index("WooHoo");
+                let bi = crate::social::social_index("Try for Baby");
+                for (o, s, ..) in company_q.iter().filter(|(o, ..)| *o != actor && near(*o)) {
+                    about.sims.push((o, s.first.clone(), s.age, s.female, in_tree_q.contains(o)));
+                    let rel = rels.get(o);
+                    let ok = |i: Option<usize>| {
+                        i.is_some_and(|i| {
+                            crate::social::available(crate::social::social(i), &rel, actor_sim, s, members_q.contains(o), family.kin(actor_sim.id, s.id).is_some(), [crate::social::Side::of(actor, sides_q.get(actor).ok()), crate::social::Side::of(o, sides_q.get(o).ok())])
+                        })
+                    };
+                    if ok(wi) {
+                        about.woohoo.push((o, s.first.clone()));
+                    }
+                    if ok(bi) {
+                        about.baby.push((o, s.first.clone()));
+                    }
+                }
+                options.extend(crate::treehouse::options(t, &htf, (info, rules), &treehouses_res, (actor, actor_sim), in_tree_q.get(actor).ok(), &about, &mut pie.submenus, submenu_kind));
             }
             // (A stroller: out for a stroll with a little one of theirs, `strollers`.)
             if obj.kind == ObjectKind::Stroller
@@ -3149,6 +3170,12 @@ fn pie_buttons(
         commands.queue(move |w: &mut World| crate::costumes::ask(w, a, child));
         return;
     }
+    // (A treehouse's invitation up, or its sign changed: there and then, as the game's.)
+    if let (ActionKind::TreehouseNow { house, now }, Some(a)) = (&kind, actor) {
+        let (house, now) = (*house, *now);
+        commands.queue(move |w: &mut World| crate::treehouse::now(w, a, house, now));
+        return;
+    }
     if label == PHONE_LABEL {
         commands.insert_resource(OpenPhone);
         return;
@@ -3593,6 +3620,15 @@ fn pie_buttons(
         let chat_with = (title == CHAT_WITH).then(|| people.iter().find(|(_, s, _)| s.full_name() == label).map(|(e, ..)| e)).flatten();
         if chat_with.is_some() {
             label = format!("Chat with {label}");
+        }
+        // (Someone picked from a treehouse's menu: "Dump Water on Arlo", "WooHoo with Judy".)
+        if let ActionKind::Treehouse { act, .. } = &kind {
+            match act {
+                crate::treehouse::Act::DumpWater(_) => label = format!("Dump Water on {label}"),
+                crate::treehouse::Act::WooHoo(_, false) => label = format!("WooHoo with {label}"),
+                crate::treehouse::Act::WooHoo(_, true) => label = format!("Try for Baby with {label}"),
+                _ => {}
+            }
         }
         let mut action = Action::new(label, kind.clone(), false);
         action.jog = jog;

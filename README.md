@@ -767,12 +767,36 @@ installation is unreachable.
   rested, woken by pretending there. Anything asked of them outside it gets them out first (the
   posture's standing transition): children slide down the clubhouse's slide, the castle's pole, or
   are beamed down from the hideaway (`Repoman.FireTeleportEffect`, a swirl of sparkles); grown-ups
-  climb down the ladder (`a2o_treehouse_woohoo_getOut`); told to stop with nothing else up there to
-  do, down they come. It's one of the playground's things (forty minutes in it on "Play on
-  Playground", `kPlayOnPlaygroundDuration`), and children short of fun go and play in it of their
-  own accord. `TREEHOUSE_TEST=<instance>` with `TREEHOUSE_WHO`, `TREEHOUSE_DO=play|pretend|sleep|getin`,
-  `TREEHOUSE_WITH`, `TREEHOUSE_MINUTES`, `TREEHOUSE_CALL=<first name>`, `TREEHOUSE_PIE=out|in`
-  (tests).
+  climb down the ladder (`a2o_treehouse_woohoo_getOut`), one at a time; told to stop with nothing
+  else up there to do, down they come. While pretending, now and then a line of the game is shown
+  for the one played ("Arrrr! They be attacking from all sides!...": `PlayPretendTns...`, a quarter
+  hour apart at least). The children who climb in first have it to themselves (`mAllowedSims`, till
+  the last is out): another child below may "Ask to Come Up" (`AskToComeUpA`), stood under its
+  window, and the one up there they like best comes to it and answers with the game's clips
+  (`c2c_treehouse_askToComeUp_accept`, `_reject`: yes unless they dislike them or the sign keeps
+  them out), and up they come to play; or those up there "Invite Up... ›" a child about, there and
+  then. Theirs, a sign goes on the door ("Entry Restrictions... ›": "No Boys Allowed", "No Girls
+  Allowed" or none, `SetRestrictions`), keeping out the other sort of their own accord always, and
+  when asked once one of them's up there; a child let in takes the sign against them down. A child
+  up there may "Dump Water on... ›" anyone below (`DumpWaterOnA`): beckoning from its first window
+  (`c2o_treehouse_dumpWaterOn_beckon`), the one below called under it and waving up till the bucket
+  (its `bucket` prop) is tipped, the water pouring out onto them at the clip's
+  `ep4TreeHouseDumpWater` and splashing off (`a2o_treehouse_dumpWaterOn_victim`, a child's own):
+  Fun and Hygiene 40 down, Soaked, liking 5 less (one on fire is put out, `HaveWaterDumpedOnExtinguish`,
+  and likes them 10 more), a puddle where they stood, and the child's fun of it; given up after
+  forty minutes (`kGiveupTimeForSyncedInteractions`). Now and then a child playing up there does so
+  of their own accord, the Evil and Mean-Spirited far likelier, on the one below they like least
+  (`kDumpWaterOnScoreLtrMultiplier`). Grown-ups may "WooHoo With... ›" or "Try for Baby With... ›"
+  someone there (as the social allows, both up it): out of sight together the treehouse shakes
+  (`o_treehouse_woohooShake_accept`, the pair's `a2a_treehouse_woohoo_accept`), with WooHoo's liking
+  and wishes, a baby one time in four (`kTryForBabySuccessChance`), and a Splinter for each half the
+  time ("splinters are a real pain in the rear": `kSplinterChance`, the Unlucky and Clumsy
+  three-quarters likelier, the Lucky never), and down the ladder they come. It's one of the
+  playground's things (forty minutes in it on "Play on Playground", `kPlayOnPlaygroundDuration`),
+  and children short of fun go and play in it of their own accord. `TREEHOUSE_TEST=<instance>` with
+  `TREEHOUSE_WHO`, `TREEHOUSE_DO=play|pretend|sleep|getin`, `TREEHOUSE_WITH`, `TREEHOUSE_MINUTES`,
+  `TREEHOUSE_CALL=<first name>`, `TREEHOUSE_PIE=out|in`, `TREEHOUSE_DUMP=<first name>`,
+  `TREEHOUSE_ASK=<first name>`, `TREEHOUSE_WOOHOO=<first name>`, `TREEHOUSE_BABY=1` (tests).
 - **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
   "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
   (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players

@@ -37,7 +37,7 @@ impl Plugin for TreehousePlugin {
         app.init_resource::<Houses>()
             .add_systems(Update, tag.run_if(in_state(crate::AppState::InGame)))
             .add_systems(Update, begin.after(crate::playground::begin).before(crate::seesaw::hold).before(crate::interact::run_actions).run_if(in_state(crate::PlayMode::Live)))
-            .add_systems(Update, (run, show, pretend_effects, autonomy, treehouse_test).chain().after(crate::interact::run_actions).before(crate::anim::drive_skeletons).run_if(in_state(crate::PlayMode::Live)));
+            .add_systems(Update, (run, tricks, asking, woohoo, show, pretend_effects, autonomy, mischief, treehouse_test).chain().after(crate::interact::run_actions).before(crate::anim::drive_skeletons).run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -67,6 +67,36 @@ const CHAT_SOCIAL: f32 = 40.0;
 const CHAT_LIKING: f32 = 3.0;
 /// How often the treehouse sparkles while pretending's going on in it (seconds).
 const SPARKLE_EVERY: f32 = 2.5;
+/// A pretend game's lines (`kTnsCooldownTime`: a quarter hour apart at least; about one in twenty
+/// game minutes after, the game's `kTnsChance` a tick).
+const PRETEND_TNS_EVERY: f64 = 15.0;
+const PRETEND_TNS_CHANCE: f64 = 0.05;
+/// Water dumped on someone (`DumpWaterOnB`'s once-off Fun and Hygiene, the liking lost or, putting
+/// out a fire, won: `kLtrLoss`, `kLtrGainExtinguish`; the fun of it, `DumpWaterOnA`'s); how long
+/// one waits for the other, beckoning (`kGiveupTimeForSyncedInteractions`, game minutes).
+const TRICKED_FUN: f32 = -40.0;
+const TRICKED_HYGIENE: f32 = -40.0;
+const TRICK_LIKING: f32 = -5.0;
+const EXTINGUISH_LIKING: f32 = 10.0;
+const TRICK_FUN: f32 = 20.0;
+const GIVE_UP: f64 = 40.0;
+/// When the clips hide or show the child at the window (seconds: their `disappear_sim` and
+/// `appear_sim` events).
+const BECKON_HIDE: f32 = 6.6;
+/// When the bucket's water comes out (its `ep4TreeHouseDumpWater` event, seconds into the
+/// dump), and how long it pours.
+const POUR_AT: f32 = 1.8;
+const POUR_SECS: f32 = 0.6;
+/// How long the one below waves up before the water comes (seconds).
+const WAVE_BEFORE: f32 = 2.0;
+const DUMP_HIDE: f32 = 7.63;
+const ANSWER_SHOW: f32 = 0.83;
+const ANSWER_HIDE: f32 = 6.6;
+/// WooHoo up a treehouse (`kSplinterChance`, twice as likely and three quarters again for the
+/// Unlucky and Clumsy, never the Lucky; `kTryForBabySuccessChance`).
+const SPLINTER_CHANCE: f64 = 0.5;
+const SPLINTER_MORE: f64 = 1.75;
+const BABY_CHANCE: f64 = 0.25;
 
 /// The three treehouses.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -111,6 +141,33 @@ impl Theme {
             Theme::Castle => "Castle",
             Theme::Club => "ClubHouse",
             Theme::Space => "SpaceAge",
+        }
+    }
+
+    /// What the pretend game has them say now and then (`PlayPretendTns...`).
+    pub fn pretend_lines(self) -> [&'static str; 5] {
+        match self {
+            Theme::Castle => [
+                "Ho there court jester! Such a lackadaisical performance will be lucky to earn thee a bread crust for your belly. Tell us a tale or it's off to the scullery with you.",
+                "Verily, this turkey leg is a size larger than my head!",
+                "King Launergan has dispatched a regiment of his finest cavalry to grace us with his presence and you all stand about nattering like a pack of louts!",
+                "Gather 'round my loyal subjects for a spot of tea and crumpets. I shan't accept any dallying!",
+                "Oh but these endless proclamations, declamations, recitations, and pontifications do grow tiring! For want of a reprieve a feast was lost!",
+            ],
+            Theme::Club => [
+                "Arrrr! They be attacking from all sides! Defend yourselves to the last breath!",
+                "Batten down the hatches, there be a nasty storm brewing and enemies closing fast! You lad, look sharp!",
+                "99 bottles of juice on the wall, 99 bottle of juice... take one down, pass it around, 98 bottles of juice on the wall!",
+                "Avast maties! Have you seen me parrot? The daft creature done flown off with me fake eye!",
+                "Raise the alarm, alert the crew, we've been boarded! I'll take my cutlass and run them thru!",
+            ],
+            Theme::Space => [
+                "The aliens won't take me, no siree Bob! I see them on the scanner... watching, waiting, hiding in the shadows. I'll outsmart the lot of them!",
+                "A long time ago in a treehouse far far away... a child decided to boldly go where no child has gone before!",
+                "Divert all power to the engines, prepare for liftoff!",
+                "Freezer Bunnies were created by Sims. They evolved. They rebelled. There are many copies. And they have a plan.",
+                "Captain's log, Earth date May 22nd, 2048. Alien life forms were detected on the scanners at 0600. Initial contact with the extraterrestrials proved futile, as greetings across all frequencies were met with silence. We will continue to monitor the alien menace for signs of hostility.",
+            ],
         }
     }
 
@@ -182,13 +239,90 @@ pub enum Act {
     Sleep,
     GetOut,
     AskDown,
+    /// A child up there tipping a bucket of water on someone below (`DumpWaterOnA`), and the one
+    /// tricked, called under the window (`DumpWaterOnB`).
+    DumpWater(Entity),
+    BeTricked(Entity),
+    /// A child below asking to come up (`AskToComeUpA`), and the one up there answering at the
+    /// window (`AskToComeUpB`).
+    AskUp,
+    BeAskedUp(Entity),
+    /// WooHoo in it with someone (`WooHoo`; trying for a baby, `TryForBaby`).
+    WooHoo(Entity, bool),
 }
 
 impl Act {
     /// Done inside it (so gone up first).
     pub fn inside(self) -> bool {
+        matches!(self, Act::Play | Act::Pretend | Act::Sleep | Act::DumpWater(_) | Act::BeAskedUp(_) | Act::WooHoo(..))
+    }
+
+    /// Playing there (the game's `PlayBase`, and sleeping): what one asked up interrupts.
+    fn playing(self) -> bool {
         matches!(self, Act::Play | Act::Pretend | Act::Sleep)
     }
+}
+
+/// Who may play in a treehouse: once a child's in it, those children only (`mAllowedSims`, till
+/// the last's out), others asking to come up; and whether it's no boys or no girls (the sign on
+/// its door, `SetRestrictions`).
+#[derive(Component, Default, Debug)]
+pub struct HouseRules {
+    pub allowed: Vec<Entity>,
+    pub restriction: Restriction,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Restriction {
+    #[default]
+    None,
+    NoBoys,
+    NoGirls,
+}
+
+impl Restriction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Restriction::None => "No Restrictions",
+            Restriction::NoBoys => "No Boys Allowed",
+            Restriction::NoGirls => "No Girls Allowed",
+        }
+    }
+}
+
+impl HouseRules {
+    /// Whether they may play in it (`IsAllowedSim`).
+    pub fn allows(&self, me: Entity) -> bool {
+        self.allowed.is_empty() || self.allowed.contains(&me)
+    }
+
+    /// Whether the sign keeps them out (`IsRestricted`): of their own accord always; asked to,
+    /// only with one of the others up there.
+    pub fn restricted(&self, female: bool, autonomous: bool, girls_in: usize, boys_in: usize) -> bool {
+        match (self.restriction, female) {
+            (Restriction::NoBoys, false) => autonomous || girls_in > 0,
+            (Restriction::NoGirls, true) => autonomous || boys_in > 0,
+            _ => false,
+        }
+    }
+
+    /// A child let in (`AddAllowedSim`): the sign against them taken down.
+    pub fn let_in(&mut self, child: Entity, female: bool) {
+        if !self.allowed.contains(&child) {
+            self.allowed.push(child);
+        }
+        if (female && self.restriction == Restriction::NoGirls) || (!female && self.restriction == Restriction::NoBoys) {
+            self.restriction = Restriction::None;
+        }
+    }
+}
+
+/// What's done there and then from a treehouse's menu (immediate, as the game's): another child
+/// invited up (`InviteUp`), the sign on the door changed (`SetRestrictions`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Now {
+    InviteUp(Entity),
+    Restrict(Restriction),
 }
 
 /// Where its slots are, by the names its rig gives them, should it have none (the castle's): place,
@@ -258,12 +392,21 @@ pub struct House {
     pub pretending: usize,
     pub parts: Vec<Part>,
     pub ladder: Option<Entity>,
+    /// A child on their way down the slide or pole (or beamed down).
+    pub exit: Option<Entity>,
     /// Children playing about inside, free to be asked out onto the second balcony; and whether
     /// one's on their way there.
     pub idle: Vec<Entity>,
     pub b_coming: bool,
     /// Those on their way down.
     pub leaving: Vec<Entity>,
+    /// The girls and boys up there, and the children playing (or asleep) there, who'd answer one
+    /// asking to come up.
+    pub girls: usize,
+    pub boys: usize,
+    pub players: Vec<Entity>,
+    /// Grown-ups going up for WooHoo together: each, and whom with.
+    pub couples: Vec<(Entity, Entity)>,
 }
 
 impl Houses {
@@ -271,12 +414,17 @@ impl Houses {
         self.0.get(&house).cloned().unwrap_or_default()
     }
 
-    /// Whether there's room for one more (`IsAvailable`): a grown-up only in an empty one, a child
-    /// in one with no grown-ups and a place free.
+    /// Whether there's room for one more (`IsAvailable`): a grown-up only in an empty one (or with
+    /// the one they're there for WooHoo with), a child in one with no grown-ups and a place free.
     pub fn room(&self, house: Entity, me: Entity, grown: bool) -> bool {
         let h = self.get(house);
         let others: Vec<&(Entity, bool)> = h.inside.iter().filter(|x| x.0 != me).collect();
-        if grown { others.is_empty() } else { others.len() < OCCUPANTS && !others.iter().any(|x| x.1) }
+        if grown {
+            let partner = |o: Entity| h.couples.iter().any(|c| (c.0 == me && c.1 == o) || (c.1 == me && c.0 == o));
+            others.iter().all(|x| partner(x.0))
+        } else {
+            others.len() < OCCUPANTS && !others.iter().any(|x| x.1)
+        }
     }
 
     /// Children up there and staying (not already on their way down).
@@ -310,6 +458,10 @@ pub struct InTreehouse {
     since: f64,
     /// Asked to come and sit on the second balcony beside the one on the first (`RequestBalconyB`).
     want_b: bool,
+    /// At a window but out of sight (waiting there, tucked down).
+    hidden: bool,
+    /// When their pretend game last had them say something (game minutes).
+    tns: f64,
 }
 
 /// Climbing in or out: how far, how long, when they vanish inside or show coming out.
@@ -335,7 +487,7 @@ fn tag(mut commands: Commands, data: Option<Res<Baked>>, objects: Query<(Entity,
             continue;
         }
         let script = data.0.catalog.iter().find(|c| c.objd == o.objd).map_or(String::new(), |c| c.script.clone());
-        commands.entity(e).insert(HouseInfo { theme: Theme::of(&script), name: o.name.clone() });
+        commands.entity(e).insert((HouseInfo { theme: Theme::of(&script), name: o.name.clone() }, HouseRules::default()));
     }
 }
 
@@ -345,7 +497,7 @@ pub fn act(house: Entity, htf: &Transform, act: Act) -> ActionKind {
     ActionKind::Treehouse { house, act, at, face }
 }
 
-/// Its words for an act.
+/// Its words for an act (the names: whom it's with, `{1.SimFirstName}`).
 pub fn label(act: Act, info: &HouseInfo) -> String {
     match act {
         Act::GetIn => get_in(&info.name),
@@ -354,15 +506,68 @@ pub fn label(act: Act, info: &HouseInfo) -> String {
         Act::Sleep => SLEEP.to_string(),
         Act::GetOut => GET_OUT.to_string(),
         Act::AskDown => ASK_DOWN.to_string(),
+        Act::AskUp => format!("Ask to Come Up in {}", info.name),
+        Act::DumpWater(_) | Act::BeTricked(_) | Act::BeAskedUp(_) | Act::WooHoo(..) => String::new(),
     }
 }
 
-/// A treehouse's menu for a Sim: outside, "Get in" (greyed when full), and a child's "Play in",
-/// its pretend game, "Sleep"; a teen or grown-up's "Ask Everyone to Come Down" with children up
-/// there. In it, "Get Out", and a child's others but the one they're at.
-pub fn options(house: Entity, htf: &Transform, info: &HouseInfo, houses: &Houses, me: Entity, age: Age, inside: Option<&InTreehouse>) -> Vec<(String, ActionKind)> {
+/// Its words for an act with someone: "Dump Water on Mortimer", "Be Tricked by Darlene", "Be
+/// Asked to Come Up by Arlo", "WooHoo with Judy in Kid's Clubhouse".
+pub fn label_with(act: Act, info: &HouseInfo, name: &str) -> String {
+    match act {
+        Act::DumpWater(_) => format!("Dump Water on {name}"),
+        Act::BeTricked(_) => format!("Be Tricked by {name}"),
+        Act::BeAskedUp(_) => format!("Be Asked to Come Up by {name}"),
+        Act::WooHoo(_, false) => format!("WooHoo with {name} in {}", info.name),
+        Act::WooHoo(_, true) => format!("Try for Baby with {name} in {}", info.name),
+        a => label(a, info),
+    }
+}
+
+/// The game's words for the treehouse's pickers and its sign.
+pub const DUMP_WATER_ON: &str = "Dump Water on...";
+pub const INVITE_UP: &str = "Invite Up...";
+pub const RESTRICTIONS: &str = "Entry Restrictions...";
+pub const RESTRICTION_SET: &str = "This is the currently selected option";
+pub const WOOHOO_WITH: &str = "WooHoo With...";
+pub const BABY_WITH: &str = "Try for Baby With...";
+
+/// Who's about for a treehouse's menu: the Sims on its lot (age, a girl or woman, up a treehouse
+/// already), and those the actor could WooHoo with there, or try for a baby with.
+#[derive(Default)]
+pub struct About {
+    pub sims: Vec<(Entity, String, Age, bool, bool)>,
+    pub woohoo: Vec<(Entity, String)>,
+    pub baby: Vec<(Entity, String)>,
+}
+
+/// A treehouse's menu for a Sim: outside, "Get in" (greyed when full); a child's "Play in", its
+/// pretend game and "Sleep" (theirs to play in), or "Ask to Come Up" (another's, with children up
+/// there); a teen or grown-up's "Ask Everyone to Come Down" with children up there, a grown-up's
+/// "WooHoo With... ›" and "Try for Baby With... ›". In it, "Get Out", and a child's others but the
+/// one they're at, "Dump Water on... ›", "Invite Up... ›" and "Entry Restrictions... ›".
+#[allow(clippy::too_many_arguments)]
+pub fn options(
+    house: Entity,
+    htf: &Transform,
+    (info, rules): (&HouseInfo, &HouseRules),
+    houses: &Houses,
+    (me, sim): (Entity, &Sim),
+    inside: Option<&InTreehouse>,
+    about: &About,
+    pie_submenus: &mut Vec<(String, Vec<(String, ActionKind)>)>,
+    submenu: impl Fn(usize) -> ActionKind,
+) -> Vec<(String, ActionKind)> {
     let mut out = Vec::new();
+    let age = sim.age;
     let child = age == Age::Child;
+    let h = houses.get(house);
+    let mut pick = |title: &str, list: Vec<(String, ActionKind)>, out: &mut Vec<(String, ActionKind)>| {
+        if !list.is_empty() {
+            out.push((format!("{title} ›"), submenu(pie_submenus.len())));
+            pie_submenus.push((title.to_string(), list));
+        }
+    };
     let here = inside.filter(|i| i.house == house);
     if let Some(i) = here {
         out.push((GET_OUT.to_string(), act(house, htf, Act::GetOut)));
@@ -371,6 +576,22 @@ pub fn options(house: Entity, htf: &Transform, info: &HouseInfo, houses: &Houses
                 if i.doing != Some(a) {
                     out.push((label(a, info), act(house, htf, a)));
                 }
+            }
+            // (Water on anyone below: child or older, not up here.)
+            let below: Vec<(String, ActionKind)> = about.sims.iter().filter(|s| s.0 != me && !s.4 && !matches!(s.2, Age::Baby | Age::Toddler)).map(|s| (s.1.clone(), act(house, htf, Act::DumpWater(s.0)))).collect();
+            pick(DUMP_WATER_ON, below, &mut out);
+            // (Children about, not up here, asked up.)
+            let kids: Vec<(String, ActionKind)> = about.sims.iter().filter(|s| s.0 != me && s.2 == Age::Child && !s.4).map(|s| (s.1.clone(), ActionKind::TreehouseNow { house, now: Now::InviteUp(s.0) })).collect();
+            pick(INVITE_UP, kids, &mut out);
+            // (Theirs, and not shared by both: the sign on the door.)
+            let mixed = h.girls > 0 && h.boys > 0;
+            if rules.allowed.contains(&me) && !mixed {
+                let mine = if sim.female { Restriction::NoBoys } else { Restriction::NoGirls };
+                let list = [mine, Restriction::None]
+                    .into_iter()
+                    .map(|r| (r.label().to_string(), if rules.restriction == r { ActionKind::Greyed(RESTRICTION_SET.into()) } else { ActionKind::TreehouseNow { house, now: Now::Restrict(r) } }))
+                    .collect();
+                pick(RESTRICTIONS, list, &mut out);
             }
         }
         return out;
@@ -383,12 +604,39 @@ pub fn options(house: Entity, htf: &Transform, info: &HouseInfo, houses: &Houses
         out.push((ASK_DOWN.to_string(), ask_down(house, htf, None)));
     }
     out.push((get_in(&info.name), if room || grown(age) { act(house, htf, Act::GetIn) } else { ActionKind::Greyed(FULL.into()) }));
-    if child && room {
-        for a in [Act::Play, Act::Pretend, Act::Sleep] {
-            out.push((label(a, info), act(house, htf, a)));
+    if child {
+        let barred = rules.restricted(sim.female, false, h.girls, h.boys);
+        if rules.allows(me) && room && !barred {
+            for a in [Act::Play, Act::Pretend, Act::Sleep] {
+                out.push((label(a, info), act(house, htf, a)));
+            }
+        } else if !rules.allows(me) && !h.players.is_empty() {
+            out.push((label(Act::AskUp, info), if h.inside.len() >= OCCUPANTS { ActionKind::Greyed(FULL.into()) } else { water_act(house, htf, info.theme, Act::AskUp) }));
         }
     }
+    if grown(age) && age != Age::Teen {
+        let with = |baby: bool, list: &[(Entity, String)]| list.iter().map(|(o, n)| (n.clone(), act(house, htf, Act::WooHoo(*o, baby)))).collect::<Vec<_>>();
+        pick(WOOHOO_WITH, with(false, &about.woohoo), &mut out);
+        pick(BABY_WITH, with(true, &about.baby), &mut out);
+    }
     out
+}
+
+/// Where one stands below its first window (the `_route_water_` routing slot: where a Sim's
+/// tricked, or asks to come up), facing up at it: half a metre nearer the trunk under the
+/// clubhouse's and the hideaway's than the castle's.
+pub fn water_spot(htf: &Transform, theme: Theme) -> Transform {
+    let mut s = slot(htf, None, "_route_water_");
+    if theme != Theme::Castle {
+        s.translation = htf.transform_point(Vec3::new(-0.738261, 0.0, 2.0));
+    }
+    s
+}
+
+/// An act done below its first window, facing up at it.
+pub fn water_act(house: Entity, htf: &Transform, theme: Theme, act: Act) -> ActionKind {
+    let s = water_spot(htf, theme);
+    ActionKind::Treehouse { house, act, at: s.translation.xz(), face: (s.rotation * Vec3::Z).xz().normalize_or(Vec2::NEG_Y) }
 }
 
 /// Calling them down from two to five metres off the ladder, on the caller's side.
@@ -413,6 +661,23 @@ fn at_house(a: &Action) -> Option<(Entity, Act)> {
 /// else to do up there, they come down.
 #[allow(clippy::type_complexity)]
 fn begin(mut sims: Query<(Entity, &Sim, &mut ActionQueue, Option<&InTreehouse>, Has<Climbing>)>, houses_q: Query<(&Transform, &HouseInfo)>) {
+    // (WooHoo up a treehouse asked of someone: theirs too, as the game's social's continuation.)
+    let mut partners: Vec<(Entity, Entity, Entity, bool, String)> = Vec::new();
+    for (e, sim, q, ..) in sims.iter() {
+        if let Some(a) = q.0.front().filter(|a| a.phase == Phase::Start && !a.cancel)
+            && let Some((h, Act::WooHoo(with, baby))) = at_house(a)
+        {
+            partners.push((with, e, h, baby, sim.first.clone()));
+        }
+    }
+    for (with, me, h, baby, name) in partners {
+        let Ok((htf, info)) = houses_q.get(h) else { continue };
+        let Ok((_, _, mut q, ..)) = sims.get_mut(with) else { continue };
+        if !q.0.iter().any(|a| matches!(at_house(a), Some((_, Act::WooHoo(o, _))) if o == me)) {
+            let a = Act::WooHoo(me, baby);
+            q.push_player(Action::new(label_with(a, info, &name), act(h, htf, a), false));
+        }
+    }
     for (_, sim, mut q, inside, climbing) in &mut sims {
         // (Part way up or down: finished first, as the game's climb can't be stopped once begun.)
         if climbing {
@@ -515,8 +780,10 @@ fn run(
         (Entity, &Sim, &mut ActionQueue, &mut Transform, &mut SimAnim, &mut crate::sim::Motives, Option<&mut InTreehouse>, Option<&mut Climbing>, Option<&mut Calling>, &mut Visibility),
         Without<HouseInfo>,
     >,
-    house_q: Query<(&Transform, &HouseInfo, Option<&crate::objanim::ObjectRig>), Without<Sim>>,
+    mut house_q: Query<(&Transform, &HouseInfo, Option<&crate::objanim::ObjectRig>, &mut HouseRules), Without<Sim>>,
     mut sparkles: MessageWriter<crate::effects::SpinSparkle>,
+    mut notes: ResMut<crate::interact::Notifications>,
+    selected: Query<(), With<crate::sim::Selected>>,
 ) {
     let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
     let hours = delta.0 / 60.0;
@@ -525,13 +792,29 @@ fn run(
     // Who's where (as it stood last).
     let snapshot = std::mem::take(&mut houses.0);
     let mut fresh: HashMap<Entity, House> = HashMap::new();
-    for (e, _, q, _, _, _, inside, climbing, ..) in sims.iter() {
+    for (e, sim, q, _, _, _, inside, climbing, ..) in sims.iter() {
+        // (Grown-ups going up for WooHoo together.)
+        for a in q.0.iter().filter(|a| !a.cancel) {
+            if let Some((h, Act::WooHoo(with, _))) = at_house(a) {
+                fresh.entry(h).or_default().couples.push((e, with));
+            }
+        }
         if let Some(i) = inside {
             let h = fresh.entry(i.house).or_default();
             h.inside.push((e, i.grown));
             h.places.push(i.place);
             if climbing.is_some_and(|c| c.out) || q.0.front().and_then(at_house).is_some_and(|(x, a)| x == i.house && a == Act::GetOut) {
                 h.leaving.push(e);
+            }
+            if !i.grown {
+                if sim.female {
+                    h.girls += 1;
+                } else {
+                    h.boys += 1;
+                }
+                if i.doing.is_some_and(Act::playing) {
+                    h.players.push(e);
+                }
             }
             if i.doing == Some(Act::Pretend) {
                 h.pretending += 1;
@@ -546,7 +829,13 @@ fn run(
             }
         }
         if let Some(c) = climbing {
-            fresh.entry(c.house).or_default().ladder = Some(e);
+            let h = fresh.entry(c.house).or_default();
+            // (A child out by the slide or pole, not the ladder.)
+            if c.out && inside.is_some_and(|i| !i.grown) {
+                h.exit = Some(e);
+            } else {
+                h.ladder = Some(e);
+            }
         }
     }
     for (h, old) in &snapshot {
@@ -588,13 +877,24 @@ fn run(
                 commands.entity(e).remove::<(InTreehouse, crate::sim::PlumbobOver)>();
                 anim.pose = Pose::Stand;
                 info!("treehouse: {} is out", sim.first);
+                // (The last child out: anyone may play in it again, `ClearAllowedSims`.)
+                let h = houses.get(house);
+                if !h.inside.iter().any(|x| x.0 != e && !x.1)
+                    && let Ok((.., mut rules)) = house_q.get_mut(house)
+                {
+                    rules.allowed.clear();
+                }
             } else {
+                // (A child in: theirs to play in, `AddAllowedSim`.)
+                if !grown_up && let Ok((.., mut rules)) = house_q.get_mut(house) {
+                    rules.let_in(e, sim.female);
+                }
                 let taken = houses.get(house).places;
                 let place = (0..OCCUPANTS).find(|p| !taken.contains(p)).unwrap_or(0);
                 let h = houses.0.entry(house).or_default();
                 h.inside.push((e, grown_up));
                 h.places.push(place);
-                commands.entity(e).insert(InTreehouse { house, place, grown: grown_up, doing: None, part: None, stage: 0, t: 0.0, len: 0.0, until: 0.0, prev: None, parity: false, since: now, want_b: false });
+                commands.entity(e).insert(InTreehouse { house, place, grown: grown_up, doing: None, part: None, stage: 0, t: 0.0, len: 0.0, until: 0.0, prev: None, parity: false, since: now, want_b: false, hidden: false, tns: f64::MIN });
                 anim.pose = Pose::Use;
                 info!("treehouse: {} is in", sim.first);
             }
@@ -612,11 +912,13 @@ fn run(
             }
             continue;
         };
-        let Ok((htf, info, rig)) = house_q.get(house) else {
+        let Ok((htf, info, rig, _)) = house_q.get(house) else {
             q.0.pop_front();
             continue;
         };
         match act {
+            // (Tricks, asking up and WooHoo: `tricks`, `asking`, `woohoo`.)
+            Act::DumpWater(_) | Act::BeTricked(_) | Act::AskUp | Act::BeAskedUp(_) | Act::WooHoo(..) => {}
             Act::GetIn => {
                 let h = houses.get(house);
                 if !houses.room(house, e, grown_up) || h.ladder.is_some_and(|l| l != e) {
@@ -641,6 +943,18 @@ fn run(
                     q.0.pop_front();
                     continue;
                 };
+                // (One at a time down the ladder, or down the slide or pole.)
+                let h = houses.get(house);
+                let busy = if i.grown { h.ladder } else { h.exit };
+                if busy.is_some_and(|o| o != e) {
+                    continue;
+                }
+                let h = houses.0.entry(house).or_default();
+                if i.grown {
+                    h.ladder = Some(e);
+                } else {
+                    h.exit = Some(e);
+                }
                 let (slot_name, clip): (&str, Option<&'static str>) = if i.grown { ("_route_climb_", Some("a2o_treehouse_woohoo_getOut_x")) } else { info.theme.exit() };
                 let at = slot(htf, rig, slot_name);
                 tf.translation = at.translation;
@@ -719,6 +1033,13 @@ fn run(
                 }
                 if act != Act::Sleep {
                     chat.entry(house).or_default().push(e);
+                }
+                // (Pretending, now and then a line of it for the one played: `PlayPretendTns...`, a
+                // quarter hour apart at least.)
+                if act == Act::Pretend && selected.contains(e) && now - i.tns >= PRETEND_TNS_EVERY && rng.random_bool((PRETEND_TNS_CHANCE * delta.0 as f64).clamp(0.0, 1.0)) {
+                    i.tns = now;
+                    let lines = info.theme.pretend_lines();
+                    notes.push(format!("{}: {}", sim.first, lines[rng.random_range(0..lines.len())]));
                 }
                 // Had enough: done (nothing else to do, they stay up there).
                 let needy = [crate::sim::HUNGER, crate::sim::BLADDER].iter().any(|k| m.0[*k] < -40.0) || (act != Act::Sleep && m.0[crate::sim::ENERGY] < -60.0);
@@ -859,6 +1180,579 @@ fn run(
     }
 }
 
+/// The child done with something at the window: inside again, back to their playing (the game's
+/// `PushPlayAsContinuation`) unless something else up there's next.
+fn back_to_play(q: &mut ActionQueue, i: &mut InTreehouse, house: Entity, htf: &Transform, info: &HouseInfo, commands: &mut Commands, e: Entity) {
+    i.doing = None;
+    i.part = None;
+    i.stage = 0;
+    i.hidden = false;
+    q.0.pop_front();
+    commands.entity(e).remove::<ActionClip>();
+    if !q.0.iter().find(|a| !a.cancel).and_then(at_house).is_some_and(|(h, _)| h == house) {
+        q.0.push_front(Action::new(label(Act::Play, info), act(house, htf, Act::Play), true));
+    }
+}
+
+/// One tricked, waiting below the window: their wave up at it, then soaked.
+#[derive(Component)]
+struct Tricked {
+    soaked: bool,
+    t: f32,
+    len: f32,
+}
+
+/// Water dumped from a treehouse's window (`DumpWaterOnA` and `B`): the child at the first window
+/// beckoning (`c2o_treehouse_dumpWaterOn_beckon`), the one below called under it and waving up
+/// (`wave`), the bucket tipped (`dump`, its `bucket` with it) as they're soaked (`victim`): Fun and
+/// Hygiene 40 down, Soaked, liking 5 less (a fire on them put out, 10 more), a puddle where they
+/// stood; the child's fun of it. Given up after forty minutes with no one come.
+#[allow(clippy::type_complexity)]
+fn tricks(
+    mut commands: Commands,
+    (time, clock): (Res<Time>, Res<crate::clock::GameClock>),
+    (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
+    houses: Res<Houses>,
+    mut sims: Query<(Entity, &Sim, &mut ActionQueue, &mut SimAnim, Option<&mut InTreehouse>, Option<&mut Tricked>, &mut Transform), Without<HouseInfo>>,
+    house_q: Query<(&Transform, &HouseInfo, Option<&crate::objanim::ObjectRig>), Without<Sim>>,
+    mut pours: MessageWriter<crate::effects::Pour>,
+) {
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    let now = clock.minutes;
+    // (Who means to be tricked by whom, and whether they're under the window yet; who's a child.)
+    let mut below: HashMap<(Entity, Entity), bool> = HashMap::new();
+    let heights: HashMap<Entity, bool> = sims.iter().map(|s| (s.0, s.1.age == Age::Child)).collect();
+    for (e, _, q, _, _, tricked, _) in sims.iter() {
+        for (n, a) in q.0.iter().enumerate().filter(|(_, a)| !a.cancel) {
+            if let Some((_, Act::BeTricked(kid))) = at_house(a) {
+                // (There, and waving up a moment, `DumpWaterOnB`'s wave before the water.)
+                below.insert((e, kid), n == 0 && matches!(a.phase, Phase::Running(_)) && tricked.is_some_and(|t| !t.soaked && t.t >= WAVE_BEFORE));
+            }
+        }
+    }
+    let mut soak: Vec<Entity> = Vec::new();
+    let mut done: Vec<(Entity, Entity)> = Vec::new();
+    let mut drop: Vec<(Entity, Entity)> = Vec::new();
+    for (e, sim, mut q, mut anim, inside, tricked, mut tf) in &mut sims {
+        let front = q.0.front().filter(|a| matches!(a.phase, Phase::Running(_))).and_then(at_house);
+        match front {
+            Some((house, Act::DumpWater(v))) => {
+                let (Some(mut i), Ok((htf, info, rig))) = (inside, house_q.get(house)) else {
+                    q.0.pop_front();
+                    continue;
+                };
+                if i.doing != Some(Act::DumpWater(v)) {
+                    // (Off the part they were at, and the window free, first.)
+                    if i.part.is_some() {
+                        step_out(&mut commands, e, &mut i, info.theme, &mut lib, &data, dt);
+                        continue;
+                    }
+                    if houses.get(house).parts.contains(&Part::WindowA) {
+                        continue;
+                    }
+                    let beckon = "c2o_treehouse_dumpWaterOn_beckon_x";
+                    i.doing = Some(Act::DumpWater(v));
+                    i.part = Some(Part::WindowA);
+                    i.stage = 10;
+                    i.t = 0.0;
+                    i.len = lib.get(&data, beckon).map_or(6.7, |c| c.duration);
+                    i.hidden = false;
+                    i.since = now;
+                    i.parity = !i.parity;
+                    commands.entity(e).insert(once(beckon, i.parity));
+                    let kind = water_act(house, htf, info.theme, Act::BeTricked(e));
+                    let words = label_with(Act::BeTricked(e), info, &sim.first);
+                    commands.queue(move |w: &mut World| {
+                        if let Some(mut q) = w.get_mut::<ActionQueue>(v) {
+                            q.push_player(Action::new(words, kind, false));
+                        }
+                    });
+                    info!("treehouse: {} beckons from the window, water at the ready", sim.first);
+                    continue;
+                }
+                match i.stage {
+                    10 => {
+                        i.t += dt;
+                        i.hidden = i.t >= BECKON_HIDE;
+                        if i.t >= i.len {
+                            i.stage = 11;
+                            commands.entity(e).remove::<ActionClip>();
+                        }
+                    }
+                    11 => match below.get(&(v, e)).copied() {
+                        // (Under the window: the bucket tipped.)
+                        Some(true) => {
+                            let dump = "c2o_treehouse_dumpWaterOn_dump_x";
+                            i.stage = 12;
+                            i.t = 0.0;
+                            i.len = lib.get(&data, dump).map_or(7.7, |c| c.duration);
+                            i.hidden = false;
+                            i.parity = !i.parity;
+                            commands.entity(e).insert(once(dump, i.parity));
+                            soak.push(v);
+                            info!("treehouse: {} tips the bucket", sim.first);
+                        }
+                        // (Not coming, or too long: given up.)
+                        w if (w.is_none() && now - i.since > 2.0) || now - i.since > GIVE_UP => {
+                            info!("treehouse: {} gives up waiting with the water", sim.first);
+                            drop.push((v, e));
+                            back_to_play(&mut q, &mut i, house, htf, info, &mut commands, e);
+                        }
+                        _ => {}
+                    },
+                    12 => {
+                        // (The water out of the bucket, its `ep4TreeHouseDumpWater`, onto the one
+                        // below.)
+                        if i.t < POUR_AT && i.t + dt >= POUR_AT {
+                            let w = slot(htf, rig, Part::WindowA.slot());
+                            let from = w.translation + w.rotation * Vec3::Z * 0.55 + Vec3::Y * 0.85;
+                            let head = if heights.get(&v).copied().unwrap_or(false) { 1.15 } else { 1.65 };
+                            let to = water_spot(htf, info.theme).translation + Vec3::Y * head;
+                            debug!("treehouse: water from {from:.2} onto {to:.2}");
+                            pours.write(crate::effects::Pour { from, to, secs: POUR_SECS });
+                        }
+                        i.t += dt;
+                        i.hidden = i.t >= DUMP_HIDE;
+                        if i.t >= i.len {
+                            done.push((v, e));
+                            back_to_play(&mut q, &mut i, house, htf, info, &mut commands, e);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some((house, Act::BeTricked(_))) => match tricked {
+                // (Under the window, just where the game has them: a wave up at it.)
+                None => {
+                    if let Ok((htf, info, _)) = house_q.get(house) {
+                        let s = water_spot(htf, info.theme);
+                        debug!("treehouse: {} under the window, from {:.2} to {:.2}", sim.first, tf.translation, s.translation);
+                        tf.translation.x = s.translation.x;
+                        tf.translation.z = s.translation.z;
+                        tf.rotation = s.rotation;
+                    }
+                    let wave = if sim.age == Age::Child { "c2o_treehouse_dumpWaterOn_wave_y" } else { "a2o_treehouse_dumpWaterOn_wave_y" };
+                    let len = lib.get(&data, wave).map_or(4.5, |c| c.duration);
+                    anim.pose = Pose::Use;
+                    // (Waving on till the water comes.)
+                    commands.entity(e).insert((Tricked { soaked: false, t: 0.0, len }, ActionClip::new(None, looping(wave.to_string()))));
+                }
+                Some(mut t) => {
+                    t.t += dt;
+                    if t.soaked && t.t >= t.len {
+                        q.0.pop_front();
+                        anim.pose = Pose::Stand;
+                        commands.entity(e).remove::<(Tricked, ActionClip)>();
+                    }
+                }
+            },
+            _ => {
+                if tricked.is_some() {
+                    commands.entity(e).remove::<(Tricked, ActionClip)>();
+                }
+            }
+        }
+    }
+    // (Soaked as the bucket's tipped: a child's own clip.)
+    for v in soak {
+        let child = sims.get(v).is_ok_and(|s| s.1.age == Age::Child);
+        let clip = if child { "c2o_treehouse_dumpWaterOn_victim_y" } else { "a2o_treehouse_dumpWaterOn_victim_y" };
+        let len = lib.get(&data, clip).map_or(7.7, |c| c.duration);
+        if let Ok((_, _, _, _, _, Some(mut t), _)) = sims.get_mut(v) {
+            t.soaked = true;
+            t.t = 0.0;
+            t.len = len;
+        } else {
+            commands.entity(v).insert(Tricked { soaked: true, t: 0.0, len });
+        }
+        commands.entity(v).insert(ActionClip::new(Some(clip), &[]));
+    }
+    for (v, kid) in drop {
+        commands.queue(move |w: &mut World| {
+            if let Some(mut q) = w.get_mut::<ActionQueue>(v) {
+                q.0.retain(|a| !matches!(at_house(a), Some((_, Act::BeTricked(k))) if k == kid));
+            }
+        });
+    }
+    // (What the water did.)
+    for (v, kid) in done {
+        commands.queue(move |w: &mut World| {
+            let on_fire = w.get::<crate::fire::OnFire>(v).is_some();
+            let now = w.resource::<crate::clock::GameClock>().minutes;
+            let at = w.get::<Transform>(v).map(|t| t.translation);
+            if let Some(mut m) = w.get_mut::<crate::sim::Motives>(v) {
+                m.add(crate::sim::FUN, TRICKED_FUN);
+                m.add(crate::sim::HYGIENE, TRICKED_HYGIENE);
+            }
+            if let Some(mut m) = w.get_mut::<crate::life::Moodlets>(v) {
+                m.add(crate::life::MoodletKind::Soaked, now);
+            }
+            if let Some(mut m) = w.get_mut::<crate::sim::Motives>(kid) {
+                m.add(crate::sim::FUN, TRICK_FUN);
+            }
+            let liking = if on_fire { EXTINGUISH_LIKING } else { TRICK_LIKING };
+            for (a, b) in [(kid, v), (v, kid)] {
+                if let Some(mut r) = w.get_mut::<crate::social::Relationships>(a) {
+                    r.add(b, liking, 0.0);
+                }
+            }
+            crate::fire::douse(w, v);
+            if let Some(at) = at {
+                w.write_message(crate::puddles::AddPuddle { at, level: 1, lasts: None });
+            }
+        });
+    }
+}
+
+/// Asking to come up (`AskToComeUpA`): below the first window, the child up there the asker likes
+/// best (playing or asleep) comes to it (`AskToComeUpB`) and answers (the game's `Ask to Come Up in
+/// Treehouse` social: yes to one they don't dislike, never to one the sign keeps out), with its
+/// clips (`c2c_treehouse_askToComeUp_accept`, `_reject`); let in, the asker goes up to play.
+#[derive(Component)]
+struct Asking {
+    since: f64,
+    reply: Option<(bool, f32, f32)>,
+}
+
+#[allow(clippy::type_complexity)]
+fn asking(
+    mut commands: Commands,
+    (time, clock): (Res<Time>, Res<crate::clock::GameClock>),
+    (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
+    houses: Res<Houses>,
+    mut sims: Query<(Entity, &Sim, &mut ActionQueue, &mut SimAnim, Option<&mut InTreehouse>, Option<&mut Asking>, Option<&crate::social::Relationships>, &mut Transform), Without<HouseInfo>>,
+    mut house_q: Query<(&Transform, &HouseInfo, &mut HouseRules), Without<Sim>>,
+) {
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    let now = clock.minutes;
+    // (Those below asking, and whether they're there yet; who's a girl.)
+    let mut askers: HashMap<Entity, bool> = HashMap::new();
+    let mut female: HashMap<Entity, bool> = HashMap::new();
+    for (e, sim, q, ..) in sims.iter() {
+        female.insert(e, sim.female);
+        if let Some(a) = q.0.front().filter(|a| !a.cancel)
+            && matches!(at_house(a), Some((_, Act::AskUp)))
+        {
+            askers.insert(e, matches!(a.phase, Phase::Running(_)));
+        }
+    }
+    let mut asks: Vec<(Entity, Entity, Entity)> = Vec::new();
+    let mut replies: Vec<(Entity, bool)> = Vec::new();
+    for (e, sim, mut q, mut anim, inside, asking, rels, mut tf) in &mut sims {
+        let front = q.0.front().filter(|a| matches!(a.phase, Phase::Running(_))).and_then(at_house);
+        match front {
+            Some((house, Act::AskUp)) => match asking {
+                None => {
+                    // (The child up there they like best, to answer.)
+                    let h = houses.get(house);
+                    let liking = |k: &Entity| rels.map_or(0.0, |r| r.get(*k).friendship);
+                    let Some(kid) = h.players.iter().copied().max_by(|a, b| liking(a).total_cmp(&liking(b))) else {
+                        info!("treehouse: nobody up there to ask, for {}", sim.first);
+                        q.0.pop_front();
+                        continue;
+                    };
+                    // (Just under the window, looking up at it.)
+                    if let Ok((htf, info, _)) = house_q.get(house) {
+                        let s = water_spot(htf, info.theme);
+                        tf.translation.x = s.translation.x;
+                        tf.translation.z = s.translation.z;
+                        tf.rotation = s.rotation;
+                    }
+                    anim.pose = Pose::Stand;
+                    commands.entity(e).insert(Asking { since: now, reply: None });
+                    asks.push((kid, e, house));
+                    info!("treehouse: {} asks to come up", sim.first);
+                }
+                Some(mut a) => {
+                    if let Some((yes, t, len)) = a.reply.as_mut() {
+                        *t += dt;
+                        if *t >= *len {
+                            let yes = *yes;
+                            q.0.pop_front();
+                            commands.entity(e).remove::<(Asking, ActionClip)>();
+                            if yes && let Ok((htf, info, _)) = house_q.get(house) {
+                                q.0.push_front(Action::new(label(Act::Play, info), act(house, htf, Act::Play), false));
+                            }
+                        }
+                    } else if now - a.since > GIVE_UP {
+                        q.0.pop_front();
+                        commands.entity(e).remove::<Asking>();
+                    }
+                }
+            },
+            Some((house, Act::BeAskedUp(asker))) => {
+                let (Some(mut i), Ok((htf, info, mut rules))) = (inside, house_q.get_mut(house)) else {
+                    q.0.pop_front();
+                    continue;
+                };
+                if i.doing != Some(Act::BeAskedUp(asker)) {
+                    if i.part.is_some() {
+                        step_out(&mut commands, e, &mut i, info.theme, &mut lib, &data, dt);
+                        continue;
+                    }
+                    if houses.get(house).parts.contains(&Part::WindowA) {
+                        continue;
+                    }
+                    i.doing = Some(Act::BeAskedUp(asker));
+                    i.part = Some(Part::WindowA);
+                    i.stage = 20;
+                    i.hidden = true;
+                    i.since = now;
+                    commands.entity(e).remove::<ActionClip>();
+                    continue;
+                }
+                match i.stage {
+                    20 => match askers.get(&asker).copied() {
+                        Some(true) => {
+                            let h = houses.get(house);
+                            let likes = rels.map_or(0.0, |r| r.get(asker).friendship) >= 0.0;
+                            let barred = rules.restricted(female.get(&asker).copied().unwrap_or(false), false, h.girls, h.boys);
+                            let yes = likes && !barred;
+                            let clip: &'static str = if yes { "c2c_treehouse_askToComeUp_accept_x" } else { "c2c_treehouse_askToComeUp_reject_x" };
+                            i.stage = 21;
+                            i.t = 0.0;
+                            i.len = lib.get(&data, clip).map_or(7.0, |c| c.duration);
+                            i.parity = !i.parity;
+                            i.until = if yes { 1.0 } else { 0.0 };
+                            commands.entity(e).insert(once(clip, i.parity));
+                            replies.push((asker, yes));
+                            info!("treehouse: {} {} {asker:?} up", sim.first, if yes { "lets" } else { "won't let" });
+                        }
+                        Some(false) => {}
+                        None if now - i.since > 2.0 => back_to_play(&mut q, &mut i, house, htf, info, &mut commands, e),
+                        None => {}
+                    },
+                    21 => {
+                        i.t += dt;
+                        i.hidden = !(ANSWER_SHOW..ANSWER_HIDE).contains(&i.t);
+                        if i.t >= i.len {
+                            if i.until > 0.5 {
+                                rules.let_in(asker, female.get(&asker).copied().unwrap_or(false));
+                            }
+                            back_to_play(&mut q, &mut i, house, htf, info, &mut commands, e);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                if asking.is_some() {
+                    commands.entity(e).remove::<Asking>();
+                }
+            }
+        }
+    }
+    // (The child up there called to the window: what they were at put by.)
+    for (kid, asker, house) in asks {
+        let Ok((htf, info, _)) = house_q.get(house) else { continue };
+        let name = sims.get(asker).map_or(String::new(), |s| s.1.first.clone());
+        let words = label_with(Act::BeAskedUp(asker), info, &name);
+        let kind = act(house, htf, Act::BeAskedUp(asker));
+        if let Ok((_, _, mut q, ..)) = sims.get_mut(kid) {
+            if let Some(a) = q.0.front_mut()
+                && at_house(a).is_some_and(|(h, x)| h == house && x.playing())
+            {
+                a.cancel = true;
+                q.0.insert(1, Action::new(words, kind, false));
+            } else {
+                q.0.push_front(Action::new(words, kind, false));
+            }
+        }
+    }
+    // (The answer heard below.)
+    for (asker, yes) in replies {
+        let clip: &'static str = if yes { "c2c_treehouse_askToComeUp_accept_y" } else { "c2c_treehouse_askToComeUp_reject_y" };
+        let len = lib.get(&data, clip).map_or(7.0, |c| c.duration);
+        if let Ok((_, _, _, _, _, Some(mut a), _, _)) = sims.get_mut(asker) {
+            a.reply = Some((yes, 0.0, len));
+        }
+        commands.entity(asker).insert(ActionClip::new(Some(clip), &[]));
+    }
+}
+
+/// WooHoo up a treehouse (`WooHoo`, `TryForBaby`): the two climb in, and once both are up, out of
+/// sight in it, the treehouse shakes (`o_treehouse_woohooShake_accept`, the pair's
+/// `a2a_treehouse_woohoo_accept`); as the game's WooHoo (liking, and `kWooHooed`), a baby maybe
+/// (`kTryForBabySuccessChance`), and a Splinter half the time; then down the ladder.
+#[derive(Component)]
+struct WooHooing {
+    t: f32,
+    len: f32,
+}
+
+#[allow(clippy::type_complexity)]
+fn woohoo(
+    mut commands: Commands,
+    (time, clock): (Res<Time>, Res<crate::clock::GameClock>),
+    (data, mut lib): (Res<Baked>, ResMut<ClipLibrary>),
+    mut sims: Query<(Entity, &Sim, &mut ActionQueue, &mut SimAnim, Option<&mut InTreehouse>, Option<&mut WooHooing>), Without<HouseInfo>>,
+    house_q: Query<&Transform, (With<HouseInfo>, Without<Sim>)>,
+) {
+    let dt = time.delta_secs().min(0.1) * crate::clock::SPEED_RATES[clock.speed];
+    let now = clock.minutes;
+    // (Those up there for it, ready.)
+    let ready: Vec<(Entity, Entity)> = sims
+        .iter()
+        .filter_map(|(e, _, q, _, inside, ..)| {
+            let a = q.0.front().filter(|a| matches!(a.phase, Phase::Running(_)) && !a.cancel)?;
+            match at_house(a) {
+                Some((h, Act::WooHoo(with, _))) if inside.is_some_and(|i| i.house == h) => Some((e, with)),
+                _ => None,
+            }
+        })
+        .collect();
+    let mut start: Vec<(Entity, Entity, Entity, bool)> = Vec::new();
+    for (e, sim, mut q, mut anim, inside, going) in &mut sims {
+        let front = q.0.front().filter(|a| matches!(a.phase, Phase::Running(_))).and_then(at_house);
+        let Some((house, Act::WooHoo(with, baby))) = front else {
+            if going.is_some() {
+                commands.entity(e).remove::<WooHooing>();
+            }
+            continue;
+        };
+        let Some(mut i) = inside else {
+            q.0.pop_front();
+            continue;
+        };
+        let Ok(htf) = house_q.get(house) else { continue };
+        if i.doing != Some(Act::WooHoo(with, baby)) {
+            i.doing = Some(Act::WooHoo(with, baby));
+            i.since = now;
+        }
+        match going {
+            None => {
+                let both = ready.contains(&(e, with)) && ready.contains(&(with, e));
+                // (The first of the two sets it going.)
+                if both && e.to_bits() < with.to_bits() {
+                    start.push((e, with, house, baby));
+                } else if now - i.since > GIVE_UP {
+                    info!("treehouse: {} gives up waiting for WooHoo", sim.first);
+                    q.0.pop_front();
+                    q.0.push_front(Action::new(GET_OUT, act(house, htf, Act::GetOut), false));
+                }
+            }
+            Some(mut w) => {
+                w.t += dt;
+                if w.t >= w.len {
+                    commands.entity(e).remove::<(WooHooing, ActionClip)>();
+                    commands.entity(house).remove::<crate::objanim::PlayingClip>();
+                    q.0.pop_front();
+                    anim.pose = Pose::Use;
+                    i.doing = None;
+                    q.0.push_front(Action::new(GET_OUT, act(house, htf, Act::GetOut), false));
+                }
+            }
+        }
+    }
+    for (a, b, house, baby) in start {
+        let shake = "o_treehouse_woohooShake_accept_treehouse";
+        let len = lib.get(&data, shake).map_or(7.9, |c| c.duration);
+        for (s, clip) in [(a, "a2a_treehouse_woohoo_accept_x"), (b, "a2a_treehouse_woohoo_accept_y")] {
+            commands.entity(s).insert((WooHooing { t: 0.0, len }, ActionClip::new(Some(clip), &[])));
+        }
+        commands.entity(house).insert(crate::objanim::PlayingClip { name: shake, time: 0.0, looping: false });
+        info!("treehouse: WooHoo up the treehouse");
+        let mut rng = rand::rng();
+        let conceived = baby && rng.random_bool(BABY_CHANCE);
+        commands.queue(move |w: &mut World| {
+            for (x, y) in [(a, b), (b, a)] {
+                if let Some(mut r) = w.get_mut::<crate::social::Relationships>(x)
+                    && r.add(y, 6.0, 15.0)
+                {
+                    w.write_message(crate::life::LifeEvent::new(x, crate::life::LifeEventKind::MadeFriend { other: y }));
+                }
+                w.write_message(crate::life::LifeEvent::new(x, crate::life::LifeEventKind::Socialized { other: y, social: "WooHoo" }));
+                w.write_message(crate::dreams::DreamEvent { other: Some(y), ..crate::dreams::DreamEvent::new(x, "kWooHooed") });
+                // (A Splinter: the Unlucky and Clumsy likelier, the Lucky never.)
+                let traits = w.get::<Sim>(x).map(|s| s.traits.clone()).unwrap_or_default();
+                if rand::rng().random_bool(splinter_chance(&traits)) {
+                    let now = w.resource::<crate::clock::GameClock>().minutes;
+                    if let Some(mut m) = w.get_mut::<crate::life::Moodlets>(x) {
+                        m.add(crate::life::MoodletKind::Splinter, now);
+                    }
+                }
+            }
+            if conceived {
+                w.write_message(crate::little::Conceive { a, b, chance: Some(1.0) });
+            }
+        });
+    }
+}
+
+/// How likely a Splinter is from WooHoo up a treehouse (`kSplinterChance...`).
+pub fn splinter_chance(traits: &[crate::life::Trait]) -> f64 {
+    use crate::life::Trait as T;
+    if traits.contains(&T::Lucky) {
+        return 0.0;
+    }
+    let more = traits.iter().any(|t| matches!(t, T::Unlucky | T::Clumsy));
+    (SPLINTER_CHANCE * if more { SPLINTER_MORE } else { 1.0 }).min(1.0)
+}
+
+/// What's done from a treehouse's menu there and then: a child invited up (theirs to play in now,
+/// and up they go to play, or to pretend with one pretending), the sign on the door changed.
+pub fn now(w: &mut World, actor: Entity, house: Entity, now: Now) {
+    match now {
+        Now::InviteUp(child) => {
+            let female = w.get::<Sim>(child).is_some_and(|s| s.female);
+            if let Some(mut r) = w.get_mut::<HouseRules>(house) {
+                r.let_in(child, female);
+            }
+            let pretending = w.get::<InTreehouse>(actor).is_some_and(|i| i.doing == Some(Act::Pretend));
+            let a = if pretending { Act::Pretend } else { Act::Play };
+            let (Some(htf), Some(info)) = (w.get::<Transform>(house).copied(), w.get::<HouseInfo>(house).cloned()) else { return };
+            if let Some(mut q) = w.get_mut::<ActionQueue>(child) {
+                q.push_player(Action::new(label(a, &info), act(house, &htf, a), false));
+            }
+            info!("treehouse: a child invited up");
+        }
+        Now::Restrict(r) => {
+            if let Some(mut rules) = w.get_mut::<HouseRules>(house) {
+                rules.restriction = r;
+            }
+            info!("treehouse: {}", r.label());
+        }
+    }
+}
+
+/// Children up a treehouse playing, the Evil and the Mean-Spirited above all (their 200), now
+/// and then tip water on someone below, the less liked the likelier (`kDumpWaterOnScoreLtrMultiplier`).
+#[allow(clippy::type_complexity)]
+fn mischief(
+    clock: Res<crate::clock::GameClock>,
+    mut kids: Query<(Entity, &Sim, &mut ActionQueue, &InTreehouse, Option<&crate::social::Relationships>)>,
+    below: Query<(Entity, &Sim, &Transform), (Without<InTreehouse>, Without<Climbing>)>,
+    house_q: Query<(&Transform, &HouseInfo)>,
+    mut next: Local<f64>,
+) {
+    if clock.minutes < *next {
+        return;
+    }
+    *next = clock.minutes + 60.0;
+    if std::env::var_os("TREEHOUSE_TEST").is_some() {
+        return;
+    }
+    let mut rng = rand::rng();
+    for (e, sim, mut q, i, rels) in &mut kids {
+        let mean = sim.traits.iter().any(|t| matches!(t, crate::life::Trait::Evil | crate::life::Trait::MeanSpirited));
+        if i.grown || i.doing != Some(Act::Play) || !rng.random_bool(if mean { 0.4 } else { 0.05 }) {
+            continue;
+        }
+        let Ok((htf, info)) = house_q.get(i.house) else { continue };
+        let liking = |o: Entity| rels.map_or(0.0, |r| r.get(o).friendship);
+        let target = below
+            .iter()
+            .filter(|(o, s, tf)| *o != e && !matches!(s.age, Age::Baby | Age::Toddler) && tf.translation.xz().distance(htf.translation.xz()) < 15.0)
+            .min_by(|a, b| liking(a.0).total_cmp(&liking(b.0)));
+        let Some((v, vs, _)) = target else { continue };
+        if let Some(a) = q.0.front_mut() {
+            a.cancel = true;
+        }
+        q.0.insert(1, Action::new(label_with(Act::DumpWater(v), info, &vs.first), act(i.house, htf, Act::DumpWater(v)), true));
+        info!("treehouse: {} means to dump water on {} of their own accord", sim.first, vs.first);
+    }
+}
+
 /// Down out of it, what they were at there over.
 fn come_down(q: &mut ActionQueue, house: Entity, htf: &Transform) {
     q.0.retain(|a| at_house(a).is_none_or(|(h, _)| h != house) || !matches!(a.phase, Phase::Running(_)));
@@ -942,7 +1836,7 @@ fn show(mut sims: Query<(&InTreehouse, &mut Transform, &mut Visibility, Option<&
         let Ok((htf, rig)) = houses.get(i.house) else { continue };
         let place = i.place.min(OCCUPANTS - 1);
         let (at, seen) = match i.part {
-            Some(p) => (slot(htf, rig, p.slot()), !(i.stage == 2 && i.t >= i.len - 0.2)),
+            Some(p) => (slot(htf, rig, p.slot()), !i.hidden && !(i.stage == 2 && i.t >= i.len - 0.2)),
             None => (slot(htf, rig, HIDE[place]), false),
         };
         tf.translation = at.translation;
@@ -1052,7 +1946,7 @@ fn treehouse_test(
     mut assets: ResMut<crate::objects::ObjectAssets>,
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut cams: Query<&mut crate::camera::SimsCamera>,
-    mut stage: Local<(u8, f32, f64)>,
+    (mut stage, mut flags): (Local<(u8, f32, f64)>, Local<u8>),
 ) {
     let Ok(name) = std::env::var("TREEHOUSE_TEST") else { return };
     let now = time.elapsed_secs();
@@ -1103,8 +1997,12 @@ fn treehouse_test(
                 return;
             }
             let with = env("TREEHOUSE_WITH");
+            // (TREEHOUSE_WOOHOO=<first name>: WooHoo up it with them instead.)
+            let lover = env("TREEHOUSE_WOOHOO").and_then(|n| sims.iter().find(|s| s.1.first.eq_ignore_ascii_case(&n)).map(|s| s.0));
             for (_, sim, _, mut q, sel, _) in &mut sims {
-                let a = if is_kid(sim, sel) {
+                let a = if let (true, Some(l)) = (is_kid(sim, sel), lover) {
+                    Act::WooHoo(l, env("TREEHOUSE_BABY").is_some())
+                } else if is_kid(sim, sel) {
                     what
                 } else if with.as_ref().is_some_and(|w| sim.first.eq_ignore_ascii_case(w)) {
                     Act::Play
@@ -1116,12 +2014,33 @@ fn treehouse_test(
             }
         }
         2 => {
-            let Some((h, _, htf)) = tree else { return };
+            let Some((h, info, htf)) = tree else { return };
             if env("TREEHOUSE_PIE").is_some_and(|p| p == "in") && sims.iter().any(|s| is_kid(s.1, s.4) && s.5) && now - stage.1 > 12.0 {
                 commands.insert_resource(crate::hud::PieFor(h));
                 info!("treehouse test: its menu, from inside");
                 *stage = (9, now, clock.minutes);
                 return;
+            }
+            // (TREEHOUSE_DUMP=<first name>: once they're up, water on them; TREEHOUSE_ASK=<first
+            // name>: that child asks to come up.)
+            let up = sims.iter().any(|s| is_kid(s.1, s.4) && s.5);
+            if up && *flags & 1 == 0 && now - stage.1 > 14.0 {
+                *flags |= 1;
+                if let Some(v) = env("TREEHOUSE_DUMP").and_then(|n| sims.iter().find(|s| s.1.first.eq_ignore_ascii_case(&n)).map(|s| s.0))
+                    && let Some((_, sim, _, mut q, ..)) = sims.iter_mut().find(|s| is_kid(s.1, s.4))
+                {
+                    if let Some(a) = q.0.front_mut() {
+                        a.cancel = true;
+                    }
+                    q.0.insert(1, Action::new(label_with(Act::DumpWater(v), info, "them"), act(h, htf, Act::DumpWater(v)), false));
+                    info!("treehouse test: {} is to dump water", sim.first);
+                }
+                if let Some(n) = env("TREEHOUSE_ASK")
+                    && let Some((_, sim, _, mut q, ..)) = sims.iter_mut().find(|s| s.1.first.eq_ignore_ascii_case(&n))
+                {
+                    q.push_player(Action::new(label(Act::AskUp, info), water_act(h, htf, info.theme, Act::AskUp), false));
+                    info!("treehouse test: {} asks to come up", sim.first);
+                }
             }
             let minutes = env("TREEHOUSE_MINUTES").and_then(|v| v.parse::<f64>().ok());
             if minutes.is_some_and(|m| clock.minutes - stage.2 >= m) {
@@ -1184,5 +2103,42 @@ mod tests {
         let w = slot(&tf, None, "_ctnm_window_02");
         assert!(((w.rotation * Vec3::Z).xz() - Vec2::X).length() < 1e-4);
         assert!((w.translation.y - 5.26955).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_sign_on_the_door_keeps_out_whom_it_says() {
+        let e = |n: u32| Entity::from_raw_u32(n).unwrap();
+        let mut rules = HouseRules::default();
+        assert!(rules.allows(e(1)) && !rules.restricted(false, true, 1, 0));
+        rules.restriction = Restriction::NoBoys;
+        // (Of their own accord, a boy's always kept out; asked, only with girls up there.)
+        assert!(rules.restricted(false, true, 0, 0));
+        assert!(!rules.restricted(false, false, 0, 0));
+        assert!(rules.restricted(false, false, 1, 0));
+        assert!(!rules.restricted(true, true, 1, 0), "girls are welcome");
+        // (A child in: theirs to play in, others asking; a boy let in takes the sign down.)
+        rules.let_in(e(2), true);
+        assert!(rules.allows(e(2)) && !rules.allows(e(3)));
+        assert_eq!(rules.restriction, Restriction::NoBoys);
+        rules.let_in(e(3), false);
+        assert_eq!(rules.restriction, Restriction::None);
+        assert_eq!(rules.allowed.len(), 2);
+        rules.let_in(e(3), false);
+        assert_eq!(rules.allowed.len(), 2);
+    }
+
+    #[test]
+    fn splinters_and_their_words() {
+        use crate::life::Trait as T;
+        assert_eq!(splinter_chance(&[]), 0.5);
+        assert_eq!(splinter_chance(&[T::Clumsy]), 0.875);
+        assert_eq!(splinter_chance(&[T::Unlucky, T::Lucky]), 0.0, "never the Lucky");
+        let info = HouseInfo { theme: Theme::Club, name: "Kid's Clubhouse".into() };
+        let x = Entity::from_raw_u32(9).unwrap();
+        assert_eq!(label_with(Act::DumpWater(x), &info, "Arlo"), "Dump Water on Arlo");
+        assert_eq!(label_with(Act::WooHoo(x, true), &info, "Judy"), "Try for Baby with Judy in Kid's Clubhouse");
+        assert_eq!(label(Act::AskUp, &info), "Ask to Come Up in Kid's Clubhouse");
+        assert!(Act::DumpWater(x).inside() && !Act::AskUp.inside() && !Act::BeTricked(x).inside());
+        assert_eq!(Theme::Space.pretend_lines().len(), 5);
     }
 }

@@ -24,7 +24,8 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterLooks>()
             .add_message::<SpinSparkle>()
-            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, jet_circles, emit, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
+            .add_message::<Pour>()
+            .add_systems(Update, (attach, fountain_water, bubble_baths, sprinkler_spray, jet_circles, emit, pour, fall, tv_screens, censor, sparkle, stink).chain().run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -671,6 +672,115 @@ fn emit(
                 MeshMaterial3d(mat.clone()),
                 Transform::from_translation(at).with_scale(Vec3::splat(size)),
                 Droplet { vel: dir.normalize() * speed, age: 0.0, life, streak: streak.then_some(size) },
+                NotShadowCaster,
+                DespawnOnExit(AppState::InGame),
+            ));
+        }
+    }
+}
+
+/// Water tipped out of a bucket (a treehouse's `ep4TreeHouseDumpWater`): a stream from `from`
+/// falling on `to` for `secs`, splashing out round it as it lands
+/// (`ep4TreeHouseDumpWaterSplashAdult`).
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Pour {
+    pub from: Vec3,
+    pub to: Vec3,
+    pub secs: f32,
+}
+
+/// A pour going on: how long it's gone on, how long the stream takes to land, and the droplets
+/// owed of the stream and of the splash.
+#[derive(Component)]
+struct Pouring {
+    pour: Pour,
+    t: f32,
+    fall: f32,
+    owed: (f32, f32),
+}
+
+/// How a pour's water comes (droplets a second of the stream, and of its splash).
+const POUR_RATE: f32 = 320.0;
+const SPLASH_RATE: f32 = 220.0;
+
+/// How long water falls from one height to another, and how fast it must go sideways to land
+/// there (metres a second).
+pub fn pour_flight(from: Vec3, to: Vec3) -> (f32, Vec2) {
+    let t = (2.0 * (from.y - to.y).max(0.05) / GRAVITY).sqrt();
+    (t, (to.xz() - from.xz()) / t)
+}
+
+/// Pours begun, and their water: the stream from the bucket and, as it lands, the splash.
+fn pour(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut pours: MessageReader<Pour>,
+    mut going: Query<(Entity, &mut Pouring)>,
+    (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
+    mut looks: Local<Looks>,
+) {
+    for p in pours.read() {
+        let (fall, _) = pour_flight(p.from, p.to);
+        commands.spawn((Pouring { pour: *p, t: 0.0, fall, owed: (0.0, 0.0) }, DespawnOnExit(AppState::InGame)));
+    }
+    // (As the droplets fall: in real time.)
+    let dt = time.delta_secs().min(0.1);
+    if going.is_empty() {
+        return;
+    }
+    let quad = looks.quad.get_or_insert_with(|| meshes.add(Rectangle::new(1.0, 1.0))).clone();
+    let mat = looks
+        .mat
+        .get_or_insert_with(|| {
+            mats.add(StandardMaterial {
+                base_color: Color::srgba(0.88, 0.95, 1.0, 0.85),
+                base_color_texture: Some(images.add(dot_image())),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            })
+        })
+        .clone();
+    let mut rng = rand::rng();
+    for (e, mut p) in &mut going {
+        p.t += dt;
+        let Pour { from, to, secs } = p.pour;
+        if p.t > secs + p.fall + 0.6 {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let mut drops: Vec<(Vec3, Vec3, f32, f32, bool)> = Vec::new();
+        // (The stream, out of the bucket's mouth and down.)
+        if p.t < secs {
+            p.owed.0 += POUR_RATE * dt;
+            while p.owed.0 >= 1.0 {
+                p.owed.0 -= 1.0;
+                let at = from + Vec3::new(rng.random_range(-0.06..0.06), rng.random_range(-0.04..0.04), rng.random_range(-0.06..0.06));
+                let (fall, side) = pour_flight(at, to);
+                let v = Vec3::new(side.x + rng.random_range(-0.15..0.15), rng.random_range(-0.4..0.0), side.y + rng.random_range(-0.15..0.15));
+                drops.push((at, v, fall, rng.random_range(0.05..0.08), true));
+            }
+        }
+        // (The splash, as it lands: off their head and shoulders, out and down.)
+        if p.t >= p.fall && p.t < secs + p.fall {
+            p.owed.1 += SPLASH_RATE * dt;
+            while p.owed.1 >= 1.0 {
+                p.owed.1 -= 1.0;
+                let a = rng.random_range(0.0..std::f32::consts::TAU);
+                let out = rng.random_range(0.6..1.8);
+                let at = to + Vec3::new(a.cos() * 0.12, rng.random_range(-0.1..0.05), a.sin() * 0.12);
+                let v = Vec3::new(a.cos() * out, rng.random_range(0.4..1.6), a.sin() * out);
+                drops.push((at, v, rng.random_range(0.35..0.6), rng.random_range(0.035..0.06), false));
+            }
+        }
+        for (at, vel, life, size, streak) in drops {
+            commands.spawn((
+                Mesh3d(quad.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_translation(at).with_scale(Vec3::splat(size)),
+                Droplet { vel, age: 0.0, life, streak: streak.then_some(size) },
                 NotShadowCaster,
                 DespawnOnExit(AppState::InGame),
             ));
