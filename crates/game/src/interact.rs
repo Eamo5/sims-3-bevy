@@ -296,6 +296,9 @@ pub enum ObjectKind {
     /// A treehouse (Generations' `Treehouse`: the castle, the clubhouse, the space-age hideaway):
     /// climbed into, played and slept in (`treehouse`).
     Treehouse,
+    /// A minor pet out cold on the floor, a cat's catch put down (the Pets pack's `ICatPrey`):
+    /// put in a Sim's inventory, eaten or put away by a pet (`petpresent`).
+    Prey,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -680,7 +683,7 @@ impl ObjectKind {
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
             Self::Crib | Self::HighChair | Self::ToyBox | Self::Xylophone | Self::PegBox | Self::PottyChair | Self::ActivityTable => "Kids",
             Self::PetBowl | Self::LitterBox | Self::PetBed | Self::PetHouse | Self::HitchingPost | Self::PetToyCrate | Self::ScratchingPost | Self::ChewToy | Self::WaterTrough | Self::Terrarium | Self::BirdCage | Self::BoxStall => "Misc",
-            Self::CatToy | Self::CatWallToy | Self::PlantShreds | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump | Self::TrainingPosts => "Misc",
+            Self::CatToy | Self::CatWallToy | Self::PlantShreds | Self::KittyBag | Self::DogBall | Self::HorseBall | Self::PetHygienator | Self::HorseJump | Self::TrainingPosts | Self::Prey => "Misc",
             Self::Other => "Misc",
         }
     }
@@ -1546,6 +1549,8 @@ pub enum Special {
     SpongeBath,
     /// A donation at the mailbox (`charity`: chosen from its causes' menus, never as itself).
     Donate,
+    /// A cat's catch on the floor picked up into the Sim's inventory (`petpresent`).
+    PocketPrey,
 }
 
 impl Special {
@@ -2023,6 +2028,8 @@ static BIRD_CAGE: [InteractionDef; 8] = [
 static SLIPPY_SLIDE: [InteractionDef; 1] = [InteractionDef { special: Special::SlippySlide, ..def("Slide", 8.0, [0.0, 0.0, -6.0, 0.0, 0.0, 75.0], Pose::Use) }];
 /// A box stall's: cleaned out (the game's `Clean`: three minutes a dirty spot, five at least).
 static BOX_STALL: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean Stall", 15.0, [0.0, 0.0, -4.0, 0.0, -15.0, 0.0], Pose::Use) }];
+/// (A cat's catch on the floor: the game's generic `PutInInventory`, a swipe.)
+static PREY: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::PocketPrey, ..def(crate::petpresent::PUT_IN_INVENTORY, 1.5, N, Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 /// (A plant's shreds, cleared into the trash: the game's `DisposeTrash` on its `TrashPile`.)
@@ -2338,6 +2345,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Scan Art" => A::new(Some("a_scanWorkOfArt_scan_start_x"), &["a_scanWorkOfArt_scan_loop1_x", "a_scanWorkOfArt_scan_loop2_x"]).ending(&["a_scanWorkOfArt_scan_stop_x"], 1.5),
         "Clean Stall" => A::new(Some("a2o_boxStall_clean_start_x"), &["a2o_boxStall_clean_loop1_x", "a2o_boxStall_clean_loop2_x"]).ending(&["a2o_boxStall_clean_stop_x"], 1.5),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
+        // (A cat's catch picked up off the floor: the game's generic swipe.)
+        "Put In Inventory" if kind == ObjectKind::Prey => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
         // (A bird cage's own: stocked, fed, watched, cleaned; a bird taught to talk.)
         "Stock" if kind == ObjectKind::BirdCage => A::new(None, &["a2o_birdcage_stock_x"]),
@@ -3030,6 +3039,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::BirdCage => &BIRD_CAGE,
         ObjectKind::SlippySlide => &SLIPPY_SLIDE,
         ObjectKind::BoxStall => &BOX_STALL,
+        ObjectKind::Prey => &PREY,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -5747,6 +5757,11 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Collect => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Pick(*target));
+                                        }
+                                        // (A cat's catch picked up: into their inventory, `petpresent`.)
+                                        Special::PocketPrey => {
+                                            let (t, objd) = (*target, obj.objd);
+                                            commands.queue(move |w: &mut World| crate::petpresent::pocket(w, me, t, objd));
                                         }
                                         Special::Fish => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Fished { spot: *target, minutes: d.minutes, bait: action.fish_choice.take() });

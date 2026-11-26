@@ -967,7 +967,8 @@ pub(crate) fn status_from(s: &str) -> RelStatus {
 
 pub const SKILLS: [&str; 13] = ["Athletic", "Charisma", "Cooking", "Fishing", "Gardening", "Guitar", "Handiness", "Logic", "Painting", "Writing", "Piano", "Drums", "LaserHarp"];
 
-fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>, hung: Option<&crate::paintings::Hung>) -> SavedObject {
+/// An object as saved: with the item it is, a painting hung or a cat's catch on the floor.
+fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::Design>, item: Option<&crate::inventory::Stack>) -> SavedObject {
     let key = design.map(|d| d.0);
     let preset = key.filter(|k| k.0 == s3bake::gamedata::T_DESIGN && k.2 == o.objd.2).map(|k| k.1 as u8);
     SavedObject {
@@ -976,7 +977,7 @@ fn saved_object(o: &GameObject, tf: &Transform, design: Option<&crate::objects::
         rotation: tf.rotation.to_array(),
         design: preset,
         design_key: key.filter(|_| preset.is_none()),
-        item: hung.map(|h| h.0.clone()),
+        item: item.cloned(),
         lost: 0,
     }
 }
@@ -1045,7 +1046,7 @@ fn save_game(
         Without<crate::services::ServiceNpc>,
     >,
     (bought, exit, graves, ghosts, pet_graves): (
-        Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>), With<Bought>>,
+        Query<(&GameObject, &Transform, Option<&crate::objects::Design>, Option<&crate::paintings::Hung>, Option<&crate::petpresent::CaughtPrey>), With<Bought>>,
         Option<Res<crate::interact::LotExit>>,
         Query<(Entity, &crate::ghosts::Grave, &Transform), Without<crate::buyhistory::HistoryHidden>>,
         Query<(Entity, &Sim, &crate::ghosts::Ghost, &Relationships)>,
@@ -1242,7 +1243,7 @@ fn save_game(
         bills: hh.bills.iter().cloned().chain(mail_due.as_ref().map(|m| m.0.clone())).collect(),
         minutes: clock.minutes,
         sims: saved,
-        bought: bought.iter().map(|(o, tf, d, h)| saved_object(o, tf, d, h)).collect(),
+        bought: bought.iter().map(|(o, tf, d, h, prey)| saved_object(o, tf, d, h.map(|h| &h.0).or(prey.map(|p| &p.0)))).collect(),
         removed: removed.0.clone(),
         paint: paint.map(|p| p.0.clone()).unwrap_or_default(),
         seeds: match (garden.as_deref(), ui.as_deref()) {
@@ -1632,8 +1633,14 @@ pub(crate) fn apply_loaded_game(
         let rot = Quat::from_array(b.rotation);
         if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, b.objd, lift(Vec3::from(b.position)), rot, b.design_texture()) {
             commands.entity(o.entity).insert(Bought);
-            if let Some(item) = &b.item {
-                commands.entity(o.entity).insert(crate::paintings::Hung(item.clone()));
+            // (A cat's catch on the floor, by its model; else a painting hung.)
+            let prey_model = data.0.catalog.iter().find(|c| c.objd == b.objd).is_some_and(|c| crate::petpresent::is_prey_model(&c.instance_name));
+            match &b.item {
+                Some(item) if prey_model => crate::petpresent::lay(&mut commands, o.entity, item.clone()),
+                Some(item) => {
+                    commands.entity(o.entity).insert(crate::paintings::Hung(item.clone()));
+                }
+                None => {}
             }
         }
     }

@@ -45,6 +45,8 @@ pub enum PetCommand {
     SitOnSim(Entity),
     /// Training for racing at the posts, in a tone (`trainingposts`).
     Train(Entity, crate::trainingposts::Tone),
+    /// A catch on the floor eaten, or put away (`petpresent`).
+    Prey(Entity, bool),
 }
 
 /// An order for a pet, to be seen to.
@@ -74,6 +76,13 @@ pub fn object_options(pet: &Pet, target: Entity, o: &GameObject, food: Option<&B
         ObjectKind::ScratchingPost if species == 'c' => out.push(order("Scratch", PetDo::Scratch(target))),
         ObjectKind::ChewToy if matches!(species, 'd' | 'l') => out.push(order("Chew", PetDo::Chew(target))),
         ObjectKind::WaterTrough if horse => out.push(order("Drink", PetDo::Drink(target))),
+        // (A catch on the floor: eaten by a cat or dog, put away by a cat, `petpresent`.)
+        ObjectKind::Prey if matches!(species, 'c' | 'd' | 'l') => {
+            out.push((crate::petpresent::EAT.to_string(), ActionKind::PetCommand(PetCommand::Prey(target, true))));
+            if species == 'c' && crate::petpresent::presents(&pet.kind) {
+                out.push((crate::petpresent::PUT_AWAY.to_string(), ActionKind::PetCommand(PetCommand::Prey(target, false))));
+            }
+        }
         _ => {}
     }
     if let Some(toy) = crate::pettoys::toy_for(&pet.kind, o.kind) {
@@ -178,6 +187,14 @@ fn obey(
             PetCommand::GetToy(c) => {
                 if let Ok((_, ctf)) = objects.get(c)
                     && !crate::toycrate::send(&mut commands, e, pet, here, c, ctf, &grid, building.as_deref(), &mut rng)
+                {
+                    notes.push(format!("{} can't get there.", pet.name));
+                }
+                continue;
+            }
+            PetCommand::Prey(p, eat) => {
+                if let Ok((_, ptf)) = objects.get(p)
+                    && !crate::petpresent::send(&mut commands, e, pet, here, p, ptf.translation.xz(), eat, &grid, building.as_deref(), &mut rng)
                 {
                     notes.push(format!("{} can't get there.", pet.name));
                 }

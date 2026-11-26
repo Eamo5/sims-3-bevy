@@ -1222,6 +1222,25 @@ installation is unreachable.
   the pack's dug hole left a while): a gem, some metal or a rock, the rarer the better its
   Hunting, or something...interesting. Both learn Hunting as they go; kept in saves.
   `PET_HUNT_TEST=<pet>[:<level>]` (tests).
+  A cat's catch, out cold in its inventory, may be "Present To..." someone (`PresentTo`: the
+  family about the lot, toddlers and up, or anyone it knows within ten metres; greyed "There are
+  no valid Sims nearby." with none): it takes it up in its mouth (`ac2o_prey_pickUp`, the catch's
+  tail or feathers showing, the game's `accessoryCatHunt...`), carries it over and puts it down a
+  metre off at their feet (`kDistanceFromSimToPresent`, `ac2o_prey_putDown`), out cold on the
+  floor (`catHuntRodent`...), going after them again if they've moved on. Within ten metres they
+  react: half the time they pet the cat for it (`kHumanBaseChanceToPetCat`: the Slob a fifth
+  likelier, the Snob a fifth and the Neat three-tenths less, three-tenths likelier where the cat
+  likes them 30 or more; the pack's "Pet"), the cat liking them 20 more; otherwise they retch at
+  it (`ReactToPresentedObject`'s Retch) and it likes them 10 less. Or it's to "Drop Somewhere": by
+  its bed four times in ten, by a plant four in ten, else anywhere about (`kChanceToDropAtBed`,
+  `kChanceToDropAtPlant`). Of its own accord a cat with a catch now and then presents it to one of
+  the family, the one it likes best seven times in ten (`kChanceOfAutonomyChooseHighestLTR`), or
+  drops it somewhere. A catch on the floor is "Put In Inventory" by a Sim (the game's swipe, to keep
+  or sell), "Eat"en by a cat or dog (`PetEatPrey`: ten minutes a cat, five a dog, with the pack's
+  eating clips; a bird Tastes Like Chicken to a cat), a hungry one of its own accord, or "Put
+  Away" by a cat into its inventory again (`PetPutInInventory`). Kept in saves.
+  `PRESENT_TEST=<cat>` with `PRESENT_TO=<first name>|drop|pie`, `PRESENT_NEAR=1`, `PRESENT_PREY`,
+  `PRESENT_THEN=eat|away|pocket:<first name>` (tests).
   Pets have moodlets and a mood as Sims do, the pack's own buffs: their needs' by the game's
   `Motives` triggers for each species (Hungry from -36, Very Hungry -40 from -61, Starving -80
   from -81; Has To Pee, Sleepy, Tired, Exhausted, Lonely, Desolate; Grungy and Smelly for the

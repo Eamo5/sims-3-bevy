@@ -235,6 +235,10 @@ pub enum ItemButton {
     Post(crate::rgmmail::Post, bool),
     /// Read (a doctor's journal).
     Read,
+    /// A cat's catch carried to someone and put down at their feet, or dropped somewhere
+    /// (`petpresent`).
+    PresentTo(Entity),
+    DropSomewhere,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -401,6 +405,18 @@ fn inventory_buttons(
         .chain(from_pie)
         .collect();
     for (b, target) in &pressed {
+        // (A cat's catch presented to someone, or dropped somewhere: one of it taken up in its
+        // mouth, `petpresent`.)
+        if let (ItemButton::PresentTo(_) | ItemButton::DropSomewhere, Some((owner, stack))) = (b, target)
+            && let Ok((_, mut inv)) = pets.get_mut(*owner)
+        {
+            let Some(k) = inv.0.iter().position(|s| s.kind == stack.kind && s.key == stack.key && s.quality == stack.quality) else { continue };
+            let Some(worth) = inv.take_one(k) else { continue };
+            let one = Stack { count: 1, worth, ..stack.clone() };
+            let to = if let ItemButton::PresentTo(to) = b { Some(*to) } else { None };
+            commands.entity(*owner).insert(crate::petpresent::Presenting::new(to, one, false));
+            continue;
+        }
         // (A pet's catch handed to one of the family: all a pet's things are for.)
         if let (ItemButton::GiveTo(to), Some((owner, stack))) = (b, target)
             && let Ok((pet, mut inv)) = pets.get_mut(*owner)
@@ -494,6 +510,8 @@ fn inventory_buttons(
                 commands.entity(me).insert(crate::rgmmail::ToPost { key: s.key.clone(), quality: s.quality, all: *all, what: *what });
                 queue.push_player(Action::new(label, ActionKind::Object { target: mailbox, def }, false));
             }
+            // (A pet's, never a Sim's.)
+            ItemButton::PresentTo(_) | ItemButton::DropSomewhere => {}
             ItemButton::GiveTo(to) => {
                 if *to == me {
                     continue;

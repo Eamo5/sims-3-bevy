@@ -672,6 +672,10 @@ const ITEM_COUNT: u32 = 0x066b_7e01;
 #[derive(Component)]
 struct InventoryCell(usize);
 
+/// (Tests.) A stack of the selected one's inventory to open the menu of, as if clicked.
+#[derive(Resource)]
+pub struct StackPie(pub usize);
+
 /// The Inventory panel: the Sim's stacks in the game's item cells (the picture, how many),
 /// four across, scrolled with the wheel; clicked, the stack's pie menu (sell, eat, hang,
 /// place). Its phone opens the phone, its journal the collection journal.
@@ -696,6 +700,7 @@ fn inventory_panel(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     mut state: Local<(Option<Entity>, String, f32)>,
     panel: Res<InfoPanel>,
+    (pet_q, people_q, stack_pie): (Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>)>, Query<(Entity, &Sim, &GlobalTransform, Has<crate::sim::HouseholdMember>)>, Option<Res<StackPie>>),
 ) {
     let s: &Spawned = &hud.inventory;
     // (A Sim's, or a pet's: what it's caught or found, only to give to the family.)
@@ -709,12 +714,15 @@ fn inventory_panel(
     // (Toddlers and babies have no phone; nor have pets.)
     set_visible(&mut vis, s.id(INV_PHONE), sim.is_some_and(|s| !s.age.is_little()));
     let stacks: Vec<crate::inventory::Stack> = inv.map(|i| i.0.clone()).unwrap_or_default();
-    // A stack clicked: its pie menu.
-    for (i, c) in &cells {
-        if *i == Interaction::Pressed
-            && let Some(st) = stacks.get(c.0)
-        {
-            chosen.select(c.0, st);
+    // A stack clicked: its pie menu (or asked for, by tests).
+    let asked = stack_pie.as_ref().map(|p| p.0);
+    if asked.is_some() {
+        commands.remove_resource::<StackPie>();
+    }
+    let picked: Vec<usize> = cells.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, c)| c.0).chain(asked).collect();
+    for idx in picked {
+        if let Some(st) = stacks.get(idx) {
+            chosen.select(idx, st);
             let mut options = sim
                 .map(|sim| crate::inventory::stack_actions(sim, st))
                 .unwrap_or_default()
@@ -749,6 +757,26 @@ fn inventory_panel(
             if !give.is_empty() {
                 options.push(("Give to ›".to_string(), crate::hud::submenu_kind(pie.submenus.len())));
                 pie.submenus.push(("Give to".to_string(), give));
+            }
+            // (A cat's catch: presented to someone about, or dropped somewhere, `petpresent`.)
+            if let (Ok((pet, ptf, bonds)), Some(g)) = (pet_q.get(me), game_ui.as_deref())
+                && crate::petpresent::presents(&pet.kind)
+                && crate::petpresent::is_prey(st, &g.data.minor_pets)
+            {
+                let here = ptf.translation();
+                let near: Vec<(Entity, String)> = people_q
+                    .iter()
+                    .filter(|(_, s, gtf, member)| crate::petpresent::can_present_to(s.age, *member, bonds.is_some_and(|b| b.0.contains_key(&s.id)), gtf.translation().distance(here)))
+                    .map(|(e, s, ..)| (e, s.full_name()))
+                    .collect();
+                let item = |b| crate::interact::ActionKind::InventoryItem(b, me, st.clone());
+                if near.is_empty() {
+                    options.push((crate::petpresent::PRESENT_TO.to_string(), crate::interact::ActionKind::Greyed(crate::petpresent::NO_SIMS.into())));
+                } else {
+                    options.push((format!("{} ›", crate::petpresent::PRESENT_TO), crate::hud::submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((crate::petpresent::PRESENT_TO.to_string(), near.into_iter().map(|(e, n)| (n, item(crate::inventory::ItemButton::PresentTo(e)))).collect()));
+                }
+                options.push((crate::petpresent::DROP_SOMEWHERE.to_string(), item(crate::inventory::ItemButton::DropSomewhere)));
             }
             if !options.is_empty() {
                 let at = windows.single().ok().and_then(|w| w.cursor_position()).unwrap_or(Vec2::new(600.0, 600.0));

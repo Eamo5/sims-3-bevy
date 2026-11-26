@@ -270,6 +270,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (A cat's catch taken up in its mouth, carried and put down; one on the floor eaten.)
+    "ac2o_prey_",
+    "ac2o_eatfish_",
+    "ad2o_eatfish_",
+    "al2o_eatfish_",
     // (Treehouses: climbing in and out, looking out of the windows, sitting on the balcony,
     // pretending, dumping water, asking up; a grown-up's climb and WooHoo, the treehouse's shake.)
     "c2o_treehouse_",
