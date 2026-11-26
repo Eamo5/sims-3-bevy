@@ -108,7 +108,7 @@ fn decor(
     mut sims: Query<(Entity, &Sim, &Transform, &mut Moodlets, &Visibility), (With<HouseholdMember>, Without<crate::visit::OnLot>)>,
     (new, clock, mut counted): (Query<(&Transform, &BoughtAt)>, Res<crate::clock::GameClock>, Local<std::collections::HashMap<Entity, usize>>),
     objects: Query<
-        (&GameObject, &Transform, Option<&crate::grime::Grime>, Has<crate::interact::Broken>, Has<crate::grime::Charred>),
+        (&GameObject, &Transform, Option<&crate::grime::Grime>, Has<crate::interact::Broken>, (Has<crate::grime::Charred>, Has<crate::ornaments::KnockedOver>)),
         (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
     >,
 ) {
@@ -125,10 +125,10 @@ fn decor(
     // Each thing's score, and where it is.
     let things: Vec<(Vec3, u8, Option<u16>, f32)> = objects
         .iter()
-        .filter_map(|(o, tf, grime, broken, charred)| {
+        .filter_map(|(o, tf, grime, broken, (charred, knocked))| {
             let base = rates.0.get(&o.objd).map_or(0.0, |r| r.environment);
-            // (Dirty, broken or burnt, it's no ornament.)
-            let spoilt = broken || charred || grime.is_some_and(|g| g.0 >= crate::grime::NEEDS_CLEANING);
+            // (Dirty, broken or burnt, or a flamingo kicked over, it's no ornament.)
+            let spoilt = broken || charred || knocked || grime.is_some_and(|g| g.0 >= crate::grime::NEEDS_CLEANING);
             let score = if spoilt { 0.0 } else { base };
             (score > 0.0).then(|| {
                 let (level, room) = where_is(tf.translation);

@@ -1850,6 +1850,17 @@ installation is unreachable.
   full and each after it less (in a big room the best counts half, and up to fifteen count;
   in a small one five), nothing for what's dirty, broken or burnt, and twice as much for a
   Snob.
+- **Lawn flamingos and garden gnomes**, as the game's `Flamingo`, `GardenGnome` and magic
+  gnomes: "Kick" one over (a magic gnome's "Kick Mysterious Mr. Gnome") from whichever of its two
+  sides is nearer (its `_route_0_W` and `_E`, the far one with the game's mirrored clips), with the
+  game's kick (`a2o_flamingo_kick`, a child's `c2o_`, its whoosh and voice), the ornament toppling
+  as its half of the clip has it and left lying there (`floor_pose`), worth nothing to the decor
+  till it's stood up again ("Stand Up", "Stand Mysterious Mr. Gnome Up": `a2o_flamingo_standup`,
+  from the side it fell to). As the kick lands (`trigger_reactions_for_nearby_sims`), those about
+  a flamingo react: four in five of a family kicking their own look awkward
+  (`kChanceOfAwkwardReaction`), and those whose home it is boo anyone else; a gnome kicked shocks
+  those about. Angry Sims kick one in a temper, the Neat stand them up again. Kept in saves.
+  `ORNAMENTS_TEST=<instance>` with `ORNAMENTS_WHO`, `ORNAMENTS_AFTER`, `ORNAMENTS_PIE=1` (tests).
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's

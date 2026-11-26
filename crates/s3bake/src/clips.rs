@@ -270,6 +270,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "t2ac_wallDancerToy_",
     "c2ac_wallDancerToy_",
     "o_wallDancerToy_",
+    // (A lawn flamingo or a gnome kicked over and stood up, its own half too.)
+    "a2o_flamingo_",
+    "c2o_flamingo_",
     // (A pet rock played with: picked up, cuddled, kissed, talked to, tossed up, dropped.)
     "a2o_petStone_",
     "c2o_petStone_",

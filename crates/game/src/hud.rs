@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q)))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q)))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>)),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>)),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1896,6 +1896,14 @@ fn world_click(
             {
                 let here = pickable.get(actor).map_or(gtf.translation().xz(), |p| p.1.translation().xz());
                 options.extend(crate::petstones::options(t, &gtf.compute_transform(), &obj.name, actor_sim.age, here));
+            }
+            // (A flamingo or a gnome: kicked over, or stood up again: `ornaments`.)
+            if obj.kind == ObjectKind::LawnOrnament
+                && let Ok((_, gtf, ..)) = pickable.get(t)
+            {
+                let here = pickable.get(actor).map_or(gtf.translation().xz(), |p| p.1.translation().xz());
+                let what = baked.0.catalog.iter().find(|c| c.objd == obj.objd).map_or(crate::ornaments::Ornament::Gnome, |c| crate::ornaments::Ornament::of(&c.script));
+                options.extend(crate::ornaments::options(t, &gtf.compute_transform(), what, &obj.name, knocked_q.get(t).ok().copied(), actor_sim.age, here));
             }
             // (A treehouse: in, out, playing, pretending and sleeping in it, calling the children
             // down: `treehouse`.)

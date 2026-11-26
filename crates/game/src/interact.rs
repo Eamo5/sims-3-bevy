@@ -302,6 +302,9 @@ pub enum ObjectKind {
     /// A pet rock (the Pets pack's `PetStone`): played with, picked up and put down
     /// (`petstones`).
     PetStone,
+    /// A lawn flamingo or a garden gnome (the game's `Flamingo`, `GardenGnome` and the magic
+    /// gnomes): kicked over and stood up again (`ornaments`).
+    LawnOrnament,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -350,6 +353,14 @@ impl ObjectKind {
             Self::PlantShreds
         } else if has("objects.miscellaneous.petstone") {
             Self::PetStone
+        } else if has("objects.decorations.flamingo")
+            || has("objects.environment.gardengnome")
+            || has("objects.environment.magicgnome")
+            || has("objects.environment.hauntedgnome")
+            || has("objects.environment.graduationgnome")
+            || has("objects.environment.divergnome")
+        {
+            Self::LawnOrnament
         } else if has("objects.pets.cattoywalldancer") {
             Self::CatWallToy
         } else if has("objects.pets.cattoy") && !has("jig") && !has("walldancer") {
@@ -683,7 +694,7 @@ impl ObjectKind {
             Self::Dresser => "Surfaces",
             Self::Table => "Surfaces",
             Self::Light => "Lighting",
-            Self::Plant | Self::Decoration | Self::Art => "Decor",
+            Self::Plant | Self::Decoration | Self::Art | Self::LawnOrnament => "Decor",
             // (Build mode's, not a buy-mode tab: see `loading::buy_category`.)
             Self::Door => "Misc",
             Self::Meal | Self::DirtyDishes | Self::DrinkTray | Self::Tombstone | Self::Mailbox | Self::Newspaper | Self::GardenPlant | Self::Collectible | Self::FishingSpot | Self::Butterfly | Self::Beetle | Self::Fireplace | Self::PoolLadder | Self::BirthdayCake => "Misc",
@@ -3215,6 +3226,9 @@ pub enum ActionKind {
     /// With a pet rock (`petstones`): playing with it, picking it up, putting it down; where
     /// they go for it, and the way they face there.
     PetStone { stone: Entity, act: crate::petstones::StoneAct, at: Vec2, face: Vec2 },
+    /// A lawn ornament kicked over, or stood up (`ornaments`): from which side (the far one's
+    /// clips mirrored), where they stand for it and the way they face.
+    Ornament { thing: Entity, kick: bool, mirrored: bool, at: Vec2, face: Vec2 },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4154,7 +4168,7 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::TreehouseNow { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } | ActionKind::Ornament { at, .. } => Some((*at, floor.0)),
                         // (Playing on the playground: `playground` turns it into the object's own
                         // play before it's begun.)
                         ActionKind::PlayOnPlayground { .. } => continue,
@@ -4992,7 +5006,7 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } | ActionKind::Ornament { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6648,7 +6662,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;
