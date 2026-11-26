@@ -3182,6 +3182,9 @@ pub enum ActionKind {
     /// Out for a stroll with a baby or toddler in the stroller (`strollers`): from behind it,
     /// where they stand and face.
     Stroll { stroller: Entity, child: Entity, at: Vec2, face: Vec2 },
+    /// Playing on the playground, starting at this object (`playground`: made the object's own
+    /// play before it begins, then on from one thing to the next).
+    PlayOnPlayground { target: Entity },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
     PickUpJump { obstacle: Entity, at: Vec2, face: Vec2 },
     /// Off to the Equestrian Center up on a horse (`equestrian`; `riding` rides off to it): the
@@ -4122,6 +4125,9 @@ pub(crate) fn run_actions(
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
                         ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } => Some((*at, floor.0)),
+                        // (Playing on the playground: `playground` turns it into the object's own
+                        // play before it's begun.)
+                        ActionKind::PlayOnPlayground { .. } => continue,
                         // (Playing pretend where they are: `costumes` walks them about.)
                         ActionKind::PlayPretend { at: None, .. } => {
                             action.phase = Phase::Running(0.0);
@@ -4948,7 +4954,7 @@ pub(crate) fn run_actions(
                             ActionKind::Ride { horse, unsaddle, .. } => {
                                 commands.entity(me).insert(crate::riding::Mounted::new(*horse, *unsaddle));
                             }
-                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } => finished = true,
+                            ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::PlayOnPlayground { .. } => finished = true,
                             // (Beside the posts, turned to them: `trainingposts` sees to the watching.)
                             ActionKind::WatchTraining { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
@@ -7074,6 +7080,9 @@ fn autonomy(
             // (Nor a little one in someone's arms, or being picked up or put down.)
             Without<crate::little::Carried>,
             Without<crate::carry::BeingMoved>,
+            // (Nor a child playing on the playground between one thing and the next:
+            // `playground` sees to what's next.)
+            Without<crate::playground::OnPlayground>,
         ),
     >,
     (objects, seconds, unmade_q, grime_q, staying_q): (

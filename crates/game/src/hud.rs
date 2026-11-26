@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1875,6 +1875,19 @@ fn world_click(
                     .map(|(o, s, ..)| (o, s.full_name()))
                     .collect();
                 options.extend(crate::seesaw::options(t, &stf, &seesaws_res, actor, actor_sim, here, &others, &mut pie.submenus, submenu_kind));
+            }
+            // (A playground thing: playing on the playground, from one thing to the next, with
+            // another free on the lot: `playground`.)
+            if crate::playground::is_playground(obj.kind) && crate::playground::can_play(actor_sim.age) {
+                let lot = playground_q.get(t).ok().and_then(|p| p.2).map(|l| l.0);
+                let cands: Vec<crate::playground::Candidate> = playground_q
+                    .iter()
+                    .filter(|(_, o, l, _)| crate::playground::is_playground(o.kind) && o.kind.usable_by(actor_sim.age) && l.map(|l| l.0) == lot)
+                    .map(|(e, o, _, u)| crate::playground::candidate(actor, e, o.kind, u.and_then(|u| u.0), &seesaws_res, 0))
+                    .collect();
+                if crate::playground::offered(t, &cands) {
+                    options.push((crate::playground::PLAY_ON_PLAYGROUND.to_string(), ActionKind::PlayOnPlayground { target: t }));
+                }
             }
             // (A stroller: out for a stroll with a little one of theirs, `strollers`.)
             if obj.kind == ObjectKind::Stroller

@@ -330,7 +330,7 @@ impl Boards {
 }
 
 /// The action that gets a Sim on from a place.
-fn sit(seesaw: Entity, stf: &Transform, spot: Spot, daredevil: bool, call: Option<Entity>) -> ActionKind {
+pub fn sit(seesaw: Entity, stf: &Transform, spot: Spot, daredevil: bool, call: Option<Entity>) -> ActionKind {
     let (at, face) = spot.world(stf);
     ActionKind::Seesaw { seesaw, spot, join: false, daredevil, call, at, face }
 }
@@ -402,7 +402,7 @@ fn at_seesaw(q: &ActionQueue) -> Option<(Entity, &Action)> {
 
 /// A rider told to stop (their seesaw cancelled from the queue, or put off by something else
 /// asked of them): they get off first, as the game's `Stand` has them, rather than vanish off it.
-fn hold(mut boards: ResMut<Boards>, mut sims: Query<(Entity, &mut ActionQueue)>) {
+pub(crate) fn hold(mut boards: ResMut<Boards>, mut sims: Query<(Entity, &mut ActionQueue)>) {
     for (e, mut q) in &mut sims {
         let Some(a) = q.0.front_mut() else { continue };
         let ActionKind::Seesaw { seesaw, .. } = a.kind else { continue };

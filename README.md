@@ -733,6 +733,20 @@ installation is unreachable.
   and a child, a Childish Sim or anyone bored nearby joins one waiting. `SEESAW_TEST=1` with
   `SEESAW_WHO`, `SEESAW_NEAR`, `SEESAW_WITH`, `SEESAW_JOIN`, `SEESAW_DAREDEVIL=1`,
   `SEESAW_MINUTES`, `SEESAW_PIE=empty|join` (tests).
+  At any of a lot's playground things a child may "Play on Playground" (`PlayOnPlayGround`,
+  offered where there's another free on the lot to go on to, `HaveEnoughPlaygroundObjects`): they
+  play on the first as its own play has them, and once they've spent the game's time on it
+  (`GetTimeToSpendOnThisObject`, the XML's: a spring rider and the lookout tower a quarter hour,
+  the slide, swings, seesaw and sandbox twenty minutes) they go on to another
+  (`TryMovingToAnotherObject`): first one where someone's waiting for a playmate (a seesaw with
+  one sat alone, `PlaygroundObjectNeedsPlayers`), then something of another kind, then another of
+  the same, picked at random among those nobody else is on or headed for; with nothing else free
+  they stay. A go over before its time's up (down the slide), they're drawn to one waiting for a
+  playmate, or have another go. They stop once their fun's full, or something else is asked of
+  them next, or told to (the one on the seesaw gets off first). Children short of fun go and play
+  on the playground of their own accord, the Childish keener (`TraitChildish`'s 200).
+  `PLAYGROUND_TEST=1` with `PLAYGROUND_WHO`, `PLAYGROUND_WITH`, `PLAYGROUND_OBJECTS`,
+  `PLAYGROUND_FUN`, `PLAYGROUND_PIE=1` (tests).
 - **Hopscotch**, as Generations' `HopscotchCourt` (the Hopscotch Court, Hopscotch Asteroids):
   "Practice Hopscotch" alone, "Join" a game going, or "Play Hopscotch With... ›" someone about
   (up to four, `kMaxNumPlayers`; greyed with the game's words, "Maximum number of players

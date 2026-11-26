@@ -1246,6 +1246,10 @@ fn main() {
                 })
                 .collect();
             println!("{o} | {i} | {}", changes.join(", "));
+            // (ITUN_RAW=1: the tuning's whole text, for its ages and flags.)
+            if std::env::var_os("ITUN_RAW").is_some() {
+                println!("{x}");
+            }
         }
         return;
     }
