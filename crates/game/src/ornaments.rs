@@ -236,6 +236,11 @@ pub fn reaction(what: Ornament, kicker_home: bool, their_home: bool, awkward: bo
     }
 }
 
+/// Stood up again there and then, with nobody at it (a magic gnome's own doing: `gnometricks`).
+pub fn stand_up(commands: &mut Commands, thing: Entity) {
+    commands.entity(thing).remove::<(KnockedOver, Posed, crate::objanim::HeldPose, crate::objanim::PlayingClip)>().queue_silenced(|mut w: EntityWorldMut| rest(&mut w));
+}
+
 /// Back as it was made, standing.
 fn rest(w: &mut EntityWorldMut) {
     let kids: Vec<Entity> = w.get::<Children>().map(|c| c.iter().collect()).unwrap_or_default();

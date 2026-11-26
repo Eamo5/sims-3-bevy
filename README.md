@@ -1905,6 +1905,15 @@ installation is unreachable.
   (`kChanceOfAwkwardReaction`), and those whose home it is boo anyone else; a gnome kicked shocks
   those about. Angry Sims kick one in a temper, the Neat stand them up again. Kept in saves.
   `ORNAMENTS_TEST=<instance>` with `ORNAMENTS_WHO`, `ORNAMENTS_AFTER`, `ORNAMENTS_PIE=1` (tests).
+  The magic gnomes are up to tricks at night (`MagicGnomeBase.EnactTrickery`): once a night, at a
+  moment of their own between nine and four (`kTrickeryStartHour`, `kTrickeryEndHour`), one on the
+  household's lot vanishes in a puff of sparkles (`ep2GnomePoof`) and turns up somewhere else as
+  the game's weights have it: by some other thing on the lot, likelier one outdoors, a plant or
+  something dear (`GetGnomeDesirability`), up on a table or counter, by its favourite thing, by
+  the dirtiest thing there having cleaned it (or a puddle mopped), by the television switched on
+  or the stereo playing (`kChanceUseTV`), or just turned about; one kicked over is stood up again,
+  and it waits a quarter of an hour while someone's at it. `GNOME_TEST=1` with
+  `GNOME_TRICK=move|slot|favorite|clean|tv|stereo|pose` (tests).
 - **Dirty surroundings**: dirty dishes left about, food left out until it spoils (eight
   hours) and a full trash can give nearby household Sims the game's *Dirty Surroundings*,
   then *Filthy Surroundings*, moodlets. A dish cleared away (picked up with the game's
