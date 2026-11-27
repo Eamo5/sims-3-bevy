@@ -1702,9 +1702,11 @@ static CAKE: [InteractionDef; 1] =
 /// A food processor's part in cooking (the game's `FoodProcessor.Prepare`, never on the menu):
 /// the ingredients tipped in and whizzed, quicker than chopping them on the counter.
 static FOOD_PROCESSOR: [InteractionDef; 1] = [InteractionDef { autonomous: false, skill: Some("Cooking"), special: Special::PrepFood, ..def("Prepare Food", 8.0, [0.0, 0.0, 0.0, 0.0, -1.0, 4.0], Pose::Use) }];
-static STOVE: [InteractionDef; 2] = [
+static STOVE: [InteractionDef; 3] = [
     InteractionDef { skill: Some("Cooking"), special: Special::ServeMeal, ..def("Cook Dinner", 60.0, [100.0, 0.0, 0.0, 0.0, -5.0, 10.0], Pose::Use) },
     InteractionDef { special: Special::NeuroticCheck, ..def("Check Stove", 5.3, N, Pose::Use) },
+    // (The game's `Stove_Clean`, once it needs it: `grime`.)
+    InteractionDef { special: Special::Scrub, ..def("Clean Stove", 10.0, [0.0, 0.0, -2.0, 0.0, -10.0, -4.0], Pose::Use) },
 ];
 static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
@@ -2532,6 +2534,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Feed Fish" => A::new(None, &["a2o_fishBowl_feed_x"]),
         "Clean Out" if kind == ObjectKind::FishBowl => A::new(None, &["a2o_fishBowl_clean_x"]),
         "Check Stove" => A::new(None, &["a2o_trait_neurotic_check_stove_x"]),
+        // (The sponge to it: `Stove_Clean`'s `Clean - Loop`.)
+        "Clean Stove" => A::new(Some("a2o_stove_clean_start_x"), &["a2o_stove_clean_loop_x", "a2o_stove_clean_loop2_x"]).ending(&["a2o_stove_clean_stop_x"], 1.5),
         "Check Fireplace" => A::new(None, &["a2o_trait_neurotic_check_fireplace_x"]),
         // (The poker in hand, jabbing and catching their breath: the fireplace's `Loop PokeFire`.)
         "Poke Fire" => A::new(Some("a2o_fireplace_poke_start_x"), &["a2o_fireplace_poke_loopjab_x", "a2o_fireplace_poke_loopbreathe_x"]),
@@ -5389,12 +5393,16 @@ pub(crate) fn run_actions(
                                             }
                                         });
                                     }
-                                    // (A bathroom thing used is that much dirtier.)
-                                    if crate::grime::cleanable(obj.kind) && !matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage) && d.special != Special::Scrub && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning)) {
-                                        let traits = sim.traits.clone();
+                                    // (A bathroom thing used is that much dirtier; a stove cooked on.)
+                                    if crate::grime::cleanable(obj.kind)
+                                        && !matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage)
+                                        && !matches!(d.special, Special::Scrub | Special::NeuroticCheck)
+                                        && !upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::SelfCleaning))
+                                    {
+                                        let (traits, dirt) = (sim.traits.clone(), crate::grime::per_use(obj.kind));
                                         commands.entity(*target).queue_silenced(move |mut e: EntityWorldMut| {
                                             if let Some(mut g) = e.get_mut::<crate::grime::Grime>() {
-                                                g.used(&traits);
+                                                g.used_by(dirt, &traits);
                                             }
                                         });
                                     }

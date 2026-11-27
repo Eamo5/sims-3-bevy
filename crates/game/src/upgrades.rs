@@ -3,7 +3,7 @@
 //! ("Boost Channels" for the TV, "Improve Speakers" for the stereo, "Improved Graphics" for the
 //! computer, "Improve Meal Quality" for the stove, "Silent Running" for the dishwasher, "Faster
 //! Cooking" for the microwave, "Improved Crushing" for the trash compactor, a "Clean Polymer
-//! Injection System" for the washing machine), "Self-Cleaning" (the bathroom's),
+//! Injection System" for the washing machine), "Self-Cleaning" (the bathroom's, the stove),
 //! "Fireproof" (the stove, the fireplace), automatic ("Auto Light" for a fireplace after dark,
 //! "Auto Water" for a sprinkler at five each morning), a fireplace's "Change Fire Color", or the
 //! stereo's "Wire House With Speakers", each from its own Handiness level (the tunings'
@@ -89,7 +89,7 @@ impl Upgrade {
             (Upgrade::Improved, K::Microwave) => Some("Faster Cooking"),
             (Upgrade::Improved, K::TrashCompactor) => Some("Improved Crushing"),
             (Upgrade::Improved, K::Washer) => Some("Clean Polymer Injection System"),
-            (Upgrade::SelfCleaning, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Toilet) => Some("Self-Cleaning"),
+            (Upgrade::SelfCleaning, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Toilet | K::Stove) => Some("Self-Cleaning"),
             (Upgrade::Fireproof, K::Stove | K::Fireplace) => Some("Fireproof"),
             (Upgrade::Automatic, K::Fireplace) => Some("Auto Light"),
             (Upgrade::Automatic, K::Sprinkler) => Some("Auto Water"),
@@ -297,6 +297,7 @@ mod tests {
     fn upgrades_are_offered_as_the_games_with_its_levels() {
         use ObjectKind as K;
         assert_eq!(Upgrade::SelfCleaning.name(K::Toilet), Some("Self-Cleaning"));
+        assert_eq!(Upgrade::SelfCleaning.name(K::Stove), Some("Self-Cleaning"));
         assert_eq!(Upgrade::SelfCleaning.name(K::Tv), None);
         assert_eq!(Upgrade::Fireproof.name(K::Stove), Some("Fireproof"));
         assert_eq!(Upgrade::Automatic.name(K::Fireplace), Some("Auto Light"));

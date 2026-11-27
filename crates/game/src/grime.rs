@@ -1,7 +1,9 @@
-//! Bathroom grime, as the game's `CleanableComponent`: toilets, showers, tubs and sinks get
-//! dirtier with every use (Neat Sims leave less, slobs more), look it (the model's own `Dirty`
-//! and `VeryDirty` materials; a clogged toilet its `Clogged` one) and are offered to be cleaned
-//! once they need it.
+//! Bathroom and kitchen grime, as the game's `CleanableComponent`: toilets, showers, tubs and
+//! sinks get dirtier with every use, a stove with every meal cooked on it (`StoveCleanable`, its
+//! tuned `DirtyIncPerUse` 9 to the bathroom's 5), Neat Sims leaving less and slobs more; they
+//! look it (the model's own `Dirty` and `VeryDirty` materials; a clogged toilet its `Clogged`
+//! one) and are offered to be cleaned once they need it ("Clean Stove", the game's sponge and
+//! scrub). A Self-Cleaning one never needs it.
 
 use bevy::prelude::*;
 
@@ -11,7 +13,8 @@ pub struct GrimePlugin;
 
 impl Plugin for GrimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (grime_objects, dirty_looks).run_if(in_state(crate::AppState::InGame)));
+        app.add_systems(Update, (grime_objects, dirty_looks).run_if(in_state(crate::AppState::InGame)))
+            .add_systems(Update, stove_test.run_if(in_state(crate::PlayMode::Live)));
     }
 }
 
@@ -31,9 +34,17 @@ pub const NEEDS_CLEANING: f32 = 25.0;
 const LOOKS_DIRTY: f32 = 30.0;
 const LOOKS_VERY_DIRTY: f32 = 60.0;
 
+/// A stove's per meal (`StoveExpensive`'s tuned `DirtyIncPerUse`).
+pub const STOVE_PER_USE: f32 = 9.0;
+
 impl Grime {
     /// A use's dirt, as the user is: the game's `kDirtyIncNeatMultiplier` and slob's.
     pub fn used(&mut self, traits: &[crate::life::Trait]) {
+        self.used_by(PER_USE, traits);
+    }
+
+    /// A use leaving so much dirt, as the user is.
+    pub fn used_by(&mut self, per_use: f32, traits: &[crate::life::Trait]) {
         let k = if traits.contains(&crate::life::Trait::Neat) {
             0.8
         } else if traits.contains(&crate::life::Trait::Slob) {
@@ -41,7 +52,7 @@ impl Grime {
         } else {
             1.0
         };
-        self.0 = (self.0 + PER_USE * k).min(100.0);
+        self.0 = (self.0 + per_use * k).min(100.0);
     }
 
     pub fn needs_cleaning(&self) -> bool {
@@ -51,7 +62,12 @@ impl Grime {
 
 /// The kinds that get dirty.
 pub fn cleanable(kind: ObjectKind) -> bool {
-    matches!(kind, ObjectKind::Toilet | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::LitterBox | ObjectKind::Terrarium | ObjectKind::BirdCage | ObjectKind::BoxStall)
+    matches!(kind, ObjectKind::Toilet | ObjectKind::Shower | ObjectKind::Bathtub | ObjectKind::ShowerTub | ObjectKind::Sink | ObjectKind::LitterBox | ObjectKind::Terrarium | ObjectKind::BirdCage | ObjectKind::BoxStall | ObjectKind::Stove)
+}
+
+/// What a use of it leaves.
+pub fn per_use(kind: ObjectKind) -> f32 {
+    if kind == ObjectKind::Stove { STOVE_PER_USE } else { PER_USE }
 }
 
 /// Bathroom things start clean.
@@ -60,6 +76,47 @@ fn grime_objects(mut commands: Commands, objects: Query<(Entity, &GameObject), W
         if cleanable(o.kind) {
             commands.entity(e).insert(Grime::default());
         }
+    }
+}
+
+/// `STOVE_TEST=menu|clean` (tests): ten seconds in, the lot's stove filthy, the view on it, and
+/// its menu up or the selected Sim cleaning it.
+fn stove_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut stoves: Query<(Entity, &GameObject, &GlobalTransform, Option<&mut Grime>)>,
+    mut sims: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut done: Local<bool>,
+) {
+    let Ok(what) = std::env::var("STOVE_TEST") else { return };
+    let t = time.elapsed_secs();
+    let Some((e, _, at, grime)) = stoves.iter_mut().find(|(_, o, ..)| o.kind == ObjectKind::Stove) else { return };
+    if t > 7.0
+        && let Ok(mut cam) = cams.single_mut()
+    {
+        let front = at.rotation() * Vec3::Z;
+        cam.look_at(at.translation() + Vec3::Y * 0.5);
+        cam.distance = 6.0;
+        cam.yaw = front.x.atan2(front.z) + 0.5;
+    }
+    if t > 8.0
+        && let Some(mut g) = grime
+        && !*done
+    {
+        g.0 = 70.0;
+    }
+    if *done || t < 10.0 {
+        return;
+    }
+    *done = true;
+    if what == "menu" {
+        commands.insert_resource(crate::hud::PieFor(e));
+        return;
+    }
+    let Some(def) = crate::interact::interactions_for(ObjectKind::Stove).iter().position(|d| d.special == crate::interact::Special::Scrub) else { return };
+    if let Ok(mut q) = sims.single_mut() {
+        q.push_player(crate::interact::Action::new("Clean Stove", crate::interact::ActionKind::Object { target: e, def }, false));
     }
 }
 
@@ -114,5 +171,26 @@ fn dirty_looks(
             }
         }
         states.shown = want;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stove_gets_dirtier_than_a_sink_with_each_use() {
+        assert!(cleanable(ObjectKind::Stove) && cleanable(ObjectKind::Sink));
+        let (mut stove, mut sink) = (Grime::default(), Grime::default());
+        stove.used_by(per_use(ObjectKind::Stove), &[]);
+        sink.used_by(per_use(ObjectKind::Sink), &[]);
+        assert_eq!((stove.0, sink.0), (9.0, 5.0));
+        // (Three meals cooked and it wants cleaning; a Neat cook's leave less.)
+        stove.used_by(per_use(ObjectKind::Stove), &[]);
+        stove.used_by(per_use(ObjectKind::Stove), &[]);
+        assert!(stove.needs_cleaning());
+        let mut neat = Grime::default();
+        neat.used_by(STOVE_PER_USE, &[crate::life::Trait::Neat]);
+        assert!((neat.0 - 7.2).abs() < 1e-4);
     }
 }

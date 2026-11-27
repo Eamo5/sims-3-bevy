@@ -889,7 +889,10 @@ installation is unreachable.
   materials, their dirt drawn over the object's texture (a clogged toilet its Clogged look).
   Once one needs it, "Clean" is offered: the game's scrubbing, with the toilet brush or the
   sponge in hand. Neat Sims clean up on their own; others when it's filthy; slobs never. Kept
-  in saves.
+  in saves. A stove gets dirtier with every meal cooked on it, more than the bathroom's (the
+  game's `StoveCleanable`, its tuned `DirtyIncPerUse` 9), looks it, and once it needs it offers
+  "Clean Stove" (the game's `Stove_Clean`: the sponge to the hob and oven door); a Self-Cleaning
+  one (Handiness 3) never needs it. `STOVE_TEST=menu|clean` (tests).
 - **Toilet etiquette**, as the game's `UseToilet` and its tuning: Sims flush after 95 times in
   a hundred (Neat Sims always, Slobs half the time when told to and never of their own accord),
   and Neat Sims wash their hands at the nearest sink after. A toilet
