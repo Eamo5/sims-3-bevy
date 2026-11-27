@@ -37,7 +37,7 @@ pub struct PhotosPlugin;
 impl Plugin for PhotosPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Grabbed>()
-            .add_systems(Update, (start_grab, grab, aim, photo_taken, titled, photos_gone, frames, photo_test, photo_menu_test).chain().after(crate::interact::run_actions).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (sittings, start_grab, grab, aim, photo_taken, titled, photos_gone, frames, photo_test, photo_menu_test).chain().after(crate::interact::run_actions).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -377,6 +377,118 @@ pub fn can_paint(style: PaintStyle, level: u32, traits: &[crate::life::Trait], m
     }
 }
 
+/// The game's words for a portrait (`PaintPortrait`: "Paint Portrait of..." and its Sim picker,
+/// "Paint Portrait" on the queue, "Pose for Portrait" for whoever sits for it), and for a scene
+/// memorized with the phone and painted later (`MemorizeScene`, `PaintFromMemory`); the Painting
+/// they take (their tunings' `SkillThreshold`).
+pub const PORTRAIT_MENU: &str = "Paint Portrait of...";
+pub const PORTRAIT: &str = "Paint Portrait";
+pub const POSE: &str = "Pose for Portrait";
+pub const MEMORIZE: &str = "Memorize Scene";
+pub const FROM_MEMORY: &str = "Paint from Memory";
+pub const PORTRAIT_LEVEL: u32 = 7;
+pub const MEMORY_LEVEL: u32 = 8;
+
+/// A scene memorized with the phone (`MemorizedScene`): its picture, and the frame it was taken
+/// in (the canvas it's for).
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct Memorized {
+    pub id: String,
+    pub frame: u8,
+}
+
+/// Sitting for a portrait (`PoseForPortrait`): for whom, at which easel, where to stand, and
+/// whether they're there, posing.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Posing {
+    pub painter: Entity,
+    pub easel: Entity,
+    pub spot: Vec2,
+    pub posed: bool,
+    /// When they began posing (seconds), turned to the painter a moment after.
+    pub since: f32,
+}
+
+/// Whether an easel's action waits on its subject before the painting's begun (a still life's or
+/// portrait's grab, a memorized scene).
+pub fn needs_subject(label: &str) -> bool {
+    still_style(label).is_some() || label == PORTRAIT || label == FROM_MEMORY
+}
+
+/// Where someone sits for a portrait: before the easel, the painter's side of it opposite
+/// (`RouteToObjectRadius` two metres off).
+pub fn pose_spot(easel_at: Vec3, painter_at: Vec2) -> Vec2 {
+    let e = easel_at.xz();
+    e + (e - painter_at).normalize_or(Vec2::Y) * 1.6
+}
+
+/// A portrait begun: the painter to the easel ("Paint Portrait"), and whoever's painted to stand
+/// before it and pose ("Pose for Portrait").
+pub fn sit_for_portrait(w: &mut World, painter: Entity, paintee: Entity, easel: Entity) {
+    let Some(def) = w.get::<crate::interact::GameObject>(easel).and_then(|o| crate::interact::interactions_for(o.kind).iter().position(|d| d.special == crate::interact::Special::SellPainting)) else { return };
+    let Some((o, tf)) = w.get::<crate::interact::GameObject>(easel).cloned().zip(w.get::<Transform>(easel).copied()) else { return };
+    let level = w.get::<crate::nav::Floor>(easel).map_or(1, |f| f.0);
+    let spot = pose_spot(tf.translation, o.use_point(&tf));
+    if let Some(mut q) = w.get_mut::<ActionQueue>(painter) {
+        q.push_player(Action::new(PORTRAIT, ActionKind::Object { target: easel, def }, false));
+    }
+    if let Some(mut q) = w.get_mut::<ActionQueue>(paintee) {
+        q.push_player(Action::new(POSE, ActionKind::GoHere(spot, level), false));
+    }
+    w.entity_mut(paintee).insert(Posing { painter, easel, spot, posed: false, since: 0.0 });
+    info!("photos: a portrait at the {}", o.name);
+}
+
+/// Those sitting for portraits: once at their spot, posing (an idle, turned to the painter) for
+/// as long as the painter's at it; let go when the painter's done or has stopped.
+#[allow(clippy::type_complexity)]
+fn sittings(mut commands: Commands, time: Res<Time>, mut sims: Query<(Entity, &Sim, &Transform, &mut ActionQueue, Option<&mut Posing>)>) {
+    let sitters: Vec<(Entity, Posing)> = sims.iter().filter_map(|(e, _, _, _, p)| p.map(|p| (e, *p))).collect();
+    for (e, p) in sitters {
+        let painting = sims.get(p.painter).is_ok_and(|(_, _, _, q, _)| q.0.iter().any(|a| a.label == PORTRAIT && !a.cancel));
+        let painter_at = sims.get(p.painter).map(|s| s.2.translation).ok();
+        let Ok((_, sim, tf, mut q, posing)) = sims.get_mut(e) else { continue };
+        let Some(mut posing) = posing else { continue };
+        if !painting {
+            for a in q.0.iter_mut().filter(|a| a.label == POSE) {
+                a.cancel = true;
+            }
+            commands.entity(e).remove::<Posing>();
+            continue;
+        }
+        // (On the way still, or something before it to finish first.)
+        let walking = q.0.iter().any(|a| a.label == POSE && !a.cancel && matches!(a.kind, ActionKind::GoHere(..)));
+        if posing.posed || walking {
+            continue;
+        }
+        // (Not there after all (the way there failed): close enough, as the game's radius.)
+        if tf.translation.xz().distance(posing.spot) > 3.0 {
+            debug!("photos: {} posing short of the spot", sim.first);
+        }
+        // (There: posing, an idle, turned to the painter, till the portrait's captured.)
+        posing.posed = true;
+        posing.since = time.elapsed_secs();
+        q.0.push_front(Action::new(POSE, ActionKind::Outro { clips: &[], then: None, secs: 600.0, stand_at: None, target: p.easel }, false));
+        let idle: &'static [&'static str] = if sim.age == Age::Child { &["c_idle_neutral_loop_"] } else { &["a_idle_neutral_loop_"] };
+        commands.entity(e).insert(crate::anim::ActionClip::new(None, idle));
+        if let Some(at) = painter_at {
+            let d = at - tf.translation;
+            commands.entity(e).insert(crate::reactions::Facing(Quat::from_rotation_y(d.x.atan2(d.z))));
+        }
+        info!("photos: {} poses for a portrait", sim.first);
+    }
+}
+
+/// A portrait sitter let go: posing no more.
+fn release(commands: &mut Commands, sims: &mut Query<(&Transform, &Sim, &mut ActionQueue, Option<&crate::sim::PlumbobRef>)>, paintee: Entity) {
+    commands.entity(paintee).remove::<Posing>();
+    if let Ok((.., mut q, _)) = sims.get_mut(paintee) {
+        for a in q.0.iter_mut().filter(|a| a.label == POSE) {
+            a.cancel = true;
+        }
+    }
+}
+
 /// The still life an easel's action is painting, by its name on the menu.
 pub fn still_style(label: &str) -> Option<PaintStyle> {
     if label == STILL_LIFE {
@@ -553,11 +665,25 @@ const KEY_ZOOM_OUT: u32 = 0x0880_27AB;
 const DISABLED: u32 = 0x998D_8D8D;
 const MOST_SHOTS: i64 = 100;
 
+/// What a painter's grab is for: a still life, a portrait of someone posing at the easel
+/// (`PaintPortrait`), or a scene memorized with the phone to paint later (`MemorizeScene`).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Purpose {
+    #[default]
+    StillLife,
+    Portrait {
+        paintee: Entity,
+        easel: Entity,
+    },
+    Memorize,
+}
+
 /// A picture taken: by whom, for what, its picture (by id) and the frame it was taken in.
 #[derive(Message, Clone, Debug)]
 pub struct Grabbed {
     pub sim: Entity,
     pub kind: GrabKind,
+    pub purpose: Purpose,
     pub id: String,
     pub frame: usize,
     /// A camera's photo: its size and style, and whether it came out spoilt.
@@ -574,6 +700,7 @@ pub struct Grabbed {
 pub struct Grabbing {
     pub sim: Entity,
     pub kind: GrabKind,
+    pub purpose: Purpose,
     /// The action it's for (its name on the queue).
     label: String,
     style: Style,
@@ -621,6 +748,7 @@ impl Grabbing {
         Grabbing {
             sim,
             kind,
+            purpose: Purpose::default(),
             label: label.to_string(),
             style: Style::Plain,
             stage: Stage::Open,
@@ -656,43 +784,88 @@ pub fn take_photo_with(camera: &'static CameraModel) -> ActionKind {
     ActionKind::TakePhoto { camera: Some(camera.name) }
 }
 
-/// Whether the action's a still life at an easel, not yet begun on (its subject's still to be
-/// captured): its style.
-fn still_life(a: &Action, objects: &Query<&crate::interact::GameObject>, plan: Option<&crate::paintings::PaintPlan>) -> Option<PaintStyle> {
+/// Whether the action's at an easel with its subject still to come (a still life's, a portrait's
+/// or a memory's, not yet begun on): the easel, and its style (a portrait's and a memory's
+/// plain).
+fn at_easel(a: &Action, objects: &Query<&crate::interact::GameObject>, plan: Option<&crate::paintings::PaintPlan>) -> Option<(Entity, PaintStyle)> {
     let ActionKind::Object { target, def } = a.kind else { return None };
     let o = objects.get(target).ok()?;
-    if crate::interact::interactions_for(o.kind).get(def).is_none_or(|d| d.special != crate::interact::Special::SellPainting) {
+    if crate::interact::interactions_for(o.kind).get(def).is_none_or(|d| d.special != crate::interact::Special::SellPainting) || !needs_subject(&a.label) {
         return None;
     }
-    let style = still_style(&a.label)?;
-    (!plan.is_some_and(|p| p.painted.as_ref().is_some_and(|x| still(&x.key).is_some()))).then_some(style)
+    let style = still_style(&a.label).unwrap_or(PaintStyle::Basic);
+    (!plan.is_some_and(|p| p.painted.as_ref().is_some_and(|x| still(&x.key).is_some()))).then_some((target, style))
 }
 
-/// The selected Sim's photo begun, or their still life: the grab.
-#[allow(clippy::type_complexity)]
+/// The selected Sim's photo begun, or their still life, portrait or scene to memorize: the grab
+/// (a portrait's once the sitter's posing). A memory painted: its picture, straight on.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn start_grab(
     mut commands: Commands,
     grabbing: Option<Res<Grabbing>>,
-    sims: Query<(Entity, &ActionQueue, Option<&crate::paintings::PaintPlan>, &crate::interact::Skills, Option<&CameraSettings>), With<Selected>>,
+    mut sims: Query<(Entity, &mut ActionQueue, Option<&crate::paintings::PaintPlan>, &crate::interact::Skills, Option<&CameraSettings>, Option<&Memorized>, &Sim), With<Selected>>,
+    sitters: Query<(Entity, &Posing)>,
     objects: Query<&crate::interact::GameObject>,
-    time: Res<Time>,
+    (time, baked): (Res<Time>, Option<Res<crate::baked::Baked>>),
+    (wishes_q, journals_q): (Query<&crate::wishes::Wishes>, Query<&crate::journal::SkillJournal>),
 ) {
     if grabbing.is_some() {
         return;
     }
-    for (e, q, plan, skills, settings) in &sims {
-        let Some(a) = q.0.front().filter(|a| !a.cancel && matches!(a.phase, Phase::Running(_))) else { continue };
+    for (e, mut q, plan, skills, settings, memorized, sim) in &mut sims {
+        let Some(a) = q.0.front_mut().filter(|a| !a.cancel && matches!(a.phase, Phase::Running(_))) else { continue };
+        let mut purpose = Purpose::StillLife;
         let kind = if let ActionKind::TakePhoto { camera: model } = a.kind {
             match model.and_then(camera) {
+                _ if a.label == MEMORIZE => {
+                    purpose = Purpose::Memorize;
+                    GrabKind::Painting(PaintStyle::Basic)
+                }
                 Some(c) => GrabKind::Camera(c),
                 None => GrabKind::Phone,
             }
-        } else if let Some(style) = still_life(a, &objects, plan) {
+        } else if let Some((easel, style)) = at_easel(a, &objects, plan) {
+            if a.label == FROM_MEMORY {
+                // (A memory: painted straight from its picture, on the canvas it was framed for;
+                // none, nothing to paint.)
+                let Some(m) = memorized else {
+                    a.cancel = true;
+                    continue;
+                };
+                let mut rng = rand::rng();
+                let size = m.frame.min(2);
+                let mut p = crate::paintings::paint(
+                    baked.as_ref().map(|b| &b.0.paintings),
+                    size,
+                    skills.level("Painting"),
+                    &sim.traits,
+                    sim.age == Age::Child,
+                    crate::wishes::has(wishes_q.get(e).ok(), "ExtraCreative"),
+                    crate::journal::earned(journals_q.get(e).ok(), "Proficient Painter"),
+                    &mut rng,
+                );
+                p.key = still_key(size, PaintStyle::Basic, &m.id, rand::Rng::random(&mut rng));
+                commands.entity(e).insert(crate::paintings::PaintPlan { size, painted: Some(p) });
+                info!("photos: {} paints from memory", sim.first);
+                continue;
+            }
+            if a.label == PORTRAIT {
+                // (Not till the sitter's posing; nobody sitting, nothing to paint.)
+                match sitters.iter().find(|(_, p)| p.painter == e) {
+                    Some((paintee, p)) if p.posed && time.elapsed_secs() - p.since > 1.5 => purpose = Purpose::Portrait { paintee, easel },
+                    Some(_) => continue,
+                    None => {
+                        a.cancel = true;
+                        continue;
+                    }
+                }
+            }
             GrabKind::Painting(style)
         } else {
             continue;
         };
         let mut g = Grabbing::new(kind, e, &a.label);
+        g.purpose = purpose;
         g.auto = std::env::var("PHOTO_CAPTURE_AT").ok().and_then(|v| v.parse().ok());
         g.frame = std::env::var("PHOTO_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
         // (A camera's: its default size and mode, as far as the photographer's skill goes.)
@@ -707,6 +880,18 @@ fn start_grab(
         info!("photos: a screen grab ({kind:?})");
     }
 }
+
+/// A portrait's camera: at the sitter's face (`kPortraitOffsetAdult`, `...Teen`, `...Child`,
+/// `...Toddler`), so far before it.
+fn portrait_height(age: Age) -> f32 {
+    match age {
+        Age::Child => 1.174,
+        Age::Teen => 1.601,
+        a if a.is_little() => 0.36,
+        _ => 1.722,
+    }
+}
+const PORTRAIT_DISTANCE: f32 = 1.6;
 
 /// How high a Sim's eyes are, by their age.
 fn eye_height(age: Age) -> f32 {
@@ -834,7 +1019,26 @@ fn grab(
             if let Ok(cam) = cams.single() {
                 g.view = Some((cam.focus, cam.yaw, cam.pitch, cam.distance, cam.height_offset, cam.follow));
             }
-            if let (Ok(mut cam), Ok((tf, sim, ..))) = (cams.single_mut(), sims.get(g.sim)) {
+            let painter_at = sims.get(g.sim).map(|s| s.0.translation).ok();
+            let portrait = match g.purpose {
+                Purpose::Portrait { paintee, .. } => sims.get(paintee).ok().map(|(tf, sim, ..)| (*tf, sim.age)),
+                _ => None,
+            };
+            if let (Ok(mut cam), Some((tf, age))) = (cams.single_mut(), portrait) {
+                // (A portrait's: the camera locked on the sitter's face, before them, from the
+                // painter's side (`GrabPortrait`'s `LockOnObject`, at the age's
+                // `kPortraitOffset`), the painter and the easel faded out of the way.)
+                let f = painter_at.map(|p| (p - tf.translation).with_y(0.0).normalize_or_zero()).filter(|f| *f != Vec3::ZERO).unwrap_or(tf.rotation * Vec3::Z);
+                let head = tf.translation + Vec3::Y * portrait_height(age);
+                let eye = head + f * PORTRAIT_DISTANCE + Vec3::Y * 0.1;
+                cam.photo = Some(crate::camera::PhotoView {
+                    eye,
+                    yaw: f.x.atan2(f.z),
+                    pitch: -0.05,
+                    fov: crate::camera::FOV.to_radians(),
+                    fovs: ((crate::camera::FOV * 0.5).to_radians(), crate::camera::FOV.to_radians()),
+                });
+            } else if let (Ok(mut cam), Ok((tf, sim, ..))) = (cams.single_mut(), sims.get(g.sim)) {
                 if phone {
                     // The camera to their eyes, looking the way they face.
                     let f = tf.rotation * Vec3::Z;
@@ -868,8 +1072,9 @@ fn grab(
                 }
             }
             hide(g, &mut roots, &mut seen, &sims);
-            // (The walls up for a phone's photo, from the Sim's eyes: `SetWallsViewMode`.)
-            if phone {
+            // (The walls up for a phone's photo, from the Sim's eyes, and a portrait's:
+            // `SetWallsViewMode`.)
+            if phone || matches!(g.purpose, Purpose::Portrait { .. }) {
                 g.walls = Some(*walls);
                 *walls = crate::building::WallMode::Up;
             }
@@ -1081,7 +1286,7 @@ fn grab(
                 match std::fs::write(&path, s3bake::gamedata::encode_rgba_png(cw, ch, &pic)) {
                     Ok(()) => {
                         info!("photos: took a {cw}x{ch} picture ({})", path.display());
-                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, id, frame: g.frame, size: g.size, style: g.style, spoilt, subject: g.subject.clone() });
+                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, purpose: g.purpose, id, frame: g.frame, size: g.size, style: g.style, spoilt, subject: g.subject.clone() });
                         done = Some(true);
                     }
                     Err(e) => {
@@ -1159,10 +1364,15 @@ fn hide(
             *v = Visibility::Hidden;
         }
     }
-    // (A painter stays at the easel, in sight; only their plumbob's put away.)
+    // (A painter stays at the easel, in sight; only their plumbob's put away. Painting a portrait,
+    // they and the easel are faded out of the way, as the game's `FadeOut`.)
     let bob = sims.get(g.sim).ok().and_then(|s| s.3.map(|p| p.0));
-    let sim = (!matches!(g.kind, GrabKind::Painting(_))).then_some(g.sim);
-    for e in sim.into_iter().chain(bob) {
+    let easel = match g.purpose {
+        Purpose::Portrait { easel, .. } => Some(easel),
+        _ => None,
+    };
+    let sim = (!matches!(g.kind, GrabKind::Painting(_)) || easel.is_some() || g.purpose == Purpose::Memorize).then_some(g.sim);
+    for e in sim.into_iter().chain(bob).chain(easel) {
         if let Ok(mut v) = seen.get_mut(e)
             && *v != Visibility::Hidden
         {
@@ -1205,7 +1415,8 @@ fn finish(
             (cam.focus, cam.yaw, cam.pitch, cam.distance, cam.height_offset, cam.follow) = (focus, yaw, pitch, distance, height, follow);
         }
     }
-    // (A phone's photo done; a still life's painting begun, or, its subject not captured, not.)
+    // (A phone's photo done, a scene memorized; a still life's or portrait's painting begun, or,
+    // its subject not captured, not; a portrait's sitter let go either way.)
     if let Ok((.., mut q, _)) = sims.get_mut(g.sim)
         && let Some(a) = q.0.front_mut()
         && a.label == g.label
@@ -1214,9 +1425,15 @@ fn finish(
             GrabKind::Phone | GrabKind::Camera(_) => {
                 q.0.pop_front();
             }
+            GrabKind::Painting(_) if g.purpose == Purpose::Memorize => {
+                q.0.pop_front();
+            }
             GrabKind::Painting(_) if !taken => a.cancel = true,
             GrabKind::Painting(_) => {}
         }
+    }
+    if let Purpose::Portrait { paintee, .. } = g.purpose {
+        release(commands, sims, paintee);
     }
     info!("photos: the grab's over ({})", if taken { "taken" } else { "put away" });
     commands.remove_resource::<Grabbing>();
@@ -1283,6 +1500,11 @@ fn photo_taken(
                 }
                 info!("photos: {} took a {} {} photo, \"{title}\" ({:?}), worth §{worth}, {points} points{}", sim.first, style_name(g.style), size_name(g.size), g.subject.as_ref().map(|s| &s.0), if g.spoilt.is_some() { " (spoilt)" } else { "" });
             }
+            // (A scene memorized: kept in mind to paint from later, the last one forgotten.)
+            GrabKind::Painting(_) if g.purpose == Purpose::Memorize => {
+                commands.entity(g.sim).insert(Memorized { id: g.id.clone(), frame: g.frame.min(2) as u8 });
+                info!("photos: a scene memorized ({})", g.id);
+            }
             GrabKind::Painting(style) => {
                 let Ok((sim, skills, wishes, journal, _)) = sims.get(g.sim) else { continue };
                 let size = g.frame.min(2) as u8;
@@ -1298,7 +1520,7 @@ fn photo_taken(
                     &mut rng,
                 );
                 p.key = still_key(size, style, &g.id, rand::Rng::random(&mut rng));
-                info!("photos: {} paints a still life ({}, {})", sim.first, style.name(), p.key);
+                info!("photos: {} paints {} ({}, {})", sim.first, if matches!(g.purpose, Purpose::Portrait { .. }) { "a portrait" } else { "a still life" }, style.name(), p.key);
                 commands.entity(g.sim).insert(crate::paintings::PaintPlan { size, painted: Some(p) });
             }
         }
@@ -1652,6 +1874,7 @@ fn photo_test(
     mut cams: Query<&mut crate::camera::SimsCamera>,
     mut stage: Local<(u8, f32)>,
     (world, mut wall_mode, grid, mut put_down): (Res<crate::loading::CurrentWorld>, ResMut<crate::building::WallMode>, Option<Res<crate::nav::NavGrid>>, Local<bool>),
+    (others, memorized): (Query<Entity, (With<Sim>, With<crate::sim::HouseholdMember>, Without<Selected>)>, Query<(), With<Memorized>>),
 ) {
     if std::env::var_os("PHOTO_TEST").is_none() {
         return;
@@ -1733,6 +1956,20 @@ fn photo_test(
                     return;
                 }
                 let def = crate::interact::interactions_for(crate::interact::ObjectKind::Easel).iter().position(|d| d.special == crate::interact::Special::SellPainting).unwrap_or(0);
+                // (PHOTO_STILL=portrait: one of the household sitting for a portrait; =memory: a
+                // scene memorized with the phone, then painted from memory.)
+                if style == "portrait" {
+                    let Some(paintee) = others.iter().next() else { return };
+                    commands.queue(move |w: &mut World| sit_for_portrait(w, me, paintee, easel));
+                    info!("photo test: painting a portrait");
+                    return;
+                }
+                if style == "memory" {
+                    q.push_player(Action::new(MEMORIZE, take_photo(me), false));
+                    *stage = (7, now);
+                    info!("photo test: memorizing a scene");
+                    return;
+                }
                 let label = PaintStyle::ALL.into_iter().find(|s| s.name().eq_ignore_ascii_case(style)).filter(|s| *s != PaintStyle::Basic).map_or(STILL_LIFE, |s| s.name());
                 q.push_player(Action::new(label, ActionKind::Object { target: easel, def }, false));
                 info!("photo test: painting a still life ({label})");
@@ -1740,6 +1977,16 @@ fn photo_test(
             }
             q.push_player(Action::new(TAKE_PHOTO, take_photo(me), false));
             info!("photo test: taking a photo");
+        }
+        // (A scene memorized: painted from memory at the easel.)
+        7 if grabbing.is_none() && memorized.contains(me) && now - stage.1 > 2.0 => {
+            let easel = objects.iter().find(|(_, o, _)| o.kind == crate::interact::ObjectKind::Easel).map(|e| e.0);
+            let def = crate::interact::interactions_for(crate::interact::ObjectKind::Easel).iter().position(|d| d.special == crate::interact::Special::SellPainting).unwrap_or(0);
+            if let Some(easel) = easel {
+                q.push_player(Action::new(FROM_MEMORY, ActionKind::Object { target: easel, def }, false));
+                info!("photo test: painting from memory");
+            }
+            *stage = (1, now);
         }
         // (The camera's menu in the inventory.)
         8 if now - stage.1 > 1.0 => {
@@ -1922,6 +2169,17 @@ mod tests {
 
     fn photo_stack() -> Stack {
         Stack { kind: ItemKind::Photo, key: "photo:1:0:ab".into(), name: UNTITLED.into(), quality: 0, count: 1, worth: 0 }
+    }
+
+    #[test]
+    fn portraits_and_memories_wait_on_their_subjects() {
+        assert!(needs_subject(PORTRAIT) && needs_subject(FROM_MEMORY) && needs_subject(STILL_LIFE) && needs_subject("Genius"));
+        assert!(!needs_subject("Paint: Small") && !needs_subject(POSE));
+        // (The sitter before the easel, across it from the painter.)
+        let spot = pose_spot(Vec3::new(5.0, 0.0, 5.0), Vec2::new(5.0, 4.0));
+        assert!((spot - Vec2::new(5.0, 6.6)).length() < 1e-4);
+        assert_eq!((PORTRAIT_LEVEL, MEMORY_LEVEL), (7, 8));
+        assert!(portrait_height(Age::Adult) > portrait_height(Age::Child));
     }
 
     #[test]

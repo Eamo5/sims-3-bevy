@@ -188,6 +188,9 @@ pub struct SavedSim {
     /// Their forum posts out (`forums`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forum_posts: Vec<crate::forums::Post>,
+    /// A scene memorized to paint from (`photos`): its picture and frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memorized_scene: Option<(String, u8)>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -764,6 +767,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         camera_settings: Vec::new(),
         photo_records: Vec::new(),
         forum_posts: Vec::new(),
+        memorized_scene: None,
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -1071,7 +1075,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>, Option<&crate::photos::Memorized>),
                     Has<crate::town::Townie>,
                     Has<crate::visit::LotGuest>,
                 ),
@@ -1129,7 +1133,7 @@ fn save_game(
     // (Passers-by are kept only once the household knows them: then as Sims met, away.)
     let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts), townie, guest))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts, memorized), townie, guest))) in &sims {
         if (townie || guest) && !known.contains(&e) {
             continue;
         }
@@ -1222,6 +1226,7 @@ fn save_game(
             camera_settings: camera_settings.map(|c| c.to_saved()).unwrap_or_default(),
             photo_records: photo_records.map(|r| r.to_saved()).unwrap_or_default(),
             forum_posts: forum_posts.map(|p| p.0.clone()).unwrap_or_default(),
+            memorized_scene: memorized.map(|m| (m.id.clone(), m.frame)),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1530,6 +1535,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.forum_posts.is_empty() {
             ec.insert(crate::forums::Posts(s.forum_posts.clone()));
+        }
+        if let Some((id, frame)) = s.memorized_scene.clone() {
+            ec.insert(crate::photos::Memorized { id, frame });
         }
         if !s.skill_books.is_empty() {
             ec.insert(crate::skillbooks::SkillBooks(s.skill_books.clone()));

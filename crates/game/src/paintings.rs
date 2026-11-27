@@ -281,7 +281,7 @@ fn easel_canvases(
             continue;
         }
         // (A still life not begun till its subject's captured: `photos`.)
-        if crate::photos::still_style(&a.label).is_some() && !plan.as_ref().is_some_and(|p| p.painted.as_ref().is_some_and(|x| crate::photos::still(&x.key).is_some())) {
+        if crate::photos::needs_subject(&a.label) && !plan.as_ref().is_some_and(|p| p.painted.as_ref().is_some_and(|x| crate::photos::still(&x.key).is_some())) {
             continue;
         }
         let level = skills.level("Painting");

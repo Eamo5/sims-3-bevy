@@ -1181,6 +1181,17 @@ installation is unreachable.
   gloom; it shows on the canvas as they paint, on its tile in their inventory and wherever it's
   hung, kept in saves. `PHOTO_TEST=1` with `PHOTO_STILL=basic|genius|insane|somber`,
   `PHOTO_LEVEL`, `PHOTO_FRAME=<0-2>`, `PHOTO_FAST=1` (tests).
+- **Portraits and paintings from memory**, as the game's `PaintPortrait`, `PoseForPortrait`,
+  `MemorizeScene` and `PaintFromMemory`: from Painting seven an easel's menu has "Paint Portrait
+  of... ›" with everyone about the lot but babies; the painter goes to the easel and whoever's
+  chosen to stand before it across from them, turns to the painter and poses ("Pose for
+  Portrait", an idle), and once they're there the same "Capture Subject" grab comes up with the
+  camera locked on the sitter's face (`GrabPortrait`'s `LockOnObject` at the age's
+  `kPortraitOffset`), the painter and easel faded out of the way; captured, the sitter's let go
+  and the portrait's painted from it as a still life is. From Painting eight the phone has
+  "Memorize Scene": the grab, framed by the player with the Sim faded out, kept in mind (the last
+  one, in saves), and the easel's "Paint from Memory" paints it straight on the canvas it was
+  framed for. `PHOTO_STILL=portrait|memory|menu` (tests).
 - **Cameras and Photography**, as World Adventures' `Camera` and the `Photography` skill: the
   SnapTastic Flimsy-Cam, the ChannonTec Outlaw SE and the Hikon QX40di Gladiator are bought and
   put on the lot, "Put In Inventory" (the game's swipe), and from the inventory children and up

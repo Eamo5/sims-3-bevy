@@ -1240,7 +1240,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res, cobras_q, (nectar_q, recipes_q, posts_q, fire_colors_q))))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res, cobras_q, (nectar_q, recipes_q, posts_q, fire_colors_q, memorized_q))))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1249,7 +1249,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>, Query<(), With<crate::snakecharm::KingCobra>>, (Query<&crate::nectar::Maker>, Query<&crate::nectar::Recipes>, Query<&crate::forums::Posts>, Query<&crate::fireplace::FireColor>))),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>, Query<(), With<crate::snakecharm::KingCobra>>, (Query<&crate::nectar::Maker>, Query<&crate::nectar::Recipes>, Query<&crate::forums::Posts>, Query<&crate::fireplace::FireColor>, Query<(), With<crate::photos::Memorized>>))),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -2910,6 +2910,24 @@ fn world_click(
                             pie.submenus.push((crate::photos::STYLIZED.trim_end_matches('.').to_string(), styles));
                         }
                     }
+                    // (A portrait of someone about the lot, from level seven, and a scene
+                    // memorized with the phone, from eight: the game's `PaintPortrait`,
+                    // `PaintFromMemory`.)
+                    if level >= crate::photos::PORTRAIT_LEVEL {
+                        let here = on_lot.get(actor).ok().map(|l| l.0);
+                        let list: Vec<(String, ActionKind)> = company_q
+                            .iter()
+                            .filter(|c| c.0 != actor && c.1.age != crate::sim::Age::Baby && c.3.map(|l| l.0) == here)
+                            .map(|c| (c.1.full_name(), ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        if !list.is_empty() {
+                            options.push((format!("{} ›", crate::photos::PORTRAIT_MENU), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((crate::photos::PORTRAIT_MENU.to_string(), list));
+                        }
+                    }
+                    if level >= crate::photos::MEMORY_LEVEL && memorized_q.contains(actor) {
+                        options.push((crate::photos::FROM_MEMORY.to_string(), ActionKind::Object { target: t, def: i }));
+                    }
                     continue;
                 }
                 if d.special == Special::ToggleAlarm {
@@ -3466,6 +3484,14 @@ fn pie_buttons(
     {
         q.push_player(Action::new(label.clone(), kind.clone(), false));
         commands.entity(a).insert(crate::potty::PottyTraining { toddler, asked: false });
+        return;
+    }
+    // A portrait of someone: the painter to the easel, the sitter before it (`photos`).
+    if title == crate::photos::PORTRAIT_MENU
+        && let ActionKind::Object { target, .. } = kind
+        && let (Some(a), Some(paintee)) = (actor, people.iter().find(|p| p.1.full_name() == label).map(|p| p.0))
+    {
+        commands.queue(move |w: &mut World| crate::photos::sit_for_portrait(w, a, paintee, target));
         return;
     }
     // Chess with someone: both to the table, a chair each.
@@ -4478,6 +4504,7 @@ fn phone_button(
     ),
     world: Res<CurrentWorld>,
     ui: Option<Res<crate::layout::UiAssets>>,
+    painters: Query<&crate::interact::Skills>,
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -4504,9 +4531,13 @@ fn phone_button(
         let why = ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Electronics/Phone/CallForServices:ServicesOnlyOnHomeLot")).unwrap_or_else(|| "You can only call for services on your home lot.".into());
         options[0].1 = ActionKind::Greyed(why);
     }
-    // (A photo with the phone's camera, children and up: `photos`.)
+    // (A photo with the phone's camera, children and up; a scene memorized to paint, from
+    // Painting 8: `photos`.)
     if !me.age.is_little() {
         options.push((crate::photos::TAKE_PHOTO.to_string(), crate::photos::take_photo(actor)));
+        if painters.get(actor).is_ok_and(|s| s.level("Painting") >= crate::photos::MEMORY_LEVEL) {
+            options.push((crate::photos::MEMORIZE.to_string(), crate::photos::take_photo(actor)));
+        }
     }
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();
