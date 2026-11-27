@@ -1538,6 +1538,8 @@ pub enum Special {
     PostAway,
     /// Something swiped posted back at the mailbox (`klepto`).
     ReturnStolen,
+    /// A teen hanging out up on a jungle gym or slide (`play_age_ok`).
+    HangOut,
     /// A garden plant fertilized, revived, talked to, or disposed of (`gardening`).
     Fertilize,
     RevivePlant,
@@ -2090,9 +2092,12 @@ static DOLLHOUSE: [InteractionDef; 3] = [
     InteractionDef { special: Special::SmashDollhouse, ..def("Smash", crate::dollhouse::ADULT_MINUTES, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::DisposeDollhouse, ..def("Throw Away", 2.0, N, Pose::Use) },
 ];
-static JUNGLEGYM: [InteractionDef; 1] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use)];
+static JUNGLEGYM: [InteractionDef; 2] = [def("Play on Jungle Gym", 40.0, [0.0, 0.0, -8.0, 0.0, -8.0, 95.0], Pose::Use), HANG_OUT];
+/// A teen's hanging out up on a jungle gym or slide (the game's `JungleGym.HangOutOn`: teens only,
+/// Fun 30 an hour till they've had their fill).
+const HANG_OUT: InteractionDef = InteractionDef { special: Special::HangOut, until_full: Some(FUN), ..def("Hang Out On", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 30.0], Pose::Use) };
 /// (Up the ladder and down the slide, once: played again and again, as children do.)
-static SLIDE: [InteractionDef; 1] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use)];
+static SLIDE: [InteractionDef; 2] = [def("Play on Slide", 9.6, [0.0, 0.0, -8.0, 0.0, -6.0, 110.0], Pose::Use), HANG_OUT];
 /// (A spring rider ridden a quarter to a half hour, the game's `kTimeRangeForRiding`: Fun 100 an
 /// hour, `Ride`'s tuning.)
 static SPRING_RIDER: [InteractionDef; 1] = [def("Ride", 22.5, [0.0, 0.0, -4.0, 0.0, 0.0, 100.0], Pose::Use)];
@@ -2697,6 +2702,9 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (Up the tower's ladder, about in its lookout, and down its pole at the end.)
         "Play on Jungle Gym" => A::new(Some("c2o_JungleGymTower_climbUp_x"), &["c2o_JungleGymTower_loop1_x", "c2o_JungleGymTower_loop2_x"]).ending(&["c2o_JungleGymTower_slideDown_x"], 6.1),
         "Play on Slide" => A::steps("c2o_JungleGymSlide_climbUp_x", &["c2o_JungleGymSlide_breathe_x"], &["c2o_JungleGymSlide_succeed_x"]),
+        // (A teen up there: the `t2o_` climb, idles, and down again.)
+        "Hang Out On" if kind == ObjectKind::Slide => A::new(Some("t2o_JungleGymSlide_climbUp_x"), &["t2o_JungleGymSlide_idle1_x", "t2o_JungleGymSlide_idle2_x", "t2o_JungleGymSlide_idle3_x", "t2o_JungleGymSlide_idle_breathe_x"]).ending(&["t2o_JungleGymSlide_slideDown_x"], 2.2),
+        "Hang Out On" => A::new(Some("t2o_JungleGymTower_climbUp_x"), &["t2o_JungleGymTower_breath_x"]).ending(&["t2o_JungleGymTower_slideDown_x"], 7.1),
         // (Up onto it, rocking on its springs, and off: the playground ride's clips, the ride
         // rocking with its own half of them.)
         "Ride" if kind == ObjectKind::SpringRider => A::new(Some("c2o_playgroundRide_start_x"), &["c2o_playgroundRide_loop1_x", "c2o_playgroundRide_loop2_x", "c2o_playgroundRide_loop3_x", "c2o_playgroundRide_loop4_x"])
@@ -3030,6 +3038,31 @@ pub fn social_clips(name: &str, little: Option<Age>, held: bool) -> &'static [&'
     }
 }
 
+/// A jungle gym's or slide's play is a child's, its hanging out a teen's (the game's `PlayOn` C,
+/// `HangOutOn` T).
+pub fn play_age_ok(d: &InteractionDef, kind: ObjectKind, age: Age) -> bool {
+    !matches!(kind, ObjectKind::JungleGym | ObjectKind::Slide) || (d.special == Special::HangOut) == (age == Age::Teen)
+}
+
+#[cfg(test)]
+mod hang_out_tests {
+    use super::*;
+
+    #[test]
+    fn children_play_on_jungle_gyms_and_teens_hang_out_on_them() {
+        for kind in [ObjectKind::JungleGym, ObjectKind::Slide] {
+            let defs = interactions_for(kind);
+            let (play, hang) = (&defs[0], defs.iter().find(|d| d.special == Special::HangOut).unwrap());
+            assert_eq!(hang.name, "Hang Out On");
+            assert!(kind.usable_by(Age::Teen) && kind.usable_by(Age::Child) && !kind.usable_by(Age::Adult));
+            assert!(play_age_ok(play, kind, Age::Child) && !play_age_ok(play, kind, Age::Teen));
+            assert!(play_age_ok(hang, kind, Age::Teen) && !play_age_ok(hang, kind, Age::Child));
+        }
+        // (Nothing else changed.)
+        assert!(play_age_ok(&interactions_for(ObjectKind::Sofa)[0], ObjectKind::Sofa, Age::Teen));
+    }
+}
+
 impl ObjectKind {
     /// Whether a Sim of this age can use the object themselves: babies use nothing, toddlers
     /// only their own things, and grown-ups leave the toddler toys alone.
@@ -3040,6 +3073,8 @@ impl ObjectKind {
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
             Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar | K::SnakeBasket | K::NectarMaker),
+            // (Teens hang out up on the jungle gyms: `play_age_ok`.)
+            Age::Teen => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
@@ -6068,7 +6103,7 @@ pub(crate) fn run_actions(
                                         Special::ClipCoupon => {
                                             commands.entity(me).insert(crate::coupons::ClipNow(*target));
                                         }
-                                        Special::None | Special::BubbleBath | Special::Ducky | Special::VampireOnly => {}
+                                        Special::None | Special::BubbleBath | Special::Ducky | Special::VampireOnly | Special::HangOut => {}
                                         Special::Clear => {
                                             commands.entity(*target).try_despawn();
                                         }
@@ -7635,6 +7670,9 @@ fn autonomy(
                 }
                 // (Strength training's for teens and up, as a sponge bath is.)
                 if matches!(d.special, Special::StrengthWorkOut | Special::SpongeBath) && !(sim.age == Age::Teen || sim.age.is_grown()) {
+                    continue;
+                }
+                if !play_age_ok(d, obj.kind, sim.age) {
                     continue;
                 }
                 // (Plasma for vampires, and vampires drink it rather than eat.)

@@ -898,6 +898,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_hotTub_",
     "c2o_dollhouse_play_",
     "c2o_JungleGym",
+    // (A teen hanging out up on one, the game's `HangOutOn`.)
+    "t2o_JungleGym",
     "a2o_foosballTable_play",
     "a2o_videoGame_sitFloor_",
     "c2o_videoGame_sitFloor_",

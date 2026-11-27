@@ -748,7 +748,9 @@ installation is unreachable.
 - **Playgrounds**: children climb a slide's ladder, sit at the top and slide down, and climb a
   jungle gym's tower, play in its lookout and come down its pole: the game's clips carrying them
   along (its `world_offset` channel, the travel the engine moves Sims by), left where they end
-  up. The dollhouse is played at its open side (by children, and by Childish grown-ups with
+  up. Teens *Hang Out On* them instead (the game's `HangOutOn`, teens only: Fun 30 an hour till
+  they've had their fill), up the ladder with the game's `t2o_` clips, idling at the top and
+  down again (the slide's own idles, the tower's breather). The dollhouse is played at its open side (by children, and by Childish grown-ups with
   their own clips), and smashed in a temper (the game's `Smash`: only in a strongly bad mood,
   by free will only for the Evil, Grumpy, Inappropriate and Hot-Headed; eight minutes of
   kicking it in, a child's eighteen, with the game's clips), left in its own smashed state (the model's

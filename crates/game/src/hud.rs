@@ -2256,6 +2256,10 @@ fn world_click(
                 if matches!(d.special, Special::StrengthWorkOut | Special::SpongeBath) && !(actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown()) {
                     continue;
                 }
+                // (A jungle gym's play a child's, its hanging out a teen's.)
+                if !crate::interact::play_age_ok(d, obj.kind, actor_sim.age) {
+                    continue;
+                }
                 // (At the computer, the traits' own: a Genius's problems, a Workaholic's job, a
                 // Bookworm's club.)
                 let work_to_do = club_q.get(actor).ok().and_then(|c| c.1).is_some_and(|w| w.0 > opp_q.2.minutes);
