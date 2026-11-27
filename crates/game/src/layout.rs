@@ -909,8 +909,28 @@ fn place(w: &UiWindow) -> Node {
             n.margin.top = Val::Px(-(y2 - y1) * v);
             (n.width, n.height) = (wd, ht);
         }
+        UiPlace::Proportional([pl, pt, pr, pb], a) => {
+            // (Each way: the anchored edges as a simple layout has them, else from the
+            // fractions of the parent, the size kept where both edges share one.)
+            let (left, right, width, ml, mr) = proportional(a & ANCHOR_LEFT != 0, a & ANCHOR_RIGHT != 0, pl, pr, x1, x2);
+            (n.left, n.right, n.width, n.margin.left, n.margin.right) = (left, right, width, ml, mr);
+            let (top, bottom, height, mt, mb) = proportional(a & ANCHOR_TOP != 0, a & ANCHOR_BOTTOM != 0, pt, pb, y1, y2);
+            (n.top, n.bottom, n.height, n.margin.top, n.margin.bottom) = (top, bottom, height, mt, mb);
+        }
     }
     n
+}
+
+/// One way of a proportional layout: the near and far edges, the size, and the margins.
+fn proportional(near: bool, far: bool, pn: f32, pf: f32, a: f32, b: f32) -> (Val, Val, Val, Val, Val) {
+    let (auto, size) = (Val::Auto, Val::Px(b - a));
+    match (near, far) {
+        (true, true) => (Val::Px(a), Val::Px(-b), auto, Val::ZERO, Val::ZERO),
+        (false, true) => (auto, Val::Px(-b), size, Val::ZERO, Val::ZERO),
+        (true, false) => (Val::Px(a), auto, size, Val::ZERO, Val::ZERO),
+        _ if (pn - pf).abs() < 1e-4 => (Val::Percent(pn * 100.0), auto, size, Val::Px(a), Val::ZERO),
+        _ => (Val::Percent(pn * 100.0), Val::Percent((1.0 - pf) * 100.0), auto, Val::Px(a), Val::Px(-b)),
+    }
 }
 
 /// Buttons show their state's picture (and tint their icon), as the game's.

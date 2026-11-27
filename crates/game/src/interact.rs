@@ -319,6 +319,9 @@ pub enum ObjectKind {
     /// A nectar maker (World Adventures' `NectarMaker`): fruit squished and pressed into bottles
     /// of nectar (`nectar`).
     NectarMaker,
+    /// A camera (World Adventures' `CameraCheap`, `CameraMedium`, `CameraExpensive`): put in a
+    /// Sim's inventory, to take photos with (`photos`).
+    Camera,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -377,6 +380,8 @@ impl ObjectKind {
             Self::SnakeBasket
         } else if has("objects.hobbiesskills.nectarmaker") {
             Self::NectarMaker
+        } else if has("objects.hobbiesskills.camera") {
+            Self::Camera
         } else if has("objects.decorations.flamingo")
             || has("objects.environment.gardengnome")
             || has("objects.environment.magicgnome")
@@ -714,7 +719,8 @@ impl ObjectKind {
             | Self::BoardBreaker
             | Self::ChinUpBar
             | Self::SnakeBasket
-            | Self::NectarMaker => "Hobbies",
+            | Self::NectarMaker
+            | Self::Camera => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -1604,6 +1610,8 @@ pub enum Special {
     PocketPrey,
     /// A snake charming basket's King Cobra bought (`snakecharm`).
     BuyKingCobra,
+    /// A camera picked up into the Sim's inventory (`photos`).
+    PocketCamera,
 }
 
 impl Special {
@@ -2093,6 +2101,8 @@ static SNAKE_BASKET: [InteractionDef; 2] = [
 ];
 /// (A cat's catch on the floor: the game's generic `PutInInventory`, a swipe.)
 static PREY: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::PocketPrey, ..def(crate::petpresent::PUT_IN_INVENTORY, 1.5, N, Pose::Use) }];
+/// (A camera picked up, the game's `PutInInventory`: `photos`.)
+static CAMERA: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::PocketCamera, ..def(crate::petpresent::PUT_IN_INVENTORY, 1.5, N, Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
 static PUDDLE: [InteractionDef; 1] = [InteractionDef { special: Special::MopUp, ..def("Mop Up", 5.0, [0.0, 0.0, -2.0, 0.0, -4.0, -4.0], Pose::Use) }];
 /// (A plant's shreds, cleared into the trash: the game's `DisposeTrash` on its `TrashPile`.)
@@ -2418,7 +2428,7 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         // (A training dummy: into the stance, at it as their skill has it, `martialarts`, and out.)
         "Practice" if kind == ObjectKind::TrainingDummy => A::new(Some("a_neutral2MA_x"), &["a2o_trainingDummy_beg_loop"]).ending(&["a_MA2neutral_x"], 1.5),
         // (A cat's catch picked up off the floor: the game's generic swipe.)
-        "Put In Inventory" if kind == ObjectKind::Prey => A::new(None, &["a2o_object_genericSwipe_x"]),
+        "Put In Inventory" if matches!(kind, ObjectKind::Prey | ObjectKind::Camera) => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Stock" if kind == ObjectKind::Terrarium => A::new(None, &["a2o_minorPet_putInTerrarium_x"]),
         // (A bird cage's own: stocked, fed, watched, cleaned; a bird taught to talk.)
         "Stock" if kind == ObjectKind::BirdCage => A::new(None, &["a2o_birdcage_stock_x"]),
@@ -3112,6 +3122,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::SlippySlide => &SLIPPY_SLIDE,
         ObjectKind::BoxStall => &BOX_STALL,
         ObjectKind::Prey => &PREY,
+        ObjectKind::Camera => &CAMERA,
         ObjectKind::TrainingDummy => &TRAINING_DUMMY,
         ObjectKind::ChinUpBar => &CHIN_UP_BAR,
         ObjectKind::SnakeBasket => &SNAKE_BASKET,
@@ -3267,6 +3278,9 @@ pub enum ActionKind {
     PutOnCostume { chest: Entity, costume: crate::costumes::Costume, asker: Option<Entity>, at: Vec2, face: Vec2 },
     /// Playing pretend dressed up (`costumes`): asked to join someone, near whom they start.
     PlayPretend { asker: Option<Entity>, at: Option<Vec2> },
+    /// A photo taken where they stand (`photos`): with the phone, or a camera from their inventory
+    /// (its catalogue name).
+    TakePhoto { camera: Option<&'static str> },
     /// Another child asked to play pretend (never queued: `costumes::ask`).
     AskToPretend { child: Entity },
     /// Out for a stroll with a baby or toddler in the stroller (`strollers`): from behind it,
@@ -4274,6 +4288,11 @@ pub(crate) fn run_actions(
                             anim.pose = Pose::Use;
                             continue;
                         }
+                        // (A photo: where they stand, the grab its own, `photos`.)
+                        ActionKind::TakePhoto { .. } => {
+                            action.phase = Phase::Running(0.0);
+                            continue;
+                        }
                         ActionKind::Outro { .. } => {
                             action.phase = Phase::Running(0.0);
                             continue;
@@ -5108,6 +5127,7 @@ pub(crate) fn run_actions(
                             }
                             // (Come to play pretend near the one who asked: `costumes`.)
                             ActionKind::PlayPretend { .. } => anim.pose = Pose::Use,
+                            ActionKind::TakePhoto { .. } => {}
                             // (At the post: the horse called over, `hitching` ties it once it's there;
                             // or the rope untied.)
                             ActionKind::TieHorse { post, horse, part } => {
@@ -5883,6 +5903,11 @@ pub(crate) fn run_actions(
                                             commands.queue(move |w: &mut World| crate::snakecharm::buy_cobra(w, me, t));
                                         }
                                         // (A cat's catch picked up: into their inventory, `petpresent`.)
+                                        // (A camera picked up: into their inventory, `photos`.)
+                                        Special::PocketCamera => {
+                                            let t = *target;
+                                            commands.queue(move |w: &mut World| crate::photos::pocket(w, me, t));
+                                        }
                                         Special::PocketPrey => {
                                             let (t, objd) = (*target, obj.objd);
                                             commands.queue(move |w: &mut World| crate::petpresent::pocket(w, me, t, objd));
@@ -6763,7 +6788,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } | ActionKind::BoardBreak { .. } | ActionKind::WatchBoardBreak { .. } | ActionKind::Nectar { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } | ActionKind::BoardBreak { .. } | ActionKind::WatchBoardBreak { .. } | ActionKind::Nectar { .. } | ActionKind::TakePhoto { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

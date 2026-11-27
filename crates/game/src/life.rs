@@ -618,6 +618,8 @@ pub fn skill_rate(traits: &[Trait], skill: &str) -> f32 {
             (Trait::Charismatic, "Charisma") => 1.25,
             (Trait::GreenThumb, "Gardening") => 1.25,
             (Trait::Handy, "Handiness") => 1.25,
+            // (`kPhotographersEyeSkillMultiplier`, the XML's.)
+            (Trait::PhotographersEye, "Photography") => 1.25,
             (Trait::Lazy, _) => 0.85,
             _ => 1.0,
         };

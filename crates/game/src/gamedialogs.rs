@@ -394,7 +394,7 @@ fn question_dialogs(
             // (Saving over another save: yes or no.)
             crate::dialog::Question::Overwrite { .. } | crate::dialog::Question::DeleteCollection { .. } => "TwoButtonDialog",
             // (A horse sold or bought at its price: yes or no.)
-            crate::dialog::Question::SellHorse { .. } | crate::dialog::Question::BuyHorse { .. } => "TwoButtonDialog",
+            crate::dialog::Question::SellHorse { .. } | crate::dialog::Question::BuyHorse { .. } | crate::dialog::Question::CameraPhotos { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
             crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } | crate::dialog::Question::NamePet { .. } | crate::dialog::Question::NameNectar { .. } | crate::dialog::Question::NamePhoto { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
@@ -422,7 +422,8 @@ fn question_dialogs(
             | crate::dialog::Question::Overwrite { .. }
             | crate::dialog::Question::DeleteCollection { .. }
             | crate::dialog::Question::SellHorse { .. }
-            | crate::dialog::Question::BuyHorse { .. } => {
+            | crate::dialog::Question::BuyHorse { .. }
+            | crate::dialog::Question::CameraPhotos { .. } => {
                 // The offer's words; a button for each path (or yes and no), in the game's words.
                 let words = [ask.title.as_str(), ask.text.as_str()].into_iter().filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");
                 if let Some(t) = s.comment("Message").and_then(|w| s.text_of(w)) {

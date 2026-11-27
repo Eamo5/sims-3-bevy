@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackWriter, read_value, write_value};
 
-pub const UI_VERSION: u32 = 27;
+pub const UI_VERSION: u32 = 28;
 pub const T_LAYOUT: u32 = 0x025C95B6;
 pub const T_FONT: u32 = 0x062E9EE0;
 pub const T_IMAGE: u32 = 0x2F7D0004;
@@ -76,6 +76,10 @@ pub enum UiPlace {
     Hud(u8, [f32; 2]),
     /// `CenterInParentLayout`: centred across, this fraction of the free space down.
     Center(f32),
+    /// `ProportionalLayout`: each edge measured from that fraction of the parent's width or
+    /// height (left, top, right, bottom), save those a `SimpleLayout` after it anchors (its
+    /// anchor bits): the photography grab's camera controls, kept to the middle at the foot.
+    Proportional([f32; 4], u8),
 }
 
 /// What a window draws.
@@ -641,7 +645,24 @@ fn window(o: &XNode) -> Option<UiWindow> {
         for p in procs.children.iter().filter(|c| c.name == "object") {
             let pv = |n: &str| p.children.iter().find(|c| c.name == "prop" && c.attr("name") == Some(n)).and_then(|c| c.attr("value"));
             match p.attr("cls") {
+                // (After a proportional layout, its anchored edges.)
+                Some("SimpleLayout") if matches!(w.place, UiPlace::Proportional(..)) => {
+                    if let UiPlace::Proportional(_, a) = &mut w.place {
+                        *a = pv("Anchor").map_or(0, num) as u8;
+                    }
+                }
                 Some("SimpleLayout") => w.place = UiPlace::Simple(pv("Anchor").map_or(0, num) as u8),
+                Some("ProportionalLayout") => {
+                    let v: Vec<f32> = p
+                        .children
+                        .iter()
+                        .find(|c| c.name == "prop" && c.attr("name") == Some("Proportions"))
+                        .map(|c| c.children.iter().filter(|v| v.name == "value").filter_map(|v| v.text.trim().parse().ok()).collect())
+                        .unwrap_or_default();
+                    if let [l, t, r, b] = v[..] {
+                        w.place = UiPlace::Proportional([l, t, r, b], 0);
+                    }
+                }
                 Some("HudLayout") => {
                     let d: Vec<f32> = pv("Dimensions").unwrap_or("1024,768").split(',').filter_map(|x| x.trim().parse().ok()).collect();
                     w.place = UiPlace::Hud(pv("Anchor").map_or(0, num) as u8, [d.first().copied().unwrap_or(1024.0), d.get(1).copied().unwrap_or(768.0)]);
@@ -998,6 +1019,14 @@ mod tests {
         assert_eq!(w.colors, vec![0xff000000, 0xffffffff]);
         assert_eq!(w.place, UiPlace::Simple(ANCHOR_BOTTOM | ANCHOR_LEFT));
         assert!(w.visible());
+        // (A proportional layout, its edges anchored by a simple one after it.)
+        let x = r#"<?xml version="1.0"?><graph class="Layout"><object cls="Window" clsid="0x4ec1b8d8">
+            <prop name="Area" type="rectf" value="-192,-102,146,-7" />
+            <prop name="WinProcs" type="object" count="2"><object cls="ProportionalLayout"><prop name="Proportions" type="float" count="4"><value>0.5</value><value>0</value><value>0.5</value><value>0</value></prop></object><object cls="SimpleLayout"><prop name="Anchor" type="uint8" value="2" /></object></prop>
+            </object></graph>"#;
+        let doc = parse_xml(x).unwrap();
+        let w = window(doc.child("object").unwrap()).unwrap();
+        assert_eq!(w.place, UiPlace::Proportional([0.5, 0.0, 0.5, 0.0], ANCHOR_BOTTOM));
     }
 
     #[test]

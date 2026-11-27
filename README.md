@@ -1155,6 +1155,35 @@ installation is unreachable.
   gloom; it shows on the canvas as they paint, on its tile in their inventory and wherever it's
   hung, kept in saves. `PHOTO_TEST=1` with `PHOTO_STILL=basic|genius|insane|somber`,
   `PHOTO_LEVEL`, `PHOTO_FRAME=<0-2>`, `PHOTO_FAST=1` (tests).
+- **Cameras and Photography**, as World Adventures' `Camera` and the `Photography` skill: the
+  SnapTastic Flimsy-Cam, the ChannonTec Outlaw SE and the Hikon QX40di Gladiator are bought and
+  put on the lot, "Put In Inventory" (the game's swipe), and from the inventory children and up
+  "Take Photo" with one: the view goes to their eyes as with the phone, framed by the game's
+  photography grab ("Take Photograph", its info panel's mode, size and price a shot and the shots
+  the household's funds will pay for, the camera controls at the foot, the keys there's nothing
+  more to choose for dimmed). F turns through the modes the photographer has (Color, Black &
+  White at two, Sepiatone at four, Classic Vignette at eight), I through the sizes they have and
+  the camera takes (Small Portrait, Medium Landscape at two, Large Portrait at five, Panorama at
+  ten; the cheap camera only the small, the middling up to the medium), each in its own frame,
+  laid out for a widescreen as the game lays it out (`AdjustWindowForNewRes`), and Z and X zoom
+  as far as the camera does (the cheap one not at all till level six's zoom upgrade); with
+  nothing more to choose, the game's word ("You don't have any photo filter options. Try gaining
+  more photography skill."), and with no money for a shot, "You don't have enough money to take
+  a photo.". C takes it, the camera's own shutter (`ui_photo_take_chp`, `_med`, `_exp`), the
+  shot's price paid (the game's base, the size's, the mode's and the camera's); the picture's
+  toned in its mode and, as green photographers do (`FlipCoinForPhotoFailure`: three in four at
+  level nought, none at ten), now and then spoilt (a gnome peeking in, a finger over the lens,
+  blurred, pixelated) with the game's sting. It's a photograph in their inventory worth what the
+  camera, their level, its size and mode make it (a spoilt one a tenth, a Photographer's Eye's a
+  quarter more), hung in the size's own frame, and Photography learnt for it (a quarter faster
+  with a Photographer's Eye). The camera's menu also has "Settings... ›" with "Set Default Size...
+  ›" and "Set Default Mode... ›" (out of reach "Your Photography Skill level is too low to take
+  photos of this size.", the one set "This is the current setting."), kept in saves, and "Sell
+  All Photos (§n)..." and "Erase All Photos...", asked first as the game asks. The layouts'
+  `ProportionalLayout` is read for it (the camera controls kept to the middle at the foot).
+  `PHOTO_TEST=1` with `PHOTO_CAMERA=<camera>`, `PHOTO_LEVEL`, `PHOTO_SIZE`, `PHOTO_STYLE`,
+  `PHOTO_SPOIL=gnome|finger|blurry|noise|none`, `PHOTO_PIE=1`, `PHOTO_MENU=<label>[>...]`,
+  `PHOTO_PLACE=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

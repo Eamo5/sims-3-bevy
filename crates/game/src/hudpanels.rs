@@ -701,6 +701,7 @@ fn inventory_panel(
     mut state: Local<(Option<Entity>, String, f32)>,
     panel: Res<InfoPanel>,
     (pet_q, people_q, stack_pie): (Query<(&crate::pets::Pet, &GlobalTransform, Option<&crate::pets::PetBonds>)>, Query<(Entity, &Sim, &GlobalTransform, Has<crate::sim::HouseholdMember>)>, Option<Res<StackPie>>),
+    photographers: Query<(&crate::interact::Skills, Option<&crate::photos::CameraSettings>)>,
 ) {
     let s: &Spawned = &hud.inventory;
     // (A Sim's, or a pet's: what it's caught or found, only to give to the family.)
@@ -736,6 +737,15 @@ fn inventory_panel(
                 })
                 .collect::<Vec<_>>();
             pie.submenus.clear();
+            // (A camera: photos taken with it, its settings, its photos sold or erased, `photos`;
+            // children and up.)
+            if sim.is_some_and(|s| !s.age.is_little())
+                && let Ok((skills, settings)) = photographers.get(me)
+                && let Some((list, menus)) = crate::photos::camera_menu(me, st, skills.level(crate::photos::SKILL), settings, &stacks, pie.submenus.len())
+            {
+                options.splice(0..0, list);
+                pie.submenus.extend(menus);
+            }
             // (A gem or metal mailed off to be cut or smelted: `rgmmail`.)
             if let Some(g) = game_ui.as_deref().filter(|_| sim.is_some()) {
                 use crate::inventory::ItemButton;

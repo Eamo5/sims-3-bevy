@@ -273,6 +273,12 @@ pub enum ItemButton {
     Taste,
     /// A photograph given a title (`photos`, the game's `NameImageObject`).
     NamePhoto,
+    /// A camera's default size or mode set (`photos::Size`, `photos::Style` as numbers), its
+    /// photos sold or erased (asked first).
+    CameraSize(u8),
+    CameraStyle(u8),
+    SellPhotos,
+    ErasePhotos,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -501,6 +507,18 @@ fn inventory_buttons(
             // (A photograph's title: the game's box to type it in, `photos`.)
             ItemButton::NamePhoto => {
                 crate::photos::ask_title(&mut commands, me, &s);
+            }
+            // (A camera's settings, and its photos: `photos`.)
+            ItemButton::CameraSize(z) => {
+                let (key, z) = (s.key.clone(), *z);
+                commands.queue(move |w: &mut World| crate::photos::set_default(w, me, &key, Some(z), None));
+            }
+            ItemButton::CameraStyle(y) => {
+                let (key, y) = (s.key.clone(), *y);
+                commands.queue(move |w: &mut World| crate::photos::set_default(w, me, &key, None, Some(y)));
+            }
+            ItemButton::SellPhotos | ItemButton::ErasePhotos => {
+                crate::photos::ask_photos(&mut commands, me, &inv.0, *b == ItemButton::SellPhotos);
             }
             // (A bottle of nectar opened for a glass: the bottle's gone, `nectar`.)
             ItemButton::Taste => {

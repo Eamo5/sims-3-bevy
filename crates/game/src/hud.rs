@@ -888,6 +888,17 @@ fn open_object_pie(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: 
     spawn_pie(commands, pie, at, title, actor, options);
 }
 
+/// The open menu's option `k` chosen, if it opens a submenu (tests): the submenu, where the menu
+/// was.
+pub fn choose_submenu(commands: &mut Commands, pie: &mut PieMenu, k: usize) -> bool {
+    let (Some(i), Some(a)) = (pie.options.get(k).and_then(|o| as_submenu(&o.1)), pie.actor) else { return false };
+    let Some((title, list)) = pie.submenus.get(i).cloned() else { return false };
+    let parent = (pie.at, pie.title.clone(), pie.options.clone());
+    let at = pie.at;
+    open_submenu(commands, pie, at, &title, a, list, parent);
+    true
+}
+
 /// A submenu, opened where its option was clicked (as the game's are), with the way back to the
 /// menu it's in at its middle.
 fn open_submenu(commands: &mut Commands, pie: &mut PieMenu, at: Vec2, title: &str, actor: Entity, options: Vec<(String, ActionKind)>, parent: (Vec2, String, Vec<(String, ActionKind)>)) {
