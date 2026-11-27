@@ -137,6 +137,9 @@ installation is unreachable.
   in its bearer's stead: they're spared) and the **Money Tree** (its money bags, a harvest
   cycle's worth by the tree's quality, §100 to §1900, and the tree better for each harvest).
   `--do "Garden <plant>"` plants one and `GARDEN_GROWN=1` grows it at once (tests).
+  A grown plant can be *Viewed* (the game's `ViewPlant`, grown or bearing): a look at it, and
+  tears of joy at a fine one, a recoil at one of the bottom three qualities (`QualityLevel`
+  under 0.3: the game's `JoyousCrying` and `Repel` reactions). `VIEW_PLANT=fine|poor` (tests).
   **Ambrosia**, as the game's: a Sim who's mastered Cooking, Gardening and Fishing learns it,
   and makes it of a Lifefruit and a Deathfish (neither to be bought), set out a single
   serving for whoever's to eat it. Eaten, it's a Divine Meal (the game's moodlet, a week) and

@@ -38,7 +38,33 @@ impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Garden>()
             .add_message::<PlantNow>()
-            .add_systems(Update, (starter_packet, restore_plants, plant_now, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (starter_packet, restore_plants, plant_now, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks, view_test).chain().run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// `VIEW_PLANT=fine|poor` (tests, with `--do Garden` and `GARDEN_GROWN=1`): the first grown plant
+/// made that good, the selected Sim to View it, the camera on it.
+fn view_test(
+    mut plants: Query<(Entity, &mut GrowingPlant, &GlobalTransform)>,
+    mut sims: Query<&mut crate::interact::ActionQueue, With<crate::sim::Selected>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut done: Local<bool>,
+) {
+    let Ok(how) = std::env::var("VIEW_PLANT") else { return };
+    let Some((e, mut p, at)) = plants.iter_mut().find(|(_, p, _)| p.growth >= 1.0) else { return };
+    if let Ok(mut cam) = cams.single_mut() {
+        cam.look_at(at.translation());
+        cam.distance = 6.0;
+    }
+    if *done {
+        return;
+    }
+    *done = true;
+    p.quality = if how == "poor" { 0.1 } else { 0.9 };
+    let Some(def) = crate::interact::interactions_for(crate::interact::ObjectKind::GardenPlant).iter().position(|d| d.special == crate::interact::Special::ViewPlant) else { return };
+    if let Ok(mut q) = sims.single_mut() {
+        q.push_player(crate::interact::Action::new("View", crate::interact::ActionKind::Object { target: e, def }, false));
+        info!("view test: viewing a {how} plant");
     }
 }
 
@@ -320,6 +346,21 @@ mod harvest_tests {
     }
 
     #[test]
+    fn a_grown_plant_is_viewed_with_joy_or_disgust() {
+        let mut p = plant();
+        p.growth = 0.5;
+        assert!(!offers(&p, crate::interact::Special::ViewPlant));
+        p.growth = 1.0;
+        assert!(offers(&p, crate::interact::Special::ViewPlant));
+        p.quality = 0.9;
+        assert_eq!(view_reaction(&p), "JoyousCrying");
+        p.quality = 0.2;
+        assert_eq!(view_reaction(&p), "Repel");
+        p.dead = true;
+        assert!(!offers(&p, crate::interact::Special::ViewPlant));
+    }
+
+    #[test]
     fn exhausted_plants_cannot_yield_even_with_stale_ready_produce() {
         let mut p = plant();
         p.harvests_left = 0;
@@ -423,8 +464,16 @@ pub fn offers(p: &GrowingPlant, special: crate::interact::Special) -> bool {
         S::Fertilize => !p.dead && p.fertilizer.is_none(),
         S::RevivePlant => p.dead,
         S::TalkToPlant => !p.dead && p.growth > 0.1,
+        // (Grown, or bearing: the game's `Mature` and `Harvest` states.)
+        S::ViewPlant => !p.dead && p.growth >= 1.0,
         _ => true,
     }
+}
+
+/// What viewing a grown plant brings on (the game's `ViewPlant`): tears of joy at a fine one,
+/// a recoil from a poor one (its quality under `0.3`, the bottom three of its levels).
+pub fn view_reaction(p: &GrowingPlant) -> &'static str {
+    if p.quality < 0.3 { "Repel" } else { "JoyousCrying" }
 }
 
 /// Seed options for planting at a spot on the home lot (unknown ones by their rarity).

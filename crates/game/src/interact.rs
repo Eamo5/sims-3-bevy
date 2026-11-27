@@ -1541,6 +1541,8 @@ pub enum Special {
     RevivePlant,
     TalkToPlant,
     DisposePlant,
+    /// A grown plant looked at: joy or disgust at it (`gardening::view_reaction`).
+    ViewPlant,
     /// Blow out a birthday cake's candles and grow up.
     BlowOutCandles,
     /// Write (a page at a time) the book under way.
@@ -1736,7 +1738,7 @@ static NEWSPAPER: [InteractionDef; 4] = [
 /// (The paper read: in a seat, or standing.)
 const READ_PAPER: InteractionDef = InteractionDef { autonomous: false, special: Special::ReadPaper, ..def("Read the Paper", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 45.0], Pose::Use) };
 const READ_PAPER_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, ..READ_PAPER };
-static GARDEN: [InteractionDef; 7] = [
+static GARDEN: [InteractionDef; 8] = [
     InteractionDef { special: Special::Water, skill: Some("Gardening"), ..def("Water", 12.0, [0.0, 0.0, 0.0, 0.0, -3.0, 4.0], Pose::Use) },
     InteractionDef { special: Special::Weed, skill: Some("Gardening"), ..def("Weed", 15.0, [0.0, 0.0, 0.0, 0.0, -8.0, 2.0], Pose::Use) },
     InteractionDef { special: Special::Harvest, skill: Some("Gardening"), ..def("Harvest", 10.0, [0.0, 0.0, 0.0, 0.0, -3.0, 8.0], Pose::Use) },
@@ -1746,6 +1748,8 @@ static GARDEN: [InteractionDef; 7] = [
     InteractionDef { autonomous: false, special: Special::RevivePlant, skill: Some("Gardening"), ..def("Revive", 20.0, [0.0, 0.0, 0.0, 0.0, -4.0, 4.0], Pose::Use) },
     InteractionDef { special: Special::TalkToPlant, ..def("Talk to Plant", 30.0, [0.0, 0.0, 0.0, 20.0, 0.0, 10.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::DisposePlant, ..def("Dispose", 5.0, [0.0, 0.0, 0.0, 0.0, -4.0, 0.0], Pose::Use) },
+    // (The game's `ViewPlant`: a look at it grown, and what it makes them feel, `gardening`.)
+    InteractionDef { autonomous: false, special: Special::ViewPlant, ..def("View", 0.5, N, Pose::Stand) },
 ];
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
@@ -5527,6 +5531,15 @@ pub(crate) fn run_actions(
                                         | Special::TvTurnOn
                                         | Special::TvTurnOff => {}
                                         Special::SpongeBath => {}
+                                        // (A grown plant viewed: tears of joy, or a recoil, at it.)
+                                        Special::ViewPlant => {
+                                            let (plant, at, until) = (*target, otf.translation, clock.minutes + 30.0);
+                                            commands.queue(move |w: &mut World| {
+                                                if let Some(kind) = w.get::<crate::gardening::GrowingPlant>(plant).map(crate::gardening::view_reaction) {
+                                                    w.entity_mut(me).insert(crate::reactions::Pending::new(&[kind], Some(at), until));
+                                                }
+                                            });
+                                        }
                                         Special::Donate => {
                                             if let Some((cause, amount)) = action.donation.clone() {
                                                 commands.entity(me).insert(crate::charity::Donated { cause, amount });
