@@ -2938,9 +2938,8 @@ fn world_click(
                     options.push((d.name.to_string(), ActionKind::Object { target: t, def: i }));
                 }
             }
-            // The upgrades a handy enough grown-up can make to it.
-            if actor_sim.age.is_grown()
-                && actor_sim.age != crate::sim::Age::Child
+            // The upgrades a handy enough teen or grown-up can make to it (the tunings' ages).
+            if (actor_sim.age == crate::sim::Age::Teen || actor_sim.age.is_grown())
                 && let Ok((_, skills, _)) = writers.get(actor)
             {
                 let have = upg_q.get(t).map_or(0, |u| u.0);

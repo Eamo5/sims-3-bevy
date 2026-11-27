@@ -4,7 +4,7 @@
 //! A Daredevil teen or older will "Play with Fire" while it's lit (the game's `PlayWithFire`:
 //! fun 50 an hour), and past its first five minutes, every two a chance in ten (the Clumsy's a
 //! quarter more: `ChanceBurnSelfWhenPlaying`, `kClumsyTraitChanceBurnSelfOnFireplace`) of being
-//! burned: fun 15 less and the burnt ending. Upgraded to "Change Color" (Handiness 9), a lit
+//! burned: fun 15 less and the burnt ending. Upgraded to "Change Fire Color" (Handiness 9), a lit
 //! fire can be turned Blue, Green or Purple and back to Normal ("Change Fire Color ›": the game's
 //! `ChangeFireColor`), its flames and light in the colour (the tuning's
 //! `...FlameLightChannel`s), kept for the next fire and in saves.
@@ -412,7 +412,7 @@ fn burn(
         }
         if clock.minutes >= l.next_spark {
             l.next_spark = clock.minutes + 60.0;
-            // (Never from a fireproof one: "Make Fireproof".)
+            // (Never from a fireproof one: "Fireproof".)
             if rng.random_bool(0.015) && !crate::upgrades::has(upgrades, crate::upgrades::Upgrade::Fireproof) {
                 let at = tf.translation + tf.rotation * Vec3::new(o.center.x, 0.0, o.center.y + o.half.y + 0.9);
                 fire.write(crate::fire::StartFire { at, level: floor.map_or(1, |f| f.0) });

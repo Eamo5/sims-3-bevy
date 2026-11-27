@@ -150,10 +150,17 @@ installation is unreachable.
   repair animations, learning Handiness (handy and neat Sims do it on their own), or the
   repairman can be phoned: he pulls up in the game's handyman pickup, in his overalls, fixes
   each broken thing in turn with the same animations (the household leaves the repairs to
-  him), and is paid §75 and §25 a fix. Handy grown-ups can upgrade appliances too ("Upgrade
-  ›", with the same animations, building Handiness): at level 3 a water heater for the shower
-  and the bath, improved channels for the TV, better speakers for the stereo and a faster
-  processor for the computer (half as much again of what they give); at level 5 Unbreakable.
+  him), and is paid §75 and §25 a fix. Handy teens and up can upgrade appliances too ("Upgrade
+  ›", with the same animations, building Handiness), each named as the game's
+  `UpgradableComponent` names it ("Upgrade: Unbreakable", "Upgrade: Self-Cleaning"...) and at
+  its tuned level: Boost Channels for the TV, Improve Speakers for the stereo and Improved
+  Graphics for the computer (half as much again of the fun they give), Improve Meal Quality for
+  the stove, Silent Running for the dishwasher, Faster Cooking for the microwave (its cook
+  speed's 8 to the usual 6), Improved Crushing for the trash compactor (twice as much in it), a
+  Clean Polymer Injection System for the washing machine (fresh clothes half again as long),
+  Auto Water for a sprinkler (on at five each morning for an hour, not with snow on the ground),
+  Wire House With Speakers for the stereo (heard all through the house, its music enjoyed
+  anywhere about it), Fireproof, Auto Light and Change Fire Color, and Unbreakable at 6.
   Things break and are repaired as the game tunes each kind (its `RepairableComponent` values
   for every class: a TV unbreakable for two days new or fixed, then 6% a use and 3% more each
   break; a repair's time from its longest at no Handiness to its shortest at the repair's
@@ -1815,7 +1822,7 @@ installation is unreachable.
   minutes, every two a chance in ten (the Clumsy's a quarter more: the fireplaces' tuned
   `ChanceBurnSelfWhenPlaying`, `kClumsyTraitChanceBurnSelfOnFireplace`) of being burned: fun 15
   less and the game's burnt ending, hands shaken and blown on. A Handiness 9 Sim can make the
-  Upgrade: Change Color (knelt at the hearth with the game's upgrade clips, as for its other
+  Upgrade: Change Fire Color (knelt at the hearth with the game's upgrade clips, as for its other
   upgrades), and then a lit fire's *Change Fire Color ›* menu turns it Blue, Green or Purple, or
   back to Normal (any but the one it is: `ChangeFireColor`, a pinch thrown in), flames and light
   in the colour (the tuning's `...FlameLightChannel`s), kept for the next fire and in saves.
@@ -2105,10 +2112,10 @@ installation is unreachable.
   `kNormalDishwasherBroadcastParams`: three metres, in its room) wakes a Sim asleep there with
   a Rude Awakening (not a Heavy Sleeper), and those awake there the first time cover their ears
   at it (the game's `BadNoise` reaction), stopping on their way to do it if they're passing; nor
-  is it noisy loaded by a Heavy Sleeper. A Handiness 3 Sim can make the *Upgrade: Make Silent*
-  (the quiet one's sounds, `dwasher_running_lp_exp`, and it disturbs nobody), and at 6 *Prevent
-  Breakage*; a toilet's is *Prevent Clogging*, as the game names it. Reactions in general now
-  stop a Sim on their way somewhere, then they carry on. `DISH_TEST=load|silent` (tests).
+  is it noisy loaded by a Heavy Sleeper. A Handiness 3 Sim can make the *Upgrade: Silent
+  Running* (the quiet one's sounds, `dwasher_running_lp_exp`, and it disturbs nobody), and at 6
+  *Unbreakable*. Reactions in general now stop a Sim on their way somewhere, then they carry on.
+  `DISH_TEST=load|silent` (tests).
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
   turning slowly in the glass, and can be taken out again. It wants feeding: hungry a day and

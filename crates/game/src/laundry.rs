@@ -56,6 +56,9 @@ pub struct Laundry {
     pub fresh_until: f64,
     pub very: bool,
     fine_wash: bool,
+    /// The last wash was in a machine with a Clean Polymer Injection System (`upgrades`): the
+    /// clothes stay fresh half as long again.
+    polymer: bool,
     /// The piles each Sim has left today (the day, and how many).
     left_today: HashMap<Entity, (u32, u32)>,
     /// Not before then is the laundry tried again of anyone's own accord (game minutes): once a
@@ -276,6 +279,7 @@ fn requests(
     mut sims: Query<(Entity, &Sim, &LaundryRequest, &Transform, &mut ActionQueue)>,
     objects: Query<(Entity, &GameObject, &Transform, Option<&Load>)>,
     piles: Query<(), With<ClothingPile>>,
+    upgraded: Query<&crate::upgrades::Upgrades>,
 ) {
     // (What's in a machine now: two Sims may have set out for the same one, and a machine seen
     // to this frame waits for the next.)
@@ -319,6 +323,7 @@ fn requests(
                 info!("{} puts on a load of laundry", sim.first);
                 laundry.waiting = 0;
                 laundry.fine_wash = objects.get(washer).is_ok_and(|o| o.1.price >= FINE_PRICE);
+                laundry.polymer = upgraded.get(washer).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved));
                 commands.entity(washer).insert(Load::Running(clock.minutes + WASH_MINUTES));
             }
             LaundryRequest::Unload(washer) if load(washer) == Some(Load::Done) => {
@@ -361,7 +366,7 @@ fn requests(
 /// (the game's `OnDryerCycleFinished`).
 fn fresh(laundry: &mut Laundry, clock: &GameClock, very: bool) {
     laundry.very = if clock.minutes < laundry.fresh_until { laundry.very || very } else { very };
-    laundry.fresh_until = clock.minutes + FRESH_MINUTES;
+    laundry.fresh_until = clock.minutes + FRESH_MINUTES * if laundry.polymer { crate::upgrades::POLYMER_FRESH } else { 1.0 };
 }
 
 /// Washers, dryers and lines finish their loads in time.

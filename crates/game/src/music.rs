@@ -131,7 +131,7 @@ pub fn station_name(key: &str) -> String {
 fn stereo_music(
     mut commands: Commands,
     lib: Res<MusicLibrary>,
-    mut stereos: Query<(Entity, &GameObject, &UsedBy, &GlobalTransform, Option<&StereoOn>, (Option<&StereoVolume>, Option<&SkipSong>, Option<&mut Played>))>,
+    mut stereos: Query<(Entity, &GameObject, &UsedBy, &GlobalTransform, Option<&StereoOn>, (Option<&StereoVolume>, Option<&SkipSong>, Option<&mut Played>, Option<&crate::upgrades::Upgrades>))>,
     playing: Query<(Entity, &StereoMusic)>,
     cams: Query<&SimsCamera>,
     sounds: Option<Res<crate::sound::Sounds>>,
@@ -145,7 +145,7 @@ fn stereo_music(
     // skipped on from.
     let mut stopped = Vec::new();
     for (e, m) in &playing {
-        let keep = stereos.get(m.0).is_ok_and(|(_, _, used, _, on, (_, skip, _))| {
+        let keep = stereos.get(m.0).is_ok_and(|(_, _, used, _, on, (_, skip, _, _))| {
             skip.is_none()
                 && match on {
                     Some(StereoOn(Some(station))) => station.trim_start_matches("stereo_") == m.1,
@@ -158,7 +158,7 @@ fn stereo_music(
             stopped.push(m.0);
         }
     }
-    for (stereo, obj, used, tf, on, (vol, skip, mut played)) in &mut stereos {
+    for (stereo, obj, used, tf, on, (vol, skip, mut played, upgrades)) in &mut stereos {
         if !matches!(obj.kind, ObjectKind::Stereo) || (used.0.is_none() && on.is_none()) || (playing.iter().any(|(_, m)| m.0 == stereo) && !stopped.contains(&stereo)) {
             continue;
         }
@@ -170,7 +170,7 @@ fn stereo_music(
             commands.entity(stereo).insert(StereoOn(None));
         }
         let volume = cam.map_or(0.5, |c| {
-            let d = c.focus.distance(tf.translation()) + c.distance * 0.35;
+            let d = heard_from(c, tf.translation(), wired(upgrades));
             (1.2 / (1.0 + d / 12.0)).min(0.9)
         }) * turned(vol);
         // A song from a random radio station; the custom-music folder counts as one more.
@@ -225,11 +225,26 @@ fn stereo_music(
     }
 }
 
-/// Sims near a stereo playing their favourite music enjoy it.
+/// A stereo "Wire House With Speakers" (`upgrades`): heard all through the house, as near as
+/// can be from anywhere about the lot.
+const WIRED_REACH: f32 = 30.0;
+
+fn wired(upgrades: Option<&crate::upgrades::Upgrades>) -> bool {
+    crate::upgrades::has(upgrades, crate::upgrades::Upgrade::WholeHouse)
+}
+
+/// How far off a stereo's heard by the camera.
+fn heard_from(cam: &SimsCamera, at: Vec3, wired: bool) -> f32 {
+    let d = cam.focus.distance(at);
+    (if wired && d < WIRED_REACH { 0.0 } else { d }) + cam.distance * 0.35
+}
+
+/// Sims near a stereo playing their favourite music enjoy it (anywhere about the house, wired
+/// for it).
 fn favorite_music(
     clock: Res<crate::clock::GameClock>,
     playing: Query<&StereoMusic>,
-    stereos: Query<&GlobalTransform>,
+    stereos: Query<(&GlobalTransform, Option<&crate::upgrades::Upgrades>)>,
     mut sims: Query<(&crate::sim::Sim, &GlobalTransform, &mut crate::life::Moodlets)>,
     mut last: Local<f64>,
 ) {
@@ -238,9 +253,10 @@ fn favorite_music(
     }
     *last = clock.minutes;
     for m in &playing {
-        let Ok(at) = stereos.get(m.0) else { continue };
+        let Ok((at, upgrades)) = stereos.get(m.0) else { continue };
+        let reach = if wired(upgrades) { WIRED_REACH } else { 8.0 };
         for (sim, tf, mut moods) in &mut sims {
-            if sim.favorites.music == m.1 && tf.translation().distance(at.translation()) < 8.0 && !moods.has(crate::life::MoodletKind::EnjoyingMusic) {
+            if sim.favorites.music == m.1 && tf.translation().distance(at.translation()) < reach && !moods.has(crate::life::MoodletKind::EnjoyingMusic) {
                 moods.add(crate::life::MoodletKind::EnjoyingMusic, clock.minutes);
             }
         }
@@ -250,15 +266,15 @@ fn favorite_music(
 /// Keeps stereo volume following the camera.
 pub fn stereo_volume(
     mut sinks: Query<(&StereoMusic, &mut AudioSink)>,
-    stereos: Query<(&GlobalTransform, Option<&StereoVolume>)>,
+    stereos: Query<(&GlobalTransform, Option<&StereoVolume>, Option<&crate::upgrades::Upgrades>)>,
     cams: Query<&SimsCamera>,
     settings: Res<crate::options::Settings>,
 ) {
     let Ok(cam) = cams.single() else { return };
     let level = settings.gain(crate::options::Channel::Music);
     for (m, mut sink) in &mut sinks {
-        if let Ok((tf, vol)) = stereos.get(m.0) {
-            let d = cam.focus.distance(tf.translation()) + cam.distance * 0.35;
+        if let Ok((tf, vol, upgrades)) = stereos.get(m.0) {
+            let d = heard_from(cam, tf.translation(), wired(upgrades));
             sink.set_volume(Volume::Linear((1.2 / (1.0 + d / 12.0)).min(0.9) * turned(vol) * level));
         }
     }

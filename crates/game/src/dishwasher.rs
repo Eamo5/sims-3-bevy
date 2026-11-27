@@ -4,7 +4,7 @@
 //! it runs, it starts over. Running, its noise (`kNormalDishwasherBroadcastParams`: three metres,
 //! its room only) wakes a Sim asleep there (Rude Awakening, not a Heavy Sleeper: `disturb`) and
 //! has those awake there pull a face at it the first time (`BadNoise`). Made silent ("Upgrade:
-//! Make Silent", Handiness 3) it disturbs nobody and is heard with the quiet one's sounds
+//! Silent Running", Handiness 3) it disturbs nobody and is heard with the quiet one's sounds
 //! (`dwasher_running_lp_exp`, `dwasher_done_exp`); nor does it run noisily for a Heavy Sleeper
 //! who loads it (`CreateDiswasherNoiseBroadcaster`). Broken as it's loaded, it doesn't run.
 
@@ -47,7 +47,7 @@ pub fn sounds(silent: bool) -> (&'static str, &'static str) {
     if silent { ("dwasher_running_lp_exp", "dwasher_done_exp") } else { ("dwasher_running_lp_chp", "dwasher_done_chp") }
 }
 
-/// Whether it's been made silent ("Make Silent": the dishwasher's improvement).
+/// Whether it's been made silent ("Silent Running": the dishwasher's improvement).
 pub fn silent(upgrades: Option<&crate::upgrades::Upgrades>) -> bool {
     crate::upgrades::has(upgrades, crate::upgrades::Upgrade::Improved)
 }

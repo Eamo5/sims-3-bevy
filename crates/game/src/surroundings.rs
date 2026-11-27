@@ -22,11 +22,16 @@ impl Plugin for SurroundingsPlugin {
 
 /// How long food keeps once served (game minutes).
 const SPOIL_MINUTES: f64 = 8.0 * 60.0;
-/// How many loads of scraps a trash can holds (a trash compactor, three times as many).
+/// How many loads of scraps a trash can holds (a trash compactor, three times as many; with
+/// "Improved Crushing", twice that).
 pub const TRASH_CAPACITY: u8 = 5;
 
-pub fn trash_capacity(kind: ObjectKind) -> u8 {
-    if kind == ObjectKind::TrashCompactor { TRASH_CAPACITY * 3 } else { TRASH_CAPACITY }
+pub fn trash_capacity(kind: ObjectKind, upgrades: Option<&crate::upgrades::Upgrades>) -> u8 {
+    match kind {
+        ObjectKind::TrashCompactor if crate::upgrades::has(upgrades, crate::upgrades::Upgrade::Improved) => TRASH_CAPACITY * 3 * crate::upgrades::IMPROVED_CRUSHING,
+        ObjectKind::TrashCompactor => TRASH_CAPACITY * 3,
+        _ => TRASH_CAPACITY,
+    }
 }
 
 /// A dish just cleared away, to be taken to the dishwasher or washed up at the sink.
@@ -87,15 +92,15 @@ fn trash_cans(mut commands: Commands, cans: Query<(Entity, &GameObject), Without
 fn discard(
     mut commands: Commands,
     sims: Query<(Entity, &Transform), With<Discarded>>,
-    mut cans: Query<(&GameObject, &Transform, &mut TrashFill)>,
+    mut cans: Query<(&GameObject, &Transform, &mut TrashFill, Option<&crate::upgrades::Upgrades>)>,
     mut notes: ResMut<Notifications>,
 ) {
     for (e, tf) in &sims {
         commands.entity(e).remove::<Discarded>();
-        let Some((obj, _, mut fill)) = cans.iter_mut().min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))) else {
+        let Some((obj, _, mut fill, upgrades)) = cans.iter_mut().min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))) else {
             continue;
         };
-        let cap = trash_capacity(obj.kind);
+        let cap = trash_capacity(obj.kind, upgrades);
         if fill.0 < cap {
             fill.0 += 1;
             if fill.0 == cap {
@@ -466,7 +471,7 @@ fn surroundings(
     time: Res<Time>,
     mut last: Local<f32>,
     mut sims: Query<(&Sim, &Transform, &mut Moodlets, &Visibility), With<HouseholdMember>>,
-    mess: Query<(Entity, &GameObject, &Transform, Has<Spoiled>, Option<&TrashFill>)>,
+    mess: Query<(Entity, &GameObject, &Transform, Has<Spoiled>, Option<&TrashFill>, Option<&crate::upgrades::Upgrades>)>,
     unflushed: Res<crate::toilets::Unflushed>,
 ) {
     let now = time.elapsed_secs();
@@ -478,11 +483,11 @@ fn surroundings(
     // unflushed (not to a Slob).
     let spots: Vec<(Vec3, u32, bool)> = mess
         .iter()
-        .filter_map(|(e, o, tf, spoiled, fill)| {
+        .filter_map(|(e, o, tf, spoiled, fill, upgrades)| {
             let w = match o.kind {
                 ObjectKind::DirtyDishes if spoiled => 3,
                 ObjectKind::DirtyDishes | ObjectKind::ClothingPile => 1,
-                ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 >= trash_capacity(o.kind)) => 3,
+                ObjectKind::TrashCan | ObjectKind::TrashCompactor if fill.is_some_and(|f| f.0 >= trash_capacity(o.kind, upgrades)) => 3,
                 ObjectKind::Toilet if unflushed.0.contains_key(&e) => 2,
                 _ => return None,
             };

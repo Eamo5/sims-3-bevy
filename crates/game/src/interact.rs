@@ -5350,6 +5350,8 @@ pub(crate) fn run_actions(
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes / 3.0,
                                     Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
                                     Special::SmashDollhouse => crate::dollhouse::smash_minutes(sim.age),
+                                    // (A microwave with "Faster Cooking": `upgrades`.)
+                                    Special::Microwave if upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved)) => d.minutes * crate::upgrades::FASTER_COOKING,
                                     _ => d.minutes,
                                 };
                                 let complete = if d.special == Special::WriteNovel {
@@ -7336,7 +7338,7 @@ fn autonomy(
     ),
     (party_on, trash_q, served_q, leftovers, sprinkling, route_failed): (
         Option<Res<Party>>,
-        Query<&crate::surroundings::TrashFill>,
+        Query<(&crate::surroundings::TrashFill, Option<&crate::upgrades::Upgrades>)>,
         Query<&crate::surroundings::ServedAt>,
         Res<crate::meals::Leftovers>,
         Query<(), With<crate::gardening::Sprinkling>>,
@@ -7769,7 +7771,7 @@ fn autonomy(
                     };
                 }
                 // A full trash can is a chore like dishes; an emptier one isn't.
-                if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|f| f.0 >= crate::surroundings::trash_capacity(obj.kind)) {
+                if d.special == Special::EmptyTrash && !trash_q.get(oe).is_ok_and(|(f, u)| f.0 >= crate::surroundings::trash_capacity(obj.kind, u)) {
                     continue;
                 }
                 if d.special == Special::Scrub {
