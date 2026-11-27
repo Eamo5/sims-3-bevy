@@ -1536,6 +1536,8 @@ pub enum Special {
     MakeAllHappy,
     /// Something posted at the mailbox (`rgmmail`).
     PostAway,
+    /// Something swiped posted back at the mailbox (`klepto`).
+    ReturnStolen,
     /// A garden plant fertilized, revived, talked to, or disposed of (`gardening`).
     Fertilize,
     RevivePlant,
@@ -1714,13 +1716,15 @@ static MEAL: [InteractionDef; 2] = [
     InteractionDef { special: Special::GrabPlate, ..def("Grab a Plate", 2.0, [9000.0, 0.0, 0.0, 0.0, 0.0, 0.0], Pose::Use) },
     InteractionDef { special: Special::PutAway, ..def("Put Away Leftovers", 3.0, N, Pose::Use) },
 ];
-static MAILBOX: [InteractionDef; 8] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
+static MAILBOX: [InteractionDef; 9] = [InteractionDef { special: Special::PayBills, ..def("Pay Bills", 3.0, N, Pose::Use) },
     // (The game's `DonateToCharity`, offered as its causes' menus.)
     InteractionDef { autonomous: false, special: Special::Donate, ..def("Donate to Charity", 2.0, N, Pose::Use) },
     // (With the testing cheats on: `cheats`.)
     InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_ALL_HAPPY, 0.0, N, Pose::Use) },
     // (A gem or metal posted off to be cut or smelted, from the inventory: `rgmmail`.)
     InteractionDef { autonomous: false, special: Special::PostAway, ..def("Post", 2.0, N, Pose::Use) },
+    // (Something swiped posted back: `klepto`.)
+    InteractionDef { autonomous: false, special: Special::ReturnStolen, ..def("Return Stolen Item", 2.0, N, Pose::Use) },
     // (The testing cheats' others: `cheats`.)
     InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::MAKE_FRIENDS, 0.0, N, Pose::Use) },
     InteractionDef { autonomous: false, special: Special::MakeAllHappy, ..def(crate::cheats::KNOW_EVERYONE, 0.0, N, Pose::Use) },
@@ -2483,6 +2487,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Eat" if matches!(kind, ObjectKind::Chair | ObjectKind::PicnicTable) => A::new(Some("a2o_eat_diningIn_fork_start_x"), &["a2o_eat_diningIn_fork_neat_x"]).ending(&["a2o_eat_diningIn_fork_stop_x"], 0.9),
         "Do Homework" => A::new(Some("a2o_homework_table_start_x"), &["a2o_homework_table_write_x", "a2o_homework_table_read_x", "a2o_homework_table_think_x", "a2o_homework_table_erase_x"]),
         "Pay Bills" | "Donate to Charity" => A::new(None, &["a2o_mailbox_getMail_x"]),
+        // (The mailbox's `Put Mail`.)
+        "Post" | "Return Stolen Item" if kind == ObjectKind::Mailbox => A::new(None, &["a2o_mailbox_putMail_x"]),
         "Water" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_wateringCan_start_x"), &["a2o_gardening_wateringCan_waterPlants_x"]),
         "Weed" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_crouch_start_x"), &["a2o_gardening_crouch_pullWeeds_x"]),
         "Harvest" if kind == ObjectKind::GardenPlant => A::new(Some("a2o_gardening_bendover_start_x"), &["a2o_gardening_bendover_harvestmed_x"]),
@@ -5549,6 +5555,10 @@ pub(crate) fn run_actions(
                                         }
                                         Special::PostAway => {
                                             commands.entity(me).insert(crate::rgmmail::PostedNow);
+                                        }
+                                        Special::ReturnStolen => {
+                                            let now = clock.minutes;
+                                            commands.queue(move |w: &mut World| crate::klepto::give_back(w, me, now));
                                         }
                                         Special::PokeFire => {
                                             commands.entity(*target).try_insert(crate::fireplace::Raging(clock.minutes + crate::fireplace::RAGING_MINUTES));

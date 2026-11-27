@@ -29,7 +29,7 @@ pub struct KleptoPlugin;
 
 impl Plugin for KleptoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Swipeable>().add_systems(Update, (swipeable, swiped, brought_home, klepto_test).run_if(in_state(PlayMode::Live)));
+        app.init_resource::<Swipeable>().add_systems(Update, (swipeable, swiped, brought_home, klepto_test, return_test).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -47,6 +47,49 @@ pub const PER_CAREER_LEVEL: i32 = 350;
 pub const FROM_SCHOOL: i32 = 500;
 /// How keen their free will is on it (above a Neurotic's freak-out, a performer's TaDa!).
 pub const SWIPE_SCORE: f32 = 10.0;
+
+/// A swiped thing in the inventory, marked as the game's `GameObject.Thief` marks it: an
+/// object's stack of this quality (kept apart from what's theirs).
+pub const STOLEN: u8 = 1;
+
+/// The mailbox's "Return Stolen Item..." (the game's `Mailbox.ReturnStolenItem`), offered while
+/// they've something swiped in their inventory: picked from its list, it's posted back (the
+/// mailbox's `Put Mail`) and they're Returned Stolen Property.
+pub const RETURN: &str = "Return Stolen Item...";
+
+/// What they've swiped, to give back: each stack's key and name.
+pub fn stolen(inv: Option<&crate::inventory::Inventory>) -> Vec<(String, String)> {
+    inv.map(|i| i.0.iter().filter(|s| is_stolen(s)).map(|s| (s.key.clone(), s.name.clone())).collect()).unwrap_or_default()
+}
+
+pub fn is_stolen(s: &crate::inventory::Stack) -> bool {
+    s.kind == crate::inventory::ItemKind::Object && s.quality == STOLEN && s.count > 0
+}
+
+/// Off to the mailbox to give back the swiped thing of that key.
+#[derive(Component, Clone, Debug)]
+pub struct Returning(pub String);
+
+/// At the mailbox: one of the things swiped taken out of their inventory and posted back, and
+/// the game's moodlet and event for it.
+pub fn give_back(w: &mut World, me: Entity, now: f64) {
+    let Some(Returning(key)) = w.entity_mut(me).take::<Returning>() else { return };
+    let Some(mut inv) = w.get_mut::<crate::inventory::Inventory>(me) else { return };
+    let Some(i) = inv.0.iter().position(|s| is_stolen(s) && s.key == key) else { return };
+    let each = inv.0[i].each();
+    let name = inv.0[i].name.clone();
+    inv.0[i].count -= 1;
+    inv.0[i].worth -= each;
+    if inv.0[i].count == 0 {
+        inv.0.remove(i);
+    }
+    if let Some(mut m) = w.get_mut::<crate::life::Moodlets>(me) {
+        m.add(crate::life::MoodletKind::ReturnedStolenObject, now);
+    }
+    w.write_message(crate::dreams::DreamEvent::new(me, "kReturnedStolenObject"));
+    let first = w.get::<Sim>(me).map(|s| s.first.clone()).unwrap_or_default();
+    info!("klepto: {first} gave back the {name}");
+}
 
 /// Whether it's the hour for it.
 pub fn swipe_hours(hour: f32) -> bool {
@@ -229,7 +272,7 @@ fn swiped(
         let Some(c) = baked.0.catalog.iter().find(|c| c.objd == o.1.objd) else { continue };
         let name = if c.name.is_empty() { o.1.name.clone() } else { c.name.clone() };
         commands.entity(t.e).try_despawn();
-        crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Object, c.instance_name.clone(), name.clone(), 0, c.price.max(0) as i64, 1);
+        crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Object, c.instance_name.clone(), name.clone(), STOLEN, c.price.max(0) as i64, 1);
         let count = swiped.map_or(0, |s| s.today(day)) + 1;
         commands.entity(me).insert(SwipedToday { day, count });
         info!("klepto: {} swiped the {name} ({} today)", sim.first, count);
@@ -275,7 +318,7 @@ fn brought_home(
         let Some(ui) = ui.as_ref() else { continue };
         let worth: Vec<&s3bake::types::CatalogEntry> = baked.0.catalog.iter().filter(|c| c.price > 0 && c.price <= d.0 && ui.data.stealable.binary_search(&c.objd.2).is_ok()).collect();
         let Some(c) = worth.choose(&mut rng) else { continue };
-        crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Object, c.instance_name.clone(), c.name.clone(), 0, c.price as i64, 1);
+        crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Object, c.instance_name.clone(), c.name.clone(), STOLEN, c.price as i64, 1);
         let a = if c.name.starts_with(['A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
         notes.push(format!("{} came home with {a} {} that isn't {}.", sim.first, c.name, if sim.female { "hers" } else { "his" }));
     }
@@ -323,9 +366,80 @@ fn klepto_test(
     }
 }
 
+/// `RETURN_TEST=1|menu` (tests): ten seconds in, the selected Sim has something swiped in their
+/// inventory (the cheapest thing the game lets be stolen) and gives it back at the mailbox, or
+/// (`menu`) the mailbox's menu is up for them.
+fn return_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    baked: Res<crate::baked::Baked>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut sel: Query<(Entity, &mut crate::interact::ActionQueue, &Transform), With<crate::sim::Selected>>,
+    mailboxes: Query<(Entity, &GameObject, &Transform), Without<LotObject>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut stage: Local<u8>,
+) {
+    let Ok(what) = std::env::var("RETURN_TEST") else { return };
+    let t = time.elapsed_secs();
+    let (Some(ui), Ok((me, mut q, tf))) = (ui, sel.single_mut()) else { return };
+    let Some((mb, _, mtf)) = mailboxes.iter().find(|m| m.1.kind == crate::interact::ObjectKind::Mailbox) else { return };
+    if t > 6.0
+        && let Ok(mut cam) = cams.single_mut()
+    {
+        cam.look_at(mtf.translation.lerp(tf.translation, 0.5));
+        cam.distance = 9.0;
+    }
+    match *stage {
+        0 if t > 8.0 => {
+            let Some(c) = baked.0.catalog.iter().filter(|c| c.price > 0 && ui.data.stealable.binary_search(&c.objd.2).is_ok()).min_by_key(|c| c.price) else { return };
+            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Object, c.instance_name.clone(), c.name.clone(), STOLEN, c.price as i64, 1);
+            info!("return test: a swiped {} in hand", c.name);
+            *stage = 1;
+        }
+        1 if t > 10.0 => {
+            *stage = 2;
+            if what == "menu" {
+                commands.insert_resource(crate::hud::PieFor(mb));
+                return;
+            }
+            let Some(def) = crate::interact::interactions_for(crate::interact::ObjectKind::Mailbox).iter().position(|d| d.special == crate::interact::Special::ReturnStolen) else { return };
+            commands.entity(me).queue_silenced(move |mut e: EntityWorldMut| {
+                let key = e.get::<crate::inventory::Inventory>().and_then(|i| stolen(Some(i)).first().map(|s| s.0.clone()));
+                if let Some(key) = key {
+                    e.insert(Returning(key));
+                }
+            });
+            q.push_player(crate::interact::Action::new("Return Stolen Item", crate::interact::ActionKind::Object { target: mb, def }, false));
+            info!("return test: off to the mailbox");
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn swiped_things_are_kept_apart_to_give_back_one_at_a_time() {
+        use crate::inventory::{Inventory, ItemKind};
+        let mut inv = Inventory::default();
+        inv.add(ItemKind::Object, "lampTable", "Table Lamp", 0, 80);
+        inv.add(ItemKind::Object, "lampTable", "Table Lamp", STOLEN, 80);
+        inv.add(ItemKind::Object, "lampTable", "Table Lamp", STOLEN, 80);
+        inv.add(ItemKind::Produce, "Tomato", "Tomato", STOLEN, 5);
+        assert_eq!(stolen(Some(&inv)), [("lampTable".to_string(), "Table Lamp".to_string())]);
+        assert!(stolen(None).is_empty());
+        let mut w = World::new();
+        w.init_resource::<bevy::ecs::message::Messages<crate::dreams::DreamEvent>>();
+        let me = w.spawn((inv, crate::life::Moodlets::default(), Returning("lampTable".into()))).id();
+        give_back(&mut w, me, 100.0);
+        let inv = w.get::<Inventory>(me).unwrap();
+        assert_eq!(inv.0.iter().filter(|s| is_stolen(s)).map(|s| s.count).sum::<u32>(), 1, "one given back");
+        assert_eq!(inv.0.iter().find(|s| s.kind == ItemKind::Object && s.quality == 0).map(|s| s.count), Some(1), "what's theirs stays");
+        assert!(w.get::<crate::life::Moodlets>(me).unwrap().has(crate::life::MoodletKind::ReturnedStolenObject));
+        assert!(w.get::<Returning>(me).is_none());
+    }
 
     #[test]
     fn swipes_are_for_the_night_unwatched_and_near() {

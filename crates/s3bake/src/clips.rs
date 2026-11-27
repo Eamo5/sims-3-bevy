@@ -669,6 +669,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     // The mailbox and the paper.
     "a2o_mailbox_getMail",
     "a2o_mailbox_putFlagUp",
+    // (Posting at it, the game's `Put Mail`: a gem sent off, something swiped given back.)
+    "a2o_mailbox_putMail_x",
     // Need failures: an accident, collapsing from exhaustion, sleeping on the floor.
     "a_motFail_",
     "c_motFail_",

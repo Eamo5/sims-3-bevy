@@ -1292,7 +1292,11 @@ installation is unreachable.
   its own back when it's next opened). Their free will has them at it whenever they can, and
   anyone come into the room meanwhile likes them less and knows them for a Kleptomaniac. A day
   of work or school brings something home one time in five (worth up to §350 a career level,
-  or §500 from school). `KLEPTO=1` makes the selected Sim one who swipes all they can (a test).
+  or §500 from school). What's swiped stays marked so in the inventory (the game's `Thief`),
+  apart from what's theirs, and the mailbox's *Return Stolen Item... ›* lists it: the one picked
+  is posted back (the mailbox's `Put Mail`) and the Sim is Returned Stolen Property (+15 for
+  eight hours, the game's `ReturnedStolenObject`). `KLEPTO=1` makes the selected Sim one who
+  swipes all they can, `RETURN_TEST=1|menu` gives one back (tests).
 - **Walk styles**: each way a Sim goes is gone in the game's walk style for it, by the game's
   own rules: about their business on their own lot they walk; sent across it, they hurry (the
   fast walk) the long ways; elsewhere the further the faster, from a walk to a fast walk, a

@@ -2207,6 +2207,15 @@ fn world_click(
                         pie.submenus.push((SET_BED_OWNER.to_string(), list));
                     }
                 }
+                // (Something swiped to give back: its list, `klepto`.)
+                if d.special == Special::ReturnStolen {
+                    let list: Vec<(String, ActionKind)> = crate::klepto::stolen(inv_q.get(actor).ok()).into_iter().map(|(_, name)| (name, ActionKind::Object { target: t, def: i })).collect();
+                    if !list.is_empty() {
+                        options.push((format!("{} ›", crate::klepto::RETURN), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::klepto::RETURN.to_string(), list));
+                    }
+                    continue;
+                }
                 // (A donation, the game's `DonateToCharity`: the Good's or Evil's, once a day, to
                 // either of this week's two causes, as much as the household can spare.)
                 if d.special == Special::Donate {
@@ -3519,6 +3528,17 @@ fn pie_buttons(
     {
         q.push_player(Action::new(crate::cityhall::CHANGE_NAME, kind.clone(), false));
         commands.entity(a).insert(crate::cityhall::ChangingName(person));
+        return;
+    }
+    // Something swiped picked to give back: off to the mailbox with it (`klepto`).
+    if title == crate::klepto::RETURN
+        && let ActionKind::Object { .. } = kind
+        && let Some(a) = actor
+        && let Some((key, _)) = crate::klepto::stolen(inventories.get(a).ok()).into_iter().find(|(_, n)| *n == label)
+        && let Ok(mut q) = queues.get_mut(a)
+    {
+        q.push_player(Action::new("Return Stolen Item", kind.clone(), false));
+        commands.entity(a).insert(crate::klepto::Returning(key));
         return;
     }
     // A portrait of someone: the painter to the easel, the sitter before it (`photos`).
