@@ -136,6 +136,9 @@ pub struct SavedSim {
     /// Her mood over the pregnancy (mood × minutes), for the baby's traits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pregnancy_mood: Option<f64>,
+    /// Had the doctor's advice about it (`little::Pregnancy::advice`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pregnancy_advice: bool,
     /// Body shape: weight and fitness.
     #[serde(default)]
     pub shape: Option<(f32, f32)>,
@@ -755,6 +758,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         school_visit: None,
         pregnancy: None,
         pregnancy_mood: None,
+        pregnancy_advice: false,
         pregnancy_sway: None,
         shape: Some((sim.weight, sim.fitness)),
         opportunities: Vec::new(),
@@ -1215,6 +1219,7 @@ fn save_game(
             school_visit: rabbit.filter(|r| std::ptr::eq(r.activity, &crate::rabbitholes::SCHOOL)).map(|r| (r.inside_from, r.until)),
             pregnancy: pregnancy.map(|p| (p.since, p.other_parent.and_then(|o| ids.get(&o).copied()), p.stage)),
             pregnancy_mood: pregnancy.map(|p| p.mood),
+            pregnancy_advice: pregnancy.is_some_and(|p| p.advice),
             pregnancy_sway: pregnancy.map(|p| (p.girl_bias, p.kids_hours)),
             shape: Some((sim.weight, sim.fitness)),
             opportunities: opps.map(|o| o.active.iter().filter_map(|a| Some((guid(a.index)?, a.deadline))).collect()).unwrap_or_default(),
@@ -1576,7 +1581,7 @@ pub(crate) fn apply_loaded_game(
             // (The hours gone by aren't gone over again: what's due comes at the next.)
             let hour = (((game.minutes - since) / 60.0).max(0.0) as u32).min(crate::little::HOURS_OF_PREGNANCY - 1);
             let (girl_bias, kids_hours) = s.pregnancy_sway.unwrap_or_default();
-            ec.insert(crate::little::Pregnancy { since, other_parent, stage, mood: s.pregnancy_mood.unwrap_or(0.0), hour, girl_bias, kids_hours });
+            ec.insert(crate::little::Pregnancy { since, other_parent, stage, mood: s.pregnancy_mood.unwrap_or(0.0), hour, girl_bias, kids_hours, advice: s.pregnancy_advice });
             if stage >= 4 {
                 ec.insert(crate::little::Labour { next: game.minutes });
             }

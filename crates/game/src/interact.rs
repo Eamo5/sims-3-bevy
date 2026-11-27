@@ -5082,6 +5082,7 @@ pub(crate) fn run_actions(
                                         .map(|t| t.0)
                                         .or_else(|| (*activity == crate::gardening::SEEDS_TASK).then_some(&crate::gardening::BUY_SEEDS))
                                         .or_else(|| (*activity == crate::little::BIRTH_TASK).then_some(&crate::little::HAVE_BABY))
+                                        .or_else(|| (*activity == crate::little::ADVICE_TASK).then_some(&crate::little::MEDICAL_ADVICE))
                                         .or_else(|| crate::meals::recipe_task(*activity))
                                         .or_else(|| crate::classes::class_task(*activity))
                                         .or_else(|| (crate::skillbooks::BOOK_TASK..crate::skillbooks::BOOK_TASK + 1000).contains(activity).then_some(&crate::skillbooks::BUY_BOOK))

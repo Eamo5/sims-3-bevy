@@ -514,7 +514,11 @@ installation is unreachable.
   as likely for each hour of KidZ Zone on TV or the children's radio station in hearing while
   pregnant, as the game's `mMultipleBabiesMultiplier`), room allowing; a girl or a boy at
   evens, swayed a twentieth for each watermelon eaten (a girl) or apple (a boy), at most three
-  twentieths, as the game's `IncreaseFemaleChance`. Each baby's traits come of her mood over the pregnancy, as the game's do: an
+  twentieths, as the game's `IncreaseFemaleChance`. Each baby's traits come of her mood over the
+  pregnancy (the game's `GetAverageMoodForBirth`: five more for each of the two pregnancy books,
+  "Totally Preggers" and "Baby Incoming", that either parent has read through, and five more for
+  the doctor's advice, the hospital's *Get Medical Advice (§200)*, three quarters of an hour,
+  offered only while pregnant and to those who can pay), as the game's do: an
   unhappy one gives bad ones, an ordinary one two inherited (from the parents half the time),
   a happy one one, a very happy one none, the rest the player's to choose in the traits
   picker; each is named in the game's box (its words saying what the baby was born with),

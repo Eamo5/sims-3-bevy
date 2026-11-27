@@ -83,7 +83,6 @@ static PARK: [Activity; 2] = [
 static POOL: [Activity; 1] = [act("Go Swimming", 90.0, 0, [-10.0, -6.0, -12.0, 20.0, 20.0, 45.0], Some("Athletic"))];
 static MUSEUM: [Activity; 1] = [act("View Art", 90.0, 15, [-5.0, -5.0, -3.0, 15.0, 0.0, 35.0], Some("Painting"))];
 static SCIENCE: [Activity; 1] = [act("Volunteer as a Test Subject", 120.0, -80, [-8.0, -8.0, -8.0, 5.0, -10.0, -10.0], None)];
-static HOSPITAL: [Activity; 1] = [act("Get a Checkup", 60.0, 40, [-4.0, -4.0, 5.0, 5.0, 5.0, -5.0], None)];
 static SHOPS: [Activity; 1] = [act("Browse the Shelves", 60.0, 0, [-4.0, -4.0, -2.0, 15.0, 0.0, 25.0], Some("Writing"))];
 // (With lunch at school.)
 pub static SCHOOL: Activity = act("School", 0.0, 0, [-6.0, -3.0, -6.0, 25.0, -6.0, -8.0], None);
@@ -115,7 +114,8 @@ pub fn activities(lot: &LotInfo) -> &'static [Activity] {
     } else if has("science") {
         &SCIENCE
     } else if has("hospital") {
-        &HOSPITAL
+        // (The hospital's own, by who's asking: `little::hospital_options`.)
+        &[]
     } else if has("book") || has("grocery") || has("consignment") {
         &SHOPS
     } else {
@@ -383,6 +383,14 @@ fn outings(
                 } else {
                     notes.push(format!("{} is home from school.", sim.first));
                 }
+            } else if std::ptr::eq(at.activity, &crate::little::MEDICAL_ADVICE) {
+                // (The doctor's advice, for the baby's traits: `little`.)
+                commands.entity(e).queue_silenced(|mut w: EntityWorldMut| {
+                    if let Some(mut p) = w.get_mut::<crate::little::Pregnancy>() {
+                        p.advice = true;
+                    }
+                });
+                notes.push(format!("{} is back from the hospital, with the doctor's advice about the pregnancy.", sim.first));
             } else if std::ptr::eq(at.activity, &crate::meals::BUY_RECIPE) {
                 commands.entity(e).insert(crate::meals::RecipeBookBought);
             } else if std::ptr::eq(at.activity, &crate::skillbooks::BUY_BOOK) {

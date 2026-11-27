@@ -94,7 +94,33 @@ impl Plugin for LittlePlugin {
             .add_message::<Conceive>()
             .init_resource::<NewbornPicks>()
             .add_systems(Update, (conceive, pregnancy, name_babies, newborn_traits_picker, little_life, put_down).chain().run_if(in_state(PlayMode::Live)))
-            .add_systems(Update, kids_radio.run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (kids_radio, advice_test).run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// `ADVICE_TEST=1` (tests, with `--do Pregnant`): the pregnant selected Sim off to the hospital
+/// for the doctor's advice; logged once it's had.
+fn advice_test(
+    world: Res<crate::loading::CurrentWorld>,
+    mut sims: Query<(&Sim, &mut crate::interact::ActionQueue, &Pregnancy), With<crate::sim::Selected>>,
+    mut stage: Local<u8>,
+) {
+    if std::env::var_os("ADVICE_TEST").is_none() {
+        return;
+    }
+    let Ok((sim, mut q, p)) = sims.single_mut() else { return };
+    match *stage {
+        0 => {
+            let Some(lot) = world.data.lots.iter().position(|l| l.internal_name.to_ascii_lowercase().contains("hospital")) else { return };
+            q.push_player(crate::interact::Action::new(crate::hud::activity_label(&MEDICAL_ADVICE), crate::interact::ActionKind::Visit { lot, activity: ADVICE_TASK }, false));
+            info!("advice test: {} off for the doctor's advice", sim.first);
+            *stage = 1;
+        }
+        1 if p.advice => {
+            info!("advice test: {} has had the doctor's advice", sim.first);
+            *stage = 2;
+        }
+        _ => {}
     }
 }
 
@@ -124,6 +150,8 @@ pub struct Pregnancy {
     /// Hours of children's TV and radio she's had (the game's `mMultipleBabiesMultiplier`, one
     /// more for each: twins and triplets likelier).
     pub kids_hours: f64,
+    /// Had the doctor's advice at the hospital (the game's `mDoctorAdviceGivenBonus`).
+    pub advice: bool,
 }
 
 /// How near a stereo playing the children's station she's in its hearing (the game's room's
@@ -154,7 +182,7 @@ pub const MAX_GENDER_OFFSET: f32 = 0.15;
 
 impl Pregnancy {
     pub fn new(since: f64, other_parent: Option<Entity>) -> Self {
-        Self { since, other_parent, stage: 0, mood: 0.0, hour: 0, girl_bias: 0.0, kids_hours: 0.0 }
+        Self { since, other_parent, stage: 0, mood: 0.0, hour: 0, girl_bias: 0.0, kids_hours: 0.0, advice: false }
     }
 
     /// Something eaten that sways the baby's sex (the game's `Ingredient` keys: `Watermelon` a
@@ -205,6 +233,38 @@ pub struct Labour {
 /// Off to the hospital to have the baby (a rabbit hole's "activity", lasting till the birth).
 pub const BIRTH_TASK: usize = 997;
 pub static HAVE_BABY: crate::rabbitholes::Activity = crate::rabbitholes::act("Have the Baby", 24.0 * 60.0, 0, [0.0, 0.0, -2.0, 0.0, 0.0, 0.0], None);
+
+/// A doctor's advice about the pregnancy at the hospital (the game's `GetMedicalAdvice`: three
+/// quarters of an hour, §200, offered only to the pregnant who can pay for it).
+pub const ADVICE_TASK: usize = 996;
+pub static MEDICAL_ADVICE: crate::rabbitholes::Activity = crate::rabbitholes::act("Get Medical Advice", 45.0, 200, [-4.0, -4.0, -2.0, 10.0, 0.0, 0.0], None);
+
+/// The pregnancy books (`Pregnancy.NumPregnancyBooksRead`'s: "Totally Preggers" and "Baby
+/// Incoming", their `BookGeneral` keys), each one read by either parent five more mood towards
+/// the baby's traits (`kPregnancyBookBonusMom`, `kPregnancyBookBonusDad`); the doctor's advice
+/// five more (`Medical.MoodEffectOfMedicalAdvice`).
+pub const PREGNANCY_BOOKS: [&str; 2] = ["PregnancyEricHW", "MorePregnancyEricHW"];
+const BOOK_BONUS: f32 = 5.0;
+const ADVICE_BONUS: f32 = 5.0;
+
+/// How many of the pregnancy books a Sim has finished.
+pub fn pregnancy_books_read(read: Option<&crate::novels::Novels>) -> usize {
+    PREGNANCY_BOOKS.iter().filter(|k| read.is_some_and(|n| n.finished(k))).count()
+}
+
+/// The mood towards the baby's traits beyond her own: the books both parents read, the doctor's
+/// advice, and a hospital birth.
+pub fn birth_bonus(mom_books: usize, dad_books: usize, advice: bool, hospital: bool) -> f32 {
+    BOOK_BONUS * (mom_books + dad_books) as f32 + if advice { ADVICE_BONUS } else { 0.0 } + if hospital { HOSPITAL_MOOD_BONUS } else { 0.0 }
+}
+
+/// The hospital's own (`Hospital`'s menu): a pregnant Sim's medical advice, if they can pay.
+pub fn hospital_options(lot: &s3bake::LotInfo, lot_index: usize, pregnant: bool, funds: i64) -> Vec<(String, crate::interact::ActionKind)> {
+    if !lot.internal_name.to_ascii_lowercase().contains("hospital") || !pregnant || funds <= MEDICAL_ADVICE.cost {
+        return Vec::new();
+    }
+    vec![(crate::hud::activity_label(&MEDICAL_ADVICE), crate::interact::ActionKind::Visit { lot: lot_index, activity: ADVICE_TASK })]
+}
 
 fn conceive(
     mut commands: Commands,
@@ -384,7 +444,7 @@ fn pregnancy(
         ResMut<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>,
         ResMut<crate::simbody::SimTextures>,
     ),
-    (mut family, fathers, members): (ResMut<crate::family::Genealogy>, Query<(&Sim, Option<&crate::wishes::Wishes>), Without<Pregnancy>>, Query<(), With<HouseholdMember>>),
+    (mut family, fathers, members, readers): (ResMut<crate::family::Genealogy>, Query<(&Sim, Option<&crate::wishes::Wishes>), Without<Pregnancy>>, Query<(), With<HouseholdMember>>, Query<&crate::novels::Novels>),
     (mut questions, mut picks, ui, words, mut puddles, mut topics): (
         ResMut<crate::dialog::Questions>,
         ResMut<NewbornPicks>,
@@ -485,7 +545,10 @@ fn pregnancy(
         let father = p.other_parent.and_then(|f| fathers.get(f).ok());
         let fertility = crate::wishes::has(wishes, "FertilityTreatment") || father.is_some_and(|(_, w)| crate::wishes::has(w, "FertilityTreatment"));
         let n = babies_born(rng.random::<f64>(), fertility, p.kids_hours, HOUSEHOLD_MAX.saturating_sub(members.iter().count()));
-        let average = p.average_mood(clock.minutes) + if hospital { HOSPITAL_MOOD_BONUS } else { 0.0 };
+        // (Her mood, and what the books both read and the doctor's advice add, the game's
+        // `GetAverageMoodForBirth`.)
+        let (mom_books, dad_books) = (pregnancy_books_read(readers.get(mother).ok()), pregnancy_books_read(p.other_parent.and_then(|f| readers.get(f).ok())));
+        let average = p.average_mood(clock.minutes) + birth_bonus(mom_books, dad_books, p.advice, hospital);
         let outcome = TraitOutcome::of(average);
         info!("birth: {} has {n} at {} (mood {average:.0}: {outcome:?})", sim.first, if hospital { "the hospital" } else { "home" });
         let parent_traits: Vec<crate::life::Trait> = sim.traits.iter().chain(father.map(|f| f.0.traits.iter()).into_iter().flatten()).copied().collect();
@@ -815,6 +878,24 @@ const CRY_TODDLER: crate::anim::ActionClip = crate::anim::ActionClip::new(Some("
 mod birth_tests {
     use super::*;
     use crate::life::Trait;
+
+    #[test]
+    fn the_pregnancy_books_and_the_doctors_advice_cheer_the_baby_on() {
+        let mut read = crate::novels::Novels::default();
+        read.0.push(crate::novels::NovelRead { key: "PregnancyEricHW".into(), finished: 1, ..default() });
+        read.0.push(crate::novels::NovelRead { key: "MorePregnancyEricHW".into(), pages: 40.0, ..default() });
+        assert_eq!(pregnancy_books_read(Some(&read)), 1, "half-read doesn't count");
+        assert_eq!(pregnancy_books_read(None), 0);
+        assert_eq!(birth_bonus(2, 1, true, false), 20.0);
+        assert_eq!(birth_bonus(0, 0, false, true), HOSPITAL_MOOD_BONUS);
+        // (Offered at the hospital only to the pregnant who can pay.)
+        let lot = |n: &str| s3bake::LotInfo { id: 1, internal_name: n.into(), corner: [0.0; 3], rotation: 0.0, width: 30, depth: 30, string_keys: Vec::new() };
+        assert_eq!(hospital_options(&lot("Com_Hospital"), 3, true, 500).len(), 1);
+        assert!(hospital_options(&lot("Com_Hospital"), 3, false, 500).is_empty());
+        assert!(hospital_options(&lot("Com_Hospital"), 3, true, 150).is_empty());
+        assert!(hospital_options(&lot("Com_Gym"), 3, true, 500).is_empty());
+        assert_eq!(hospital_options(&lot("Com_Hospital"), 3, true, 500)[0].0, "Get Medical Advice (§200)");
+    }
 
     #[test]
     fn twins_and_triplets_come_as_the_games_odds_have_them() {

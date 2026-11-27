@@ -571,7 +571,7 @@ fn tag_clicks(
     mut cam: Query<&mut SimsCamera>,
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<(Option<&crate::opportunities::SimOpportunities>, Option<&crate::careers::Job>), With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
     (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
-    learners: Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>)>,
+    learners: Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>, Has<crate::little::Pregnancy>)>,
     company_q: Query<(Entity, &crate::sim::Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<crate::sim::HouseholdMember>, With<crate::interact::Visitor>)>>,
 ) {
     for (i, tag, collectible) in &tags {
@@ -596,7 +596,8 @@ fn tag_clicks(
         let (mine, job) = opps.single().ok().unwrap_or((None, None));
         let mut tasks = ui.as_ref().map(|u| crate::opportunities::lot_options(&world.data, tag.lot, mine, &u.data, crate::opportunities::Today::of(&clock, job))).unwrap_or_default();
         tasks.extend(crate::gardening::lot_options(&world.data, tag.lot));
-        if let Ok((s, taken)) = learners.get(selected.single().unwrap_or(Entity::PLACEHOLDER)) {
+        if let Ok((s, taken, pregnant)) = learners.get(selected.single().unwrap_or(Entity::PLACEHOLDER)) {
+            tasks.extend(crate::little::hospital_options(lot, tag.lot, pregnant, household.as_ref().map_or(0, |h| h.funds)));
             tasks.extend(crate::classes::lot_classes(lot, clock.hour_f(), clock.day(), s.age, taken, None).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot: tag.lot, activity: task })));
             tasks.splice(0..0, crate::venues::world_lot_options(&world.data, tag.lot, clock.day(), clock.hour_f(), s.age).into_iter().map(|(label, task)| (label, ActionKind::Visit { lot: tag.lot, activity: task })));
         }
