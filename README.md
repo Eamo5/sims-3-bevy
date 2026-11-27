@@ -2041,6 +2041,21 @@ installation is unreachable.
   football or baseball about lets two Sims *Play Catch* a few metres apart, throwing it soft,
   hard, wimpy or showing off; and a house phone on the wall or a table opens the phone's
   menu. All with the game's own animations and props.
+- **Play Tag**, as the game's "Play Tag" social and its `PlayTagSituation`: a child, or a
+  Childish teen or older (`TestPlayTag`), asks anyone from childhood up under Friendly, and
+  children do it of their own accord (the outdoorsy and the Childish keener, never one who
+  hates the outdoors), tagging them with the game's `Tagger`/`Taggee` clips. Taken up, the one
+  who asked is "it": the other runs off outdoors on the lot, six to ten metres at a time and no
+  further than forty from where it began (`kMaxDistanceFromOrigin`), laughing as they go
+  (`vo_playtag_runA`, a child's `runC`); after a run they may stop to catch their breath
+  (`loopBreathe`: the heavier and less fit the likelier, at least three times in ten), and a
+  moment after they've set off (`kHunterDelay`) "it" runs after them to where they ran.
+  Caught out of breath within three metres, they're tagged (`Tagger_accept`), and once they've
+  their breath back they're "it". It's fun (50 an hour) and social (100), and they get on
+  (friendly 75 an hour, liking 2: `kRelationshipSTCDelta`, `kRelationshipLTRDelta`), till one's
+  had all the fun they can, a need's pressing, something else is asked of them or the game's
+  cancelled, or their way's blocked too often; on the queue it's "Play Tag" with the other's
+  picture. `TAG_TEST=social|play|menu`, `TAG_BREATHE=1` (tests).
 - **The packs' games and instruments**: pool tables (the cue fetched from the rack, shots
   round the table as the balls roll), dartboards, bowling lanes (the ball fetched from the
   return, bowled, and the pins' fall watched, in turn), karaoke machines with the microphone,

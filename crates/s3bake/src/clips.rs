@@ -112,6 +112,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fireplace_warmHands",
     // (Poking the fire, the poker in hand: its clips and the poker's.)
     "a2o_fireplace_poke_",
+    // Play Tag: the tag that starts it and each one after, the one tagged, catching breath.
+    "a2a_playTag_",
+    "a2c_playTag_",
+    "c2a_playTag_",
+    "c2c_playTag_",
     // (Playing with the fire, a colour thrown in, and upgrading it.)
     "a2o_fireplace_playFire_",
     "a2o_fireplace_throwHerb_",

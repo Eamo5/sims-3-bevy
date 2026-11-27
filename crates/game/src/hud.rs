@@ -3833,9 +3833,10 @@ fn hud_buttons(
         }
     }
     for (i, b) in &queue_btns {
+        // (The panel's buttons are those not already cancelled, in turn.)
         if *i == Interaction::Pressed
             && let Ok(mut q) = queues.single_mut()
-            && let Some(a) = q.0.get_mut(b.0)
+            && let Some(a) = q.0.iter_mut().filter(|a| !a.cancel).nth(b.0)
         {
             a.cancel = true;
         }
@@ -4100,6 +4101,8 @@ fn update_queue_panel(
                             objects.get(*target).map_or(QueuePicture::None, |o| QueuePicture::Object(o.objd))
                         }
                         ActionKind::Social { target, .. } | ActionKind::PhoneChat { target } | ActionKind::Invite { target } if sims.contains(*target) => QueuePicture::Sim(*target),
+                        // (A game of tag: the other player's picture, as the game's `GetIconKey`.)
+                        ActionKind::Outro { target, .. } if a.label == crate::playtag::PLAY_TAG && sims.contains(*target) => QueuePicture::Sim(*target),
                         _ => QueuePicture::None,
                     };
                     (a.label.clone(), pic)

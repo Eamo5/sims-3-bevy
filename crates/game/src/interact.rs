@@ -4830,6 +4830,12 @@ pub(crate) fn run_actions(
                                         debug!("{} to {}: {} comes across {:?} (in {}, liking {:.0})", sim.first, tsim.first, s.name, outcome.result, rel.stc.name(), rel.friendship);
                                     }
                                     action.social_outcome = Some(outcome);
+                                    // (Tag: the one tagged, and taking it up or not, `playtag`.)
+                                    if s.effect == SocialEffect::PlayTag && !action.seated {
+                                        let (x, y) = crate::playtag::social_clips(sim.age, tsim.age, outcome.accepted);
+                                        commands.entity(me).insert(x);
+                                        commands.entity(*target).try_insert((y, SocialPartner(me)));
+                                    }
                                     // (Seated: the talker's talk and the listener's, over the top of them;
                                     // to one sat, theirs.)
                                     // (A cuddle on the sofa: the game's seated cuddle, leaning in (or turned
@@ -6183,6 +6189,11 @@ pub(crate) fn run_actions(
                                                     info!("competition promoted ({} in all)", j.tally.promoted);
                                                 }
                                             });
+                                        }
+                                        // (Tag taken up: the game's on, `playtag`.)
+                                        SocialEffect::PlayTag if action.social_outcome.is_none_or(|o| o.accepted) => {
+                                            let (prey, autonomous) = (*target, action.autonomous);
+                                            commands.queue(move |w: &mut World| crate::playtag::start(w, me, prey, autonomous));
                                         }
                                         // (A child asked out of their costume: into everyday clothes,
                                         // `costumes`.)

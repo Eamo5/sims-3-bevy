@@ -1774,6 +1774,8 @@ fn interaction_queue(
                 crate::interact::ActionKind::Social { target, .. } | crate::interact::ActionKind::PhoneChat { target } | crate::interact::ActionKind::Invite { target } if sims.contains(*target) => {
                     Some(QueuePicture::Sim(*target))
                 }
+                // (A game of tag: the other player's picture, as the game's `GetIconKey`.)
+                crate::interact::ActionKind::Outro { target, .. } if a.label == crate::playtag::PLAY_TAG && sims.contains(*target) => Some(QueuePicture::Sim(*target)),
                 crate::interact::ActionKind::GoToWork => workers.get(me).ok().map(|(j, _)| QueuePicture::Icon(j.career().icon)),
                 _ => None,
             };

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 30;
+pub const SOUNDS_VERSION: u32 = 31;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -121,6 +121,9 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "ui_photo_sting_bad",
     // A photography collection completed.
     "sting_obj_collect_piece_final",
+    // Play Tag: the laugh as they run (a grown-up's, a child's).
+    "vo_playtag_runA",
+    "vo_playtag_runC",
     // A dishwasher running and done, and a silent one's.
     "dwasher_running_lp_chp",
     "dwasher_running_lp_exp",

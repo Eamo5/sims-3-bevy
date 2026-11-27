@@ -314,6 +314,8 @@ pub enum SocialEffect {
     /// A child asked out of their costume, into everyday clothes (the game's "Ask To Remove
     /// Costume": `OnAskToRemoveCostume`): `costumes`.
     RemoveCostume,
+    /// A game of tag, the one who asked "it" (the game's "Play Tag": `AfterPlayTag`): `playtag`.
+    PlayTag,
 }
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
@@ -604,7 +606,7 @@ const fn occult(o: crate::sim::Occult, def: SocialDef) -> SocialDef {
 use crate::sim::Occult as O;
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 62] = [
+pub static SOCIALS: [SocialDef; 63] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::Greet, ..sd("Greet", Friendly, 3.0, 80.0, 5.0, 4.0, 0.0) },
     SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
@@ -661,6 +663,8 @@ pub static SOCIALS: [SocialDef; 62] = [
     SocialDef { min_romance: 50.0, ..sd("Leap Into Arms", Romantic, 5.0, 140.0, 40.0, 4.0, 10.0) },
     SocialDef { effect: SocialEffect::Kiss, min_romance: 60.0, ..sd("Dip Kiss", Romantic, 6.0, 150.0, 30.0, 4.0, 12.0) },
     SocialDef { effect: SocialEffect::PlayCatch, ..sd("Play Catch", Funny, 30.0, 60.0, 120.0, 6.0, 0.0) },
+    // (The tag that starts it, `PlayTag`'s graph; the game itself is `playtag`'s.)
+    SocialDef { autonomous: true, effect: SocialEffect::PlayTag, ..sd(crate::playtag::PLAY_TAG, Friendly, 3.0, 100.0, 50.0, 4.0, 0.0) },
     // The Supernatural pack's (and Late Night's): each for its own kind.
     occult(O::Vampire, sd("Hypnotic Gaze", Romantic, 6.0, 100.0, 30.0, 4.0, 8.0)),
     occult(O::Vampire, sd("Talk About the Joy of Plasma", Friendly, 15.0, 100.0, 20.0, 6.0, 0.0)),
@@ -971,11 +975,14 @@ pub fn pick_autonomous(actor: &Sim, target_age: Age, rel: &Relationship, rng: &m
             {
                 return None;
             }
+            if s.effect == SocialEffect::PlayTag && !crate::playtag::may_play(actor, target_age, true) {
+                return None;
+            }
             let intended = conv::intended(i);
             if avoid.contains(&intended) || (intended == Commodity::Amorous && !romantic) || !conv::offered(s, rel.stc, state) {
                 return None;
             }
-            let keen = s.game.is_some_and(|g| g.keen.iter().any(|t| actor.traits.contains(t)));
+            let keen = s.game.is_some_and(|g| g.keen.iter().any(|t| actor.traits.contains(t))) || (s.effect == SocialEffect::PlayTag && crate::playtag::keen(actor));
             Some((i, conv::tone_weight(desired, intended) * if keen { 1.2 } else { 1.0 }))
         })
         .collect();
@@ -1144,6 +1151,10 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         return false;
     }
     if kin && (def.cat == SocialCat::Romantic || matches!(def.effect, SocialEffect::WooHoo | SocialEffect::TryForBaby | SocialEffect::Propose | SocialEffect::Marry | SocialEffect::GoSteady)) {
+        return false;
+    }
+    // (Tag: children's, and the Childish's: `playtag`.)
+    if def.effect == SocialEffect::PlayTag && !crate::playtag::may_play(actor, target.age, false) {
         return false;
     }
     // Babies and toddlers are looked after rather than chatted with.
