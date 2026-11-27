@@ -293,8 +293,32 @@ pub fn bake_texture(pkgs: &PackageSet, key: Key, max: u32, layer_mode: bool) -> 
             c.layer_mode = layer_mode;
             Some(encode_dds(&c.run(&t, w, h)))
         }
+        // (An animated texture: its first frame.)
+        ANIMATED_TEXTURE => anim_texture_frame(&data, 0).map(|d| trim_dds(d, max)),
         _ => None,
     }
+}
+
+/// An animated texture's resource type (an RCOL with an `ANIM` chunk: a nectar maker's squished
+/// fruit, bubbling).
+pub const ANIMATED_TEXTURE: u32 = 0x63A3_3EA7;
+
+/// A frame of an animated texture: its `ANIM` chunk's version, frame rate, frame count and a
+/// word, then each frame's length and its DDS.
+pub fn anim_texture_frame(data: &[u8], frame: usize) -> Option<&[u8]> {
+    let at = data.windows(4).position(|w| w == b"ANIM")?;
+    let word = |o: usize| data.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
+    let count = word(at + 12)?;
+    let mut o = at + 20;
+    for i in 0..count {
+        let len = word(o)?;
+        let dds = data.get(o + 4..o + 4 + len)?;
+        if i == frame {
+            return dds.starts_with(b"DDS ").then_some(dds);
+        }
+        o += 4 + len;
+    }
+    None
 }
 
 /// When the compact complates' numbered names ("Color 0"…) began to be read right again (they
@@ -724,7 +748,7 @@ pub fn bake_clips(root: &BakeRoot, pkgs: &PackageSet, progress: Progress) -> Res
 }
 
 /// Bumped when the baked clip layout changes.
-pub const CLIPS_VERSION: u32 = 163;
+pub const CLIPS_VERSION: u32 = 165;
 
 pub fn clips_ready(root: &BakeRoot) -> bool {
     let g = root.global_dir();

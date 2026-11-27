@@ -316,6 +316,9 @@ pub enum ObjectKind {
     /// A snake charming basket (World Adventures' `SnakeCharmingBasket`): its snake charmed out
     /// of it (`snakecharm`).
     SnakeBasket,
+    /// A nectar maker (World Adventures' `NectarMaker`): fruit squished and pressed into bottles
+    /// of nectar (`nectar`).
+    NectarMaker,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -372,6 +375,8 @@ impl ObjectKind {
             Self::ChinUpBar
         } else if has("objects.hobbiesskills.snakecharmingbasket") {
             Self::SnakeBasket
+        } else if has("objects.hobbiesskills.nectarmaker") {
+            Self::NectarMaker
         } else if has("objects.decorations.flamingo")
             || has("objects.environment.gardengnome")
             || has("objects.environment.magicgnome")
@@ -708,7 +713,8 @@ impl ObjectKind {
             | Self::TrainingDummy
             | Self::BoardBreaker
             | Self::ChinUpBar
-            | Self::SnakeBasket => "Hobbies",
+            | Self::SnakeBasket
+            | Self::NectarMaker => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -2975,7 +2981,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar | K::SnakeBasket),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar | K::SnakeBasket | K::NectarMaker),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
@@ -3286,6 +3292,9 @@ pub enum ActionKind {
     BoardBreak { breaker: Entity, board: crate::boardbreaker::Board, side: bool, at: Vec2, face: Vec2 },
     /// Watching someone break boards (`boardbreaker`'s `Watch Martial Artist`), from a few metres.
     WatchBoardBreak { breaker: Entity, at: Vec2, face: Vec2 },
+    /// At a nectar maker (`nectar`): fruit put in, squished, the nectar made or taken, from its
+    /// routing slot for that, facing it.
+    Nectar { maker: Entity, step: crate::nectar::Step, at: Vec2, face: Vec2 },
     /// Another kind of board to break, there and then (never queued: `boardbreaker::change`).
     ChangeBoard { breaker: Entity, board: crate::boardbreaker::Board },
     /// A knocked-down horse jump's bars set back up (`horsejumps`): where the Sim stands and faces.
@@ -4255,7 +4264,7 @@ pub(crate) fn run_actions(
                         }
                         ActionKind::BuyReward(_) | ActionKind::InventoryItem(..) | ActionKind::WakeUp { .. } | ActionKind::Greyed(_) | ActionKind::Notice(_) | ActionKind::Dismount | ActionKind::HorseJump { .. } | ActionKind::TrainForRacing { .. } | ActionKind::TieUp { .. } | ActionKind::Equestrian { .. } | ActionKind::PreferVehicle { .. } | ActionKind::PetCommand(_) | ActionKind::AskToPretend { .. } | ActionKind::TreehouseNow { .. } | ActionKind::ChangeBoard { .. } => None,
                         // (Beside the training posts, 4 to 6 m off; beside a spring rider.)
-                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } | ActionKind::Ornament { at, .. } | ActionKind::BoardBreak { at, .. } | ActionKind::WatchBoardBreak { at, .. } => Some((*at, floor.0)),
+                        ActionKind::WatchTraining { at, .. } | ActionKind::ToddlerRide { at, .. } | ActionKind::Seesaw { at, .. } | ActionKind::PutOnCostume { at, .. } | ActionKind::PlayPretend { at: Some(at), .. } | ActionKind::Stroll { at, .. } | ActionKind::Treehouse { at, .. } | ActionKind::PetStone { at, .. } | ActionKind::Ornament { at, .. } | ActionKind::BoardBreak { at, .. } | ActionKind::WatchBoardBreak { at, .. } | ActionKind::Nectar { at, .. } => Some((*at, floor.0)),
                         // (Playing on the playground: `playground` turns it into the object's own
                         // play before it's begun.)
                         ActionKind::PlayOnPlayground { .. } => continue,
@@ -5093,7 +5102,7 @@ pub(crate) fn run_actions(
                             }
                             // (Beside the spring rider: `springriders` sets the toddler on it; at
                             // a seesaw's place, `seesaw` gets them on.)
-                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } | ActionKind::Ornament { face, .. } | ActionKind::BoardBreak { face, .. } | ActionKind::WatchBoardBreak { face, .. } => {
+                            ActionKind::ToddlerRide { face, .. } | ActionKind::Seesaw { face, .. } | ActionKind::PutOnCostume { face, .. } | ActionKind::Stroll { face, .. } | ActionKind::Treehouse { face, .. } | ActionKind::PetStone { face, .. } | ActionKind::Ornament { face, .. } | ActionKind::BoardBreak { face, .. } | ActionKind::WatchBoardBreak { face, .. } | ActionKind::Nectar { face, .. } => {
                                 tf.rotation = Quat::from_rotation_y(face.x.atan2(face.y));
                                 anim.pose = Pose::Use;
                             }
@@ -6754,7 +6763,7 @@ pub(crate) fn run_actions(
                             }
                         }
                         // (Out on the street, the jog runs itself: `jog`; a ride: `riding`.)
-                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } | ActionKind::BoardBreak { .. } | ActionKind::WatchBoardBreak { .. } => {}
+                        ActionKind::Jog { .. } | ActionKind::Ride { .. } | ActionKind::DogTrick { .. } | ActionKind::BathePet { .. } | ActionKind::PickUpJump { .. } | ActionKind::WallDancerWith { .. } | ActionKind::PickUpPet { .. } | ActionKind::PutDownPet { .. } | ActionKind::PetHeldPet { .. } | ActionKind::FeedProduce { .. } | ActionKind::Hopscotch { .. } | ActionKind::WatchTraining { .. } | ActionKind::ToddlerRide { .. } | ActionKind::Seesaw { .. } | ActionKind::PutOnCostume { .. } | ActionKind::PlayPretend { .. } | ActionKind::Stroll { .. } | ActionKind::Treehouse { .. } | ActionKind::PetStone { .. } | ActionKind::Ornament { .. } | ActionKind::BoardBreak { .. } | ActionKind::WatchBoardBreak { .. } | ActionKind::Nectar { .. } => {}
                         ActionKind::TieHorse { .. } => finished = elapsed >= crate::hitching::CALL_MINUTES,
                         ActionKind::Untie { horse, .. } => {
                             finished = elapsed >= crate::hitching::UNTIE_MINUTES;

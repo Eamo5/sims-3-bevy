@@ -176,6 +176,9 @@ pub struct SavedSim {
     /// This week's charities, and when they last gave (`charity`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub charities: Option<crate::charity::Charities>,
+    /// The best nectars they've made (`nectar`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nectar_recipes: Vec<crate::nectar::Recipe>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -379,6 +382,9 @@ pub struct SavedObjectState {
     /// A snake charming basket with a King Cobra in it (`snakecharm`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cobra: bool,
+    /// A nectar maker's fruit, batch and bottles (`nectar`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nectar: Option<crate::nectar::Maker>,
 }
 
 fn is_zero(v: &i32) -> bool {
@@ -452,6 +458,9 @@ fn restore_states(
         }
         if saved.cobra {
             commands.entity(e).insert(crate::snakecharm::KingCobra);
+        }
+        if let Some(m) = saved.nectar.clone() {
+            commands.entity(e).insert(m);
         }
         debug!("{} as it was: grime {}, unmade {}, lost {}", o.name, saved.grime, saved.unmade, saved.lost);
         false
@@ -742,6 +751,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         book_club: false,
         time_off: None,
         charities: None,
+        nectar_recipes: Vec::new(),
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -1049,7 +1059,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>),
                     Has<crate::town::Townie>,
                     Has<crate::visit::LotGuest>,
                 ),
@@ -1087,7 +1097,7 @@ fn save_game(
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,
         Query<
-            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>, Option<&crate::doorlocks::DoorLock>, Option<&crate::bedowners::BedOwners>, Has<crate::dollhouse::Smashed>, Has<crate::trashcans::TippedOver>, Option<&crate::paintings::LeftOnEasel>, (Option<&crate::lights::Switched>, Option<&crate::lights::Dimmer>, Has<crate::frontdoor::FrontDoor>, Option<&crate::petneeds::BowlFood>, Option<&crate::toycrate::ToyCrate>, Option<&crate::ornaments::KnockedOver>, Has<crate::snakecharm::KingCobra>)),
+            (&GameObject, &Transform, Has<crate::interact::Broken>, Has<crate::grime::Charred>, Option<&crate::grime::Grime>, Has<crate::interact::Unmade>, Option<&crate::interact::Depreciated>, Option<&crate::doorlocks::DoorLock>, Option<&crate::bedowners::BedOwners>, Has<crate::dollhouse::Smashed>, Has<crate::trashcans::TippedOver>, Option<&crate::paintings::LeftOnEasel>, (Option<&crate::lights::Switched>, Option<&crate::lights::Dimmer>, Has<crate::frontdoor::FrontDoor>, Option<&crate::petneeds::BowlFood>, Option<&crate::toycrate::ToyCrate>, Option<&crate::ornaments::KnockedOver>, Has<crate::snakecharm::KingCobra>, Option<&crate::nectar::Maker>)),
             (Without<crate::visit::LotObject>, Without<crate::buyhistory::HistoryHidden>),
         >,
         Res<crate::familyinv::FamilyInventory>,
@@ -1107,7 +1117,7 @@ fn save_game(
     // (Passers-by are kept only once the household knows them: then as Sims met, away.)
     let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities), townie, guest))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes), townie, guest))) in &sims {
         if (townie || guest) && !known.contains(&e) {
             continue;
         }
@@ -1196,6 +1206,7 @@ fn save_game(
             book_club,
             time_off: time_off.cloned(),
             charities: charities.cloned(),
+            nectar_recipes: nectar_recipes.map(|r| r.0.clone()).unwrap_or_default(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1223,10 +1234,10 @@ fn save_game(
         repo_debt: repo.debt,
         object_states: broken
             .iter()
-            .filter(|(.., grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl, toys, knocked, cobra))| {
-                grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0) || lock.is_some() || owners.is_some_and(|o| o.0.iter().any(|s| s.is_some())) || *smashed || *tipped || canvas.is_some() || switched.is_some() || dimmer.is_some() || *front || bowl.is_some() || toys.is_some() || knocked.is_some() || *cobra
+            .filter(|(.., grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl, toys, knocked, cobra, nectar))| {
+                grime.is_some_and(|g| g.0 > 0.0) || *unmade || lost.is_some_and(|d| d.0 > 0) || lock.is_some() || owners.is_some_and(|o| o.0.iter().any(|s| s.is_some())) || *smashed || *tipped || canvas.is_some() || switched.is_some() || dimmer.is_some() || *front || bowl.is_some() || toys.is_some() || knocked.is_some() || *cobra || nectar.is_some_and(|m| *m != crate::nectar::Maker { squish_left: 1.0, ..Default::default() })
             })
-            .map(|(o, tf, _, _, grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl, toys, knocked, cobra))| SavedObjectState {
+            .map(|(o, tf, _, _, grime, unmade, lost, lock, owners, smashed, tipped, canvas, (switched, dimmer, front, bowl, toys, knocked, cobra, nectar))| SavedObjectState {
                 objd: o.objd,
                 position: tf.translation.to_array(),
                 grime: grime.map_or(0.0, |g| g.0),
@@ -1244,6 +1255,7 @@ fn save_game(
                 toys: toys.map(|t| t.0.clone()),
                 knocked: knocked.map(|k| k.mirrored),
                 cobra,
+                nectar: nectar.cloned(),
             })
             .collect(),
         version: SAVE_VERSION,
@@ -1481,15 +1493,19 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.novels.is_empty() {
             ec.insert(crate::novels::Novels(s.novels.clone()));
-            if let Some(t) = &s.time_off {
-                ec.insert(t.clone());
-            }
-            if let Some(c) = &s.charities {
-                ec.insert(c.clone());
-            }
-            if s.book_club {
-                ec.insert(crate::computertraits::BookClub);
-            }
+        }
+        // (Whatever novels they've read: time off asked for, this week's charities, the book club.)
+        if let Some(t) = &s.time_off {
+            ec.insert(t.clone());
+        }
+        if let Some(c) = &s.charities {
+            ec.insert(c.clone());
+        }
+        if s.book_club {
+            ec.insert(crate::computertraits::BookClub);
+        }
+        if !s.nectar_recipes.is_empty() {
+            ec.insert(crate::nectar::Recipes(s.nectar_recipes.clone()));
         }
         if !s.skill_books.is_empty() {
             ec.insert(crate::skillbooks::SkillBooks(s.skill_books.clone()));
@@ -1761,8 +1777,8 @@ mod tests {
 
     #[test]
     fn grime_and_unmade_beds_come_back_once_the_furniture_has() {
-        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None, toys: None, knocked: None, cobra: false };
-        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None, toys: None, knocked: None, cobra: false };
+        let toilet = SavedObjectState { objd: (1, 2, 3), position: [4.0, 0.0, 8.0], grime: 45.0, unmade: false, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None, toys: None, knocked: None, cobra: false, nectar: None };
+        let bed = SavedObjectState { objd: (1, 2, 4), position: [9.0, 0.0, 8.0], grime: 0.0, unmade: true, lost: 0, lock: None, bed_owners: None, smashed: false, tipped: false, canvas: None, switched: None, dimmer: None, front: false, bowl: None, toys: None, knocked: None, cobra: false, nectar: None };
         let mut app = App::new();
         app.init_resource::<Time>().insert_resource(PendingStates(vec![toilet, bed], None)).add_systems(Update, restore_states);
         let obj = |kind, objd| GameObject { kind, name: "x".into(), objd, price: 100, center: Vec2::ZERO, half: Vec2::ONE, height: 1.0, route: None };

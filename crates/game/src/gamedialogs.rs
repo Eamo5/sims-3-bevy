@@ -300,6 +300,7 @@ fn type_into_box(
         Some(crate::dialog::Question::NameObject { object, suggested }) => (*object, suggested, crate::fishbowl::NAME_LENGTH),
         Some(crate::dialog::Question::NameHorse { sim, suggested, .. }) => (*sim, suggested, 20),
         Some(crate::dialog::Question::NamePet { pet, suggested }) => (*pet, suggested, 20),
+        Some(crate::dialog::Question::NameNectar { maker, suggested }) => (*maker, suggested, crate::nectar::NAME_LENGTH),
         _ => {
             *asking = None;
             keys.clear();
@@ -394,7 +395,7 @@ fn question_dialogs(
             // (A horse sold or bought at its price: yes or no.)
             crate::dialog::Question::SellHorse { .. } | crate::dialog::Question::BuyHorse { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } | crate::dialog::Question::NamePet { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } | crate::dialog::Question::NamePet { .. } | crate::dialog::Question::NameNectar { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -441,7 +442,8 @@ fn question_dialogs(
             | crate::dialog::Question::SaveName { suggested }
             | crate::dialog::Question::NameObject { suggested, .. }
             | crate::dialog::Question::NameHorse { suggested, .. }
-            | crate::dialog::Question::NamePet { suggested, .. } => {
+            | crate::dialog::Question::NamePet { suggested, .. }
+            | crate::dialog::Question::NameNectar { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {

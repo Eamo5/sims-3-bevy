@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 25;
+pub const SOUNDS_VERSION: u32 = 26;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -108,6 +108,8 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "snake_pungi_med_lp",
     "snake_pungi_exp_lp",
     "snake_vox_trans_appear",
+    // A nectar maker pressing its fruit.
+    "nectar_maker_proc_lp",
     // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
     "thouse_pretend_castle_loop",
     "thouse_pretend_castle_plist",

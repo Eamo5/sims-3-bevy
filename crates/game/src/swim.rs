@@ -75,6 +75,8 @@ fn pyjamas(
             (ActionKind::Outro { clips, .. }, _) if clips.first() == Some(&crate::martialarts::NEW_BELT) => Some(OutfitKind::MartialArts),
             // (Breaking boards in it too.)
             (ActionKind::BoardBreak { .. }, Phase::Running(_)) => Some(OutfitKind::MartialArts),
+            // (Squishing fruit barefoot in swimwear: `SquishGrapes`' `GoingToSwim`.)
+            (ActionKind::Nectar { step: crate::nectar::Step::Squish { .. }, .. }, Phase::Running(_)) => Some(OutfitKind::Swimwear),
             (ActionKind::Object { target, def }, Phase::Running(_)) => {
                 let o = beds.get(*target).ok()?;
                 outfit_for_use(o.kind, interactions_for(o.kind).get(*def)?)

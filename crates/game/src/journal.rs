@@ -56,6 +56,11 @@ pub enum Stat {
     HardBoardsBroken,
     /// Boards of every kind broken.
     BoardsBroken,
+    /// Nectar: bottles made, batches of fruit squished, fruit used (`NectarSkill`'s
+    /// `mNumberOfBottlesNectarMade`, `mTimesSquishedGrapes`, `mNumberFruitsUsedNectar`).
+    NectarBottles,
+    NectarSquishes,
+    NectarFruit,
 }
 
 impl Stat {
@@ -86,6 +91,9 @@ impl Stat {
             Stat::GemsCut => "gems_cut",
             Stat::HardBoardsBroken => "hard_boards_broken",
             Stat::BoardsBroken => "boards_broken",
+            Stat::NectarBottles => "nectar_bottles",
+            Stat::NectarSquishes => "nectar_squishes",
+            Stat::NectarFruit => "nectar_fruit",
         }
     }
 }

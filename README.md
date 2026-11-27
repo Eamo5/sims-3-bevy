@@ -1092,6 +1092,33 @@ installation is unreachable.
   basket now has a King Cobra in it.", greyed without the money), kept in saves.
   `CHARM_TEST=1` with `CHARM_LEVEL`, `CHARM_COBRA=1`, `CHARM_FORCE=snake|none|bite|kiss|bitten|
   magic`, `CHARM_STOP=<seconds>`, `CHARM_PIE=1` (tests).
+- **The nectar maker and Nectar Making**, as World Adventures' `NectarMaker` and `NectarSkill`:
+  teens and up put fruit from their inventory in its bin ("Add Fruit... ›", a stack at a time with
+  the game's place-a-grape; "Place Ingredients For... ›" a nectar they've made before, greyed
+  "Need the ingredients in your inventory" without the fruit), ten at most (`kMaxFruitInNectar`,
+  the XML's), the bin's fruit showing as it fills. Once it's full "Squish Fruit" (else greyed "The
+  bin needs to be full before you can squish"): into swimwear with a spin and up into the tub,
+  stomping half an hour (`kSquishGrapesTimeMinutes`; Nectar 450 an hour, Fun 15), the fruit turned
+  to the game's bubbling juice; stopped part way, they pick up where they left off. "Make Nectar...
+  ›" (squishing first if it's still to do; greyed "Remove Nectar bottles before making more")
+  offers Basic, and from level four Concentrated, seven Mass Produce and nine Extended Nectaration:
+  half an hour at the controls (Nectar 900 an hour), then the machine runs two hours with its own
+  pressing and sound (half as long again extended), and three bottles come out (a bottle fewer
+  concentrated, two more mass produced, one more for a Nectar Master's two hundred bottles), named
+  in the game's "Name Your Nectar" box, the blend judged as the game judges it ("This Nectar blend
+  is great!..."), the name suggested its two main fruits' ("Apple Lime Nectar") or the one they
+  gave that blend before. A bottle's worth is the game's sum: the fruits' nectar values
+  (`Nectar_Value`) times a third, times the maker's skill (three quarters at level 0 to one and a
+  half at 10), the fruits' average quality (`kQualityLevelMultiplier`), how well they go together
+  (each blend's own multiplier, drawn from its fruits' hash with .NET's random numbers as the
+  game's `CalculateHashMultiplier` does: half to one and three quarters), the style's and Flavorful
+  Feet's (forty batches squished, a tenth more). "Take Nectar" takes the bottles into their
+  inventory ("Week: 1 - Apple Lime Nectar", a bottle in hand as they do), where they're worth four
+  in a hundred more each day (`kAppreciationPercent`), their quality rising with it
+  (`kQualityValueThresholds`), to sell. The six best nectars each Sim's made are kept, their journal
+  counts the bottles, batches and fruit, and the maker's fruit, batch and bottles are kept in saves.
+  `NECTAR_TEST=1` with `NECTAR_FRUIT=<produce>/<tier>*<n>,...`, `NECTAR_LEVEL`,
+  `NECTAR_DO=add|squish|make|take|all`, `NECTAR_FAST=1`, `NECTAR_PIE=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

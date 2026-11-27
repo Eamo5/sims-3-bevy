@@ -41,6 +41,9 @@ pub enum ItemKind {
     Coupon,
     /// A doctor's medical journal, the day's (`careermetrics`): to read. Not to be sold.
     Journal,
+    /// Bottles of nectar of a batch (`nectar`): its make in the key (`nectar::Bottle::key`), its
+    /// nectar quality the quality, worth more as it ages.
+    Nectar,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -174,8 +177,12 @@ pub fn stack_picture(
         return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
     }
     let ui = ui?;
-    if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake | ItemKind::Coupon) {
-        let name = if s.kind == ItemKind::Coupon { "Coupon" } else { s.key.as_str() };
+    if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake | ItemKind::Coupon | ItemKind::Nectar) {
+        let name = match s.kind {
+            ItemKind::Coupon => "Coupon",
+            ItemKind::Nectar => "NectarBottle",
+            _ => s.key.as_str(),
+        };
         let objd = baked?.0.catalog.iter().find(|c| c.instance_name == name)?.objd;
         return ui.icon(images, &s3bake::gamedata::thumb_name(objd.2)).map(|h| (h, None));
     }
@@ -278,6 +285,7 @@ pub fn draw_tab(
             let bg = match s.kind {
                 ItemKind::Produce => quality_color(s.quality),
                 ItemKind::Painting => Color::srgb(0.85, 0.75, 0.55),
+                ItemKind::Nectar => Color::srgb(0.78, 0.62, 0.78),
                 _ => Color::srgba(1.0, 1.0, 1.0, 0.85),
             };
             grid.spawn((

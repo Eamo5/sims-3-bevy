@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 181;
+pub const GAMEDATA_VERSION: u32 = 183;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1848,6 +1848,9 @@ pub struct IngredientInfo {
     pub pets_eat: Vec<String>,
     #[serde(default)]
     pub pets_graze: Vec<String>,
+    /// What it adds to a nectar's worth, a fruit (`Nectar_Value`; 0 for what isn't one).
+    #[serde(default)]
+    pub nectar: i32,
 }
 
 /// The seasons' weather, from the game's `Seasons` table: temperatures through the day, how
@@ -3262,8 +3265,9 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
 }
 
 /// Geometry states the game switches objects to (`alt_states.pack`): a dollhouse smashed, an
-/// outdoor trash can with its lid off, an activity table's blocks as they're built up (`blocks`).
-pub const ALT_STATES: [&str; 12] = ["dollhouseSmashed", "BinOnly", "pile", "midPointStructure", "house", "castle", "bridge", "sphinx", "tower", "empty", "partiallyFull", "full"];
+/// outdoor trash can with its lid off, an activity table's blocks as they're built up (`blocks`),
+/// a nectar maker's bin with no fruit in it (`nectar`).
+pub const ALT_STATES: [&str; 13] = ["dollhouseSmashed", "BinOnly", "pile", "midPointStructure", "house", "castle", "bridge", "sphinx", "tower", "empty", "partiallyFull", "full", "fruitNone"];
 
 /// A model's key in one of its other states (`alt_states.pack`): the state's hash its group.
 pub fn alt_state_key(model: crate::types::Key, state: u32) -> crate::types::Key {
@@ -4589,7 +4593,8 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
             let meshes = s3formats::model::load_model(pkgs, &rk)?;
             let found: Vec<(crate::types::Key, crate::types::BakedModel)> = alts
                 .iter()
-                .filter(|h| meshes.iter().any(|m| m.states.iter().any(|(s, ix)| s == *h && !ix.is_empty())))
+                // (A state that hides a mesh counts: a nectar maker's bin with no fruit.)
+                .filter(|h| meshes.iter().any(|m| m.states.iter().any(|(s, _)| s == *h)))
                 .map(|h| (alt_state_key(*k, *h), crate::bake::bake_model_state(pkgs, &rk, Some(*h))))
                 .collect();
             Some(found)
@@ -4775,6 +4780,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 fertilizer: fertilizer(&f),
                 pets_eat: species_list(&f, "PetSpeciesThatCanEatOffGround"),
                 pets_graze: species_list(&f, "PetSpeciesThatCanEatOffPlant"),
+                nectar: num(&f, "Nectar_Value") as i32,
                 key,
             });
         }
@@ -4799,6 +4805,7 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 fertilizer: fertilizer(&f),
                 pets_eat: species_list(&f, "PetSpeciesThatCanEatOffGround"),
                 pets_graze: species_list(&f, "PetSpeciesThatCanEatOffPlant"),
+                nectar: 0,
                 key,
             });
         }

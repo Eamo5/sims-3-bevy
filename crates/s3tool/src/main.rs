@@ -1001,13 +1001,17 @@ fn main() {
         return;
     }
     if args[1] == "objmats" {
-        // objmats <root> <objd instance hex>: each mesh's shader and material parameters.
+        // objmats <root> <objd instance hex> [group hex]: each mesh's shader and material
+        // parameters, and its states' looks.
         let set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
-        let k = s3pkg::ResourceKey::new(types::OBJD, 0, parse_hex(&args[3]));
+        let k = s3pkg::ResourceKey::new(types::OBJD, args.get(4).map_or(0, |g| parse_hex(g) as u32), parse_hex(&args[3]));
         for mk in s3formats::object::object_models(&set, &k) {
             println!("model {mk}");
             for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
                 println!("  mesh {:08X} shader {:08X} verts {} blended {}", m.name_hash, m.material.shader, m.positions.len(), m.material.is_alpha_blended());
+                for (s, k, overlay) in &m.state_textures {
+                    println!("    state {s:08X} texture {k} overlay {overlay}");
+                }
                 for (p, v) in &m.material.params {
                     println!("    {p:08X} {v:?}");
                 }

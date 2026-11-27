@@ -279,6 +279,11 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_react_newMartialArtsBelt",
     // (Chin ups on a chin-up bar.)
     "a2o_chinBar_",
+    // (Nectar made: fruit put in, squished, the buttons pushed, the bottles taken; the machine's
+    // own running.)
+    "a2o_nectarMaker_",
+    "a_nectarMaker_",
+    "o_nectarMaker_",
     // (A snake charmed out of its basket: the charmer's, the basket's lid, the snake's own.)
     "a2o_snakeBasket_",
     "o_snakeBasket_",
@@ -1047,6 +1052,8 @@ pub const PROP_ACTORS: &[&str] = &[
     // (A snake charmer's pungi, and the snake charmed.)
     "pungi",
     "snake",
+    // (A bottle of nectar taken from the maker.)
+    "nectarBottle",
 ];
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's

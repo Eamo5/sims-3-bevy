@@ -352,6 +352,8 @@ pub const STATE_FOAM: u32 = state_hash("Foam");
 pub const STATE_BALSA: u32 = state_hash("Balsa");
 pub const STATE_OAK: u32 = state_hash("Oak");
 pub const STATE_STONE: u32 = state_hash("Stone");
+/// A nectar maker's fruit once it's squished (`NectarMaker.UpdateVisualState`).
+pub const STATE_FRUIT_SQUISHED: u32 = state_hash("fruitSquished");
 
 /// A material state's name hashed as `SetMaterial` hashes it (the lower-case FNV-32).
 pub const fn state_hash(name: &str) -> u32 {
@@ -381,7 +383,7 @@ fn state_textures(rcol: &Rcol, raw: u32, default: &Material) -> Vec<(u32, Resour
     let base = default.texture(P_DIFFUSE_MAP);
     (0..n.min(32))
         .filter_map(|_| Some((r.u32().ok()?, r.u32().ok()?)))
-        .filter(|(_, state)| matches!(*state, STATE_DIRTY | STATE_VERY_DIRTY | STATE_CLOGGED | STATE_BURNT | STATE_FOAM | STATE_BALSA | STATE_OAK | STATE_STONE))
+        .filter(|(_, state)| matches!(*state, STATE_DIRTY | STATE_VERY_DIRTY | STATE_CLOGGED | STATE_BURNT | STATE_FOAM | STATE_BALSA | STATE_OAK | STATE_STONE | STATE_FRUIT_SQUISHED))
         .filter_map(|(chunk, state)| {
             let m = resolve_material(rcol, chunk, 1)?;
             match m.texture(P_DIFFUSE_MAP) {
