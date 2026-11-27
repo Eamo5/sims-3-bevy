@@ -207,7 +207,14 @@ pub enum OutfitKind {
     Costume,
     /// A martial artist's karate gi, its belt their level's (`martialarts`).
     MartialArts,
+    /// A career's uniform put on at a dresser (the game's `PutOnUniform`: which one, `UniformOn`),
+    /// worn till they change.
+    Uniform,
 }
+
+/// The uniform put on at a dresser (an outfit's name, a career level's: `careers::uniforms_reached`).
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UniformOn(pub &'static str);
 
 impl OutfitKind {
     /// The outfits a dresser offers to change into.
@@ -224,13 +231,14 @@ impl OutfitKind {
             Self::Naked => "Naked",
             Self::Costume => "Costume",
             Self::MartialArts => "Martial Arts",
+            Self::Uniform => "Uniform",
         }
     }
 
     /// The CAS parts' category flag for clothes of this outfit.
     pub fn category(self) -> u32 {
         match self {
-            Self::Everyday | Self::Career | Self::Costume => s3formats::sim::CAT_EVERYDAY,
+            Self::Everyday | Self::Career | Self::Costume | Self::Uniform => s3formats::sim::CAT_EVERYDAY,
             Self::Swimwear => s3formats::sim::CAT_SWIM,
             Self::Sleepwear => s3formats::sim::CAT_SLEEP,
             Self::Athletic | Self::MartialArts => s3formats::sim::CAT_ATHLETIC,
@@ -459,7 +467,7 @@ pub fn pick_outfit_for(cas: &CasData, sim: &Sim, rng: &mut impl Rng, kind: Outfi
         OutfitKind::Formal => !fulls.is_empty() && rng.random_bool(0.5),
         // (Snowsuits now and then; mostly a coat.)
         OutfitKind::Outerwear => !fulls.is_empty() && rng.random_bool(0.25),
-        OutfitKind::Career | OutfitKind::Naked | OutfitKind::Costume => use_full,
+        OutfitKind::Career | OutfitKind::Naked | OutfitKind::Costume | OutfitKind::Uniform => use_full,
     };
     if let Some(f) = cf {
         body.push(f);

@@ -397,7 +397,7 @@ fn look_rows(
     // The panel's title: the outfit's name, as the game has it.
     let title = match p.wear {
         OutfitKind::Everyday | OutfitKind::Naked | OutfitKind::Costume => "Everyday",
-        OutfitKind::Career => "Career",
+        OutfitKind::Career | OutfitKind::Uniform => "Career",
         OutfitKind::Formal => "Formal",
         OutfitKind::Sleepwear => "Sleepwear",
         OutfitKind::Swimwear => "Swimwear",

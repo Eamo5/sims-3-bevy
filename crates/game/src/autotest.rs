@@ -194,7 +194,7 @@ impl Plugin for AutoTestPlugin {
             .add_systems(First, tick_input_timeline.after(bevy::time::TimeSystems).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, list_cams)
             .add_systems(Update, auto_pick_world.run_if(in_state(AppState::MainMenu)))
-            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics, give_homework), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
+            .add_systems(Update, (apply_cam, watch_insect, ask_question, (keep_hungry, all_use, set_grime, dresser_menu), wear_uniform, give_items, make_mess, show_uniforms, auto_terrain, auto_sculpt, (run_out, give_topics, give_homework), face_hook, shots_every, (show_designs, show_style), walls_hook, hang_paintings, buy_close, diving_board, route_debug, near_debug).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(Update, (strand_swimmers, sim_cam).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, press_key.after(bevy::input::InputSystems).before(crate::buy::toggle_buy).run_if(in_state(crate::PlayMode::Live)))
             .add_systems(PreUpdate, hold_shift.after(bevy::input::InputSystems))
@@ -1480,6 +1480,26 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
     }
     info!("uniform test: {} level {}", name, job.level + 1);
     commands.entity(e).insert((job, crate::simbody::Wearing(crate::simbody::OutfitKind::Career), crate::aging::NeedsNewBody));
+}
+
+/// UNIFORM_MENU=1 (with UNIFORM): nine seconds in, the menu of the dresser nearest the selected
+/// Sim is up (for `PHOTO_MENU=Put On Uniform>...`), the camera on it.
+fn dresser_menu(mut commands: Commands, time: Res<Time>, sel: Query<&Transform, With<crate::sim::Selected>>, objects: Query<(Entity, &crate::interact::GameObject, &Transform), Without<crate::visit::LotObject>>, mut cam: Query<&mut SimsCamera>, mut done: Local<bool>) {
+    if *done || std::env::var_os("UNIFORM_MENU").is_none() || time.elapsed_secs() < 9.0 {
+        return;
+    }
+    let Ok(at) = sel.single().map(|t| t.translation) else { return };
+    let dresser = objects
+        .iter()
+        .filter(|(_, o, _)| crate::interact::interactions_for(o.kind).iter().any(|d| d.special == crate::interact::Special::ChangeClothes))
+        .min_by(|a, b| a.2.translation.distance(at).total_cmp(&b.2.translation.distance(at)));
+    let Some((e, _, tf)) = dresser else { return };
+    *done = true;
+    if let Ok(mut c) = cam.single_mut() {
+        c.look_at(tf.translation);
+        c.distance = 8.0;
+    }
+    commands.insert_resource(crate::hud::PieFor(e));
 }
 
 /// GIVE=<item>,...: puts things in the selected Sim's inventory: a collectible's key

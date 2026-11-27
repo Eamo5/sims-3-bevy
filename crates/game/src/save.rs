@@ -197,6 +197,9 @@ pub struct SavedSim {
     /// Their cell phone's ringtone (`calls::Ringtone`).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub ringtone: u8,
+    /// The uniform put on at a dresser (`simbody::UniformOn`: its outfit's name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uniform_on: Option<String>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -780,6 +783,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         forum_posts: Vec::new(),
         memorized_scene: None,
         ringtone: 0,
+        uniform_on: None,
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -1087,7 +1091,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>, Option<&crate::photos::Memorized>, Option<&crate::calls::Ringtone>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>, Option<&crate::photos::Memorized>, Option<&crate::calls::Ringtone>, Option<&crate::simbody::UniformOn>),
                     Has<crate::town::Townie>,
                     Has<crate::visit::LotGuest>,
                 ),
@@ -1145,7 +1149,7 @@ fn save_game(
     // (Passers-by are kept only once the household knows them: then as Sims met, away.)
     let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts, memorized, ringtone), townie, guest))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts, memorized, ringtone, uniform_on), townie, guest))) in &sims {
         if (townie || guest) && !known.contains(&e) {
             continue;
         }
@@ -1241,6 +1245,7 @@ fn save_game(
             forum_posts: forum_posts.map(|p| p.0.clone()).unwrap_or_default(),
             memorized_scene: memorized.map(|m| (m.id.clone(), m.frame)),
             ringtone: ringtone.map_or(0, |r| r.0),
+            uniform_on: uniform_on.map(|u| u.0.to_string()),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1549,6 +1554,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.forum_posts.is_empty() {
             ec.insert(crate::forums::Posts(s.forum_posts.clone()));
+        }
+        if let Some(u) = s.uniform_on.as_deref().and_then(crate::careers::find_uniform) {
+            ec.insert(crate::simbody::UniformOn(u));
         }
         if s.ringtone != 0 {
             ec.insert(crate::calls::Ringtone(s.ringtone));

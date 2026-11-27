@@ -164,6 +164,44 @@ impl CareerTrack {
     }
 }
 
+/// A level's uniform for a Sim (an elder's own where it has one), if it has one.
+pub fn level_uniform(l: &CareerLevel, sim: &Sim) -> Option<&'static str> {
+    let o = &l.outfits;
+    let i = sim.female as usize;
+    let elder = (sim.age == Age::Elder).then(|| o[2 + i]).filter(|s| !s.is_empty());
+    elder.or(Some(o[i])).filter(|s| !s.is_empty())
+}
+
+/// The dresser's "Put On Uniform..." (`Dresser.PutOnUniform`): the uniforms of the levels their
+/// career's reached, one for each run of levels wearing the same (named for the last of them,
+/// a woman's title hers), the highest first (`GetUniqueUniforms`).
+pub const PUT_ON_UNIFORM: &str = "Put On Uniform...";
+
+pub fn uniforms_reached(job: &Job, sim: &Sim) -> Vec<(String, &'static str)> {
+    unique_uniforms(job.levels(), job.level, sim)
+}
+
+fn unique_uniforms(levels: &[CareerLevel], level: usize, sim: &Sim) -> Vec<(String, &'static str)> {
+    let Some(top) = levels.len().checked_sub(1).map(|n| level.min(n)) else { return Vec::new() };
+    let mut out = Vec::new();
+    for i in 0..=top {
+        let Some(u) = level_uniform(&levels[i], sim) else { continue };
+        if i < top && level_uniform(&levels[i + 1], sim) == Some(u) {
+            continue;
+        }
+        let l = &levels[i];
+        let title = if sim.female && !l.title_female.is_empty() { l.title_female } else { l.title };
+        out.push((title.to_string(), u));
+    }
+    out.reverse();
+    out
+}
+
+/// A uniform by its outfit's name (a saved one's), as the careers have it.
+pub fn find_uniform(name: &str) -> Option<&'static str> {
+    careers().iter().flat_map(|c| c.paths.iter()).flat_map(|p| p.levels.iter()).flat_map(|l| l.outfits.iter()).find(|o| **o == name).copied()
+}
+
 static TRACKS: std::sync::OnceLock<Vec<CareerTrack>> = std::sync::OnceLock::new();
 
 /// The career tracks: the game's own once converted, else the built-in table.
@@ -911,10 +949,7 @@ impl Job {
     }
     /// The uniform a Sim wears to work at their level, if it has one.
     pub fn uniform(&self, sim: &Sim) -> Option<&'static str> {
-        let o = &self.info().outfits;
-        let i = sim.female as usize;
-        let elder = (sim.age == Age::Elder).then(|| o[2 + i]).filter(|s| !s.is_empty());
-        elder.or(Some(o[i])).filter(|s| !s.is_empty())
+        level_uniform(self.info(), sim)
     }
     pub fn hours(&self) -> f32 {
         let l = self.info();
@@ -1948,6 +1983,18 @@ mod audit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dresser_offers_each_uniform_reached_once_the_highest_first() {
+        let l = |title: &'static str, m: &'static str, f: &'static str| CareerLevel { title, title_female: "", hourly: 10, start: 9.0, end: 17.0, wakeup: 7.0, days: 31, outfits: [m, f, "", ""], metrics: &[], has_boss: false, reward: "" };
+        let levels = [l("Intern", "", ""), l("Clerk", "amSuit", "afSuit"), l("Assistant", "amSuit", "afSuit"), l("Manager", "amTie", "afTie"), l("CEO", "amTux", "afTux")];
+        let man = crate::sim::random_sim(&mut rand::rng(), "M", Some(false), Age::Adult);
+        let got = unique_uniforms(&levels, 3, &man);
+        assert_eq!(got, [("Manager".to_string(), "amTie"), ("Assistant".to_string(), "amSuit")]);
+        let woman = crate::sim::random_sim(&mut rand::rng(), "W", Some(true), Age::Adult);
+        assert_eq!(unique_uniforms(&levels, 0, &woman), []);
+        assert_eq!(unique_uniforms(&levels, 9, &woman)[0], ("CEO".to_string(), "afTux"));
+    }
 
     #[test]
     fn work_tones_keep_their_names() {

@@ -2967,6 +2967,13 @@ fn world_click(
                         .collect();
                     options.push(("Change Into ›".to_string(), submenu_kind(pie.submenus.len())));
                     pie.submenus.push(("Change Into".to_string(), list));
+                    // (A uniform of their career's, any level reached: `careers`.)
+                    let uniforms = jobs_q.get(actor).ok().flatten().map(|j| crate::careers::uniforms_reached(j, actor_sim)).unwrap_or_default();
+                    if !uniforms.is_empty() {
+                        let list: Vec<(String, ActionKind)> = uniforms.into_iter().map(|(title, _)| (title, ActionKind::Object { target: t, def: i })).collect();
+                        options.push((format!("{} ›", crate::careers::PUT_ON_UNIFORM), submenu_kind(pie.submenus.len())));
+                        pie.submenus.push((crate::careers::PUT_ON_UNIFORM.to_string(), list));
+                    }
                     continue;
                 }
                 if d.special == Special::FindJob {
@@ -3728,7 +3735,15 @@ fn pie_buttons(
                 label = "Fish".to_string();
             }
         }
-        let outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
+        let mut outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
+        // (A uniform of their career's put on: `careers`.)
+        if title == crate::careers::PUT_ON_UNIFORM
+            && let Some(u) = jobs.get(a).ok().zip(people.get(a).ok()).and_then(|(j, (_, me, _))| crate::careers::uniforms_reached(j, me).into_iter().find(|(t, _)| *t == label).map(|(_, u)| u))
+        {
+            outfit_choice = Some(crate::simbody::OutfitKind::Uniform);
+            commands.entity(a).insert(crate::simbody::UniformOn(u));
+            label = "Put On Uniform".to_string();
+        }
         let canvas_choice = label.strip_prefix("Paint: ").and_then(|n| crate::paintings::CANVASES.iter().position(|c| *c == n)).map(|c| c as u8);
         // (Another drink tried: "Drink Soy Chai with Caramel Swirl", as they'd put it.)
         if let Some(ui) = ui_data.as_ref()

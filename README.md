@@ -2355,7 +2355,10 @@ installation is unreachable.
   own hair colour under a hat. They come home in it and change for bed, a swim or a workout.
 - **Changing clothes**: a dresser's *Change Into ›* puts a Sim in their everyday, formal (the
   wardrobe's suits, tuxedos and cocktail dresses among them), sleep, athletic or swim wear,
-  or their career's uniform, kept on until it's time for something else; *Plan Outfit*
+  or their career's uniform, kept on until it's time for something else; *Put On Uniform... ›*
+  (the game's `PutOnUniform`) offers each uniform their career's had them wear so far, named for
+  the last level that wore it, the highest first (a Grunt's fatigues, a Wingman's flight suit),
+  put on with the spin and worn till they change (work puts on the level's own); *Plan Outfit*
   opens the wardrobe for their age and gender, for any of their outfits (everyday, formal,
   sleepwear, athletic, swimwear: they put it on to plan it; hair, tops, bottoms, outfits and shoes, the
   base game's first, pictured by the game's Create-a-Sim thumbnails), the Sim dressing in
