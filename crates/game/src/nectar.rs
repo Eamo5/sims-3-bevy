@@ -33,7 +33,7 @@ pub struct NectarPlugin;
 
 impl Plugin for NectarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (run, machines, named).chain().after(crate::interact::run_actions).before(crate::anim::drive_skeletons).run_if(in_state(PlayMode::Live)))
+        app.add_systems(Update, (run, machines, named, tasting).chain().after(crate::interact::run_actions).before(crate::anim::drive_skeletons).run_if(in_state(PlayMode::Live)))
             .add_systems(Update, (stock, looks, dome_bottles, appreciate, nectar_test).run_if(in_state(PlayMode::Live)));
     }
 }
@@ -80,6 +80,51 @@ pub const TAKE: &str = "Take Nectar";
 pub const NOT_FULL: &str = "The bin needs to be full before you can squish";
 pub const BOTTLES_IN_IT: &str = "Remove Nectar bottles before making more";
 pub const NEED_FRUIT: &str = "Need the ingredients in your inventory";
+pub const TASTE: &str = "Taste Nectar";
+
+/// Tasting: glasses drunk before they drink as a connoisseur does (`kNumDrinksForMedSkill`,
+/// `...HighSkill`, the XML's), the moods by quality (`kQualityBuffMoodLevels`), a Snob's
+/// threshold and bonus, and how much flame fruit or lifefruit a bottle needs for their effects.
+const MED_DRINKS: f64 = 10.0;
+const HIGH_DRINKS: f64 = 30.0;
+const QUALITY_MOOD: [i32; 11] = [-20, -15, -10, -5, 0, 5, 8, 12, 16, 20, 25];
+const SNOB_THRESHOLD: i32 = 13;
+const SNOB_BONUS: i32 = 5;
+const FLAME_SHARE: f32 = 0.25;
+const LIFE_SHARE: f32 = 0.5;
+/// The drinking clips (a glass in hand), as they've come to drink it: the novice's sniff, the
+/// swirl, the snooty connoisseur's; a disgusting one's reaction after.
+const SNIFF: &str = "a2o_drinkNectar_sniff_x";
+const SWIRL: &str = "a2o_drinkNectar_swirl_x";
+const SNOOTY: &str = "a2o_drinkNectar_snooty_x";
+const YUCK: &str = "a_react_badNectar_x";
+/// The tasting notes (`NectarGlass`'s `adj_`, `hint_`, and its sentences).
+const ADJECTIVES: [&str; 15] = ["buttery", "oaky", "sugary", "crisp", "earthy", "scrumptious", "plain", "simple", "spicy", "smokey", "soft", "supple", "ambiguous", "toasty", "bitter"];
+const HINTS: [&str; 7] = ["blackberry", "chocolate", "raspberry", "honey", "blueberry", "apple", "coffee"];
+const LOW: [&str; 6] = [
+    "All nectar tastes the same to me.",
+    "Sweet, just like other nectar.",
+    "Yum, nectar!",
+    "Drinking nectar makes me happy.",
+    "There are 3 types of nectar, brown, purple, and green.",
+    "Boy, this sure does go well with food!",
+];
+const HIGH_GOOD: [&str; 6] = [
+    "Wow, this Nectar has a {0} taste with strong hints of {1}!",
+    "Mmmm mmm, the {0} taste mixes very well with the hint of {1}!",
+    "This is great!  The nose is {0} with wonderful {1} undertones!",
+    "Delicious!  This is {0} with a strong hint of {1}.",
+    "The {0} flavor with hints of {1} would really go well with dinner.",
+    "I can't get enough of this!  The {0} tones match really well with the {1}.",
+];
+const HIGH_BAD: [&str; 6] = [
+    "I can't believe they called this Nectar. Eww!",
+    "All I can taste is feet!",
+    "Disgusting!",
+    "This Nectar is swill!",
+    "Bleh! The {1} notes overpower the {0} flavor and ruin it.",
+    "Yuck!  The {0} flavor is overpowering, washing out the {1} hints.",
+];
 
 /// Where the maker's used from (its routing slots, model space; all facing it, -Z): the
 /// controls (`_route_1_SW_controls`), the tub (`_route_2_SE_tub`), the bottles
@@ -182,6 +227,10 @@ pub struct Bottle {
     pub day: u32,
     pub base: f32,
     pub mix: Vec<(String, f32)>,
+    /// Made by a master of it (level ten: `MadeByLevel10Sim`), its flame fruit and lifefruit
+    /// working their magic.
+    #[serde(default)]
+    pub ten: bool,
 }
 
 impl Bottle {
@@ -193,7 +242,7 @@ impl Bottle {
     /// Its stack's key in an inventory (`ItemKind::Nectar`), from which it's made again.
     pub fn key(&self) -> String {
         let mix: Vec<String> = self.mix.iter().map(|(k, f)| format!("{k}={f:.3}")).collect();
-        format!("{:08x}|{}|{}|{:.4}|{}", self.hash, self.week, self.day, self.base, mix.join(";"))
+        format!("{:08x}|{}|{}|{:.4}|{}|{}", self.hash, self.week, self.day, self.base, mix.join(";"), u8::from(self.ten))
     }
 
     /// A bottle from its stack's key and name.
@@ -204,7 +253,13 @@ impl Bottle {
         let day = p.next()?.parse().ok()?;
         let base = p.next()?.parse().ok()?;
         let mix = p.next().unwrap_or("").split(';').filter_map(|m| m.split_once('=').and_then(|(k, f)| Some((k.to_string(), f.parse().ok()?)))).collect();
-        Some(Bottle { name: name.trim_start_matches(|c: char| c != '-').trim_start_matches("- ").to_string(), hash, week, day, base, mix })
+        let ten = p.next() == Some("1");
+        Some(Bottle { name: name.trim_start_matches(|c: char| c != '-').trim_start_matches("- ").to_string(), hash, week, day, base, mix, ten })
+    }
+
+    /// How much of it is a fruit (its share of the blend).
+    fn share(&self, key: &str) -> f32 {
+        self.mix.iter().find(|m| m.0 == key).map_or(0.0, |m| m.1)
     }
 
     /// Its name with its week, as the game shows a bottle ("Week: 3 - Apple Nectar").
@@ -875,7 +930,8 @@ fn machines(
                 let name = maker_sim.and_then(|s| sims.get(s).ok()).and_then(|s| s.2.and_then(|r| r.0.iter().find(|x| x.hash == hash).map(|x| x.name.clone()))).unwrap_or(name);
                 let day = clock.day();
                 let week = day / 7 + 1;
-                m.bottles = (0..n).map(|_| Bottle { name: name.clone(), hash, week, day, base: worth, mix: mix.clone() }).collect();
+                let ten = b.level >= 10.0;
+                m.bottles = (0..n).map(|_| Bottle { name: name.clone(), hash, week, day, base: worth, mix: mix.clone(), ten }).collect();
                 let mut fruit_count: Vec<(String, u32)> = Vec::new();
                 for f in &m.fruit {
                     match fruit_count.iter_mut().find(|c| c.0 == f.key) {
@@ -953,6 +1009,140 @@ fn named(mut answers: MessageReader<crate::dialog::Answered>, typed: Res<crate::
     }
 }
 
+/// A glass of nectar being tasted: the bottle it's from, its quality, whether it's begun, and
+/// whether it was their own idea.
+#[derive(Component)]
+pub struct Tasting {
+    bottle: Bottle,
+    quality: u8,
+    begun: bool,
+}
+
+/// A bottle from the inventory opened and a glass of it drunk ("Taste Nectar", `ServeNectar`'s
+/// `TasteDefinition`): the bottle's gone at once.
+pub fn taste(commands: &mut Commands, sim: Entity, queue: &mut ActionQueue, stack: crate::inventory::Stack, who: &Sim) {
+    let Some(bottle) = Bottle::from_key(&stack.key, &stack.name) else { return };
+    commands.entity(sim).insert(Tasting { bottle, quality: stack.quality.max(1), begun: false });
+    queue.push_player(Action::new(TASTE, ActionKind::Outro { clips: &[SNIFF], then: None, secs: 8.0, stand_at: None, target: sim }, false));
+    info!("nectar: {} tastes {}", who.first, stack.name);
+}
+
+/// How they drink it (`SetParameters`): a Snob as a connoisseur, the Insane any way at all, the
+/// rest as they've learned (glasses drunk).
+pub fn drink_clip(snob: bool, insane: bool, glasses: f64, roll: u32) -> &'static str {
+    if snob {
+        SNOOTY
+    } else if insane {
+        [SNIFF, SWIRL, SNOOTY][(roll % 3) as usize]
+    } else if glasses < MED_DRINKS {
+        SNIFF
+    } else if glasses < HIGH_DRINKS {
+        SWIRL
+    } else {
+        SNOOTY
+    }
+}
+
+/// What a glass does to them (`DoPostDrink`): its mood (by its quality; a Snob's better for a
+/// fine one, and only a fine one pleases them; the Insane's anything), and what they make of it.
+/// `rolls`: the bottle's own draws (the buff, adjective, hint), a base sentence, and the Insane's.
+pub fn verdict(quality: u8, snob: bool, insane: bool, glasses: f64, rolls: (usize, usize, usize, usize), crazy: (usize, u32)) -> (i32, String) {
+    let q = (quality.clamp(1, 11) - 1) as usize;
+    let (_, adj, hint, base) = rolls;
+    let fill = |s: &str| s.replace("{0}", ADJECTIVES[adj % ADJECTIVES.len()]).replace("{1}", HINTS[hint % HINTS.len()]);
+    let low = LOW[base % LOW.len()].to_string();
+    let good = fill(HIGH_GOOD[base % HIGH_GOOD.len()]);
+    let bad = fill(HIGH_BAD[base % HIGH_BAD.len()]);
+    if snob {
+        let m = QUALITY_MOOD[q];
+        if m > SNOB_THRESHOLD { (m + SNOB_BONUS, good) } else { (m.min(0), bad) }
+    } else if insane {
+        let m = QUALITY_MOOD[crazy.0 % QUALITY_MOOD.len()];
+        (m, [low, bad, good][(crazy.1 % 3) as usize].clone())
+    } else {
+        let m = QUALITY_MOOD[q];
+        let said = if m < 0 { if glasses < HIGH_DRINKS { low } else { bad } } else if glasses < MED_DRINKS { low } else { good };
+        (m, said)
+    }
+}
+
+/// Glasses being tasted: the drink as they've come to drink it (and a disgusted face after a
+/// foul one, for those who know better), then the moodlets and what they make of it.
+#[allow(clippy::type_complexity)]
+fn tasting(
+    mut commands: Commands,
+    clock: Res<crate::clock::GameClock>,
+    (data, mut lib): (Res<crate::baked::Baked>, ResMut<crate::anim::ClipLibrary>),
+    mut sims: Query<(Entity, &Sim, &mut ActionQueue, &mut Tasting, Option<&mut crate::life::Moodlets>, Option<&crate::journal::SkillJournal>, Has<crate::sim::Selected>)>,
+    (mut notes, mut did): (ResMut<crate::interact::Notifications>, MessageWriter<crate::journal::Did>),
+) {
+    let mut rng = rand::rng();
+    for (e, sim, mut q, mut t, moodlets, journal, selected) in &mut sims {
+        let now_tasting = q.0.front().filter(|a| a.label == TASTE && matches!(a.kind, ActionKind::Outro { target, .. } if target == e));
+        let glasses = journal.map_or(0.0, |j| j.get(crate::journal::Stat::NectarGlasses));
+        let snob = sim.traits.contains(&crate::life::Trait::Snob);
+        let insane = sim.traits.contains(&crate::life::Trait::Insane);
+        match now_tasting {
+            Some(a) if !t.begun => {
+                if !matches!(a.phase, Phase::Running(_)) {
+                    continue;
+                }
+                t.begun = true;
+                let clip = drink_clip(snob, insane, glasses, rng.random());
+                // (A connoisseur knows a foul one: `NectarDisgusting`.)
+                let yuck = clip == SNOOTY && t.quality < 5;
+                let secs = lib.get(&data, clip).map_or(5.0, |c| c.duration) + if yuck { lib.get(&data, YUCK).map_or(3.0, |c| c.duration) } else { 0.0 };
+                commands.entity(e).insert(if yuck { ActionClip::steps(clip, &[YUCK], &[]) } else { ActionClip::new(Some(clip), &[]) });
+                if let Some(a) = q.0.front_mut()
+                    && let ActionKind::Outro { secs: s, .. } = &mut a.kind
+                {
+                    *s = secs;
+                }
+            }
+            Some(_) => {}
+            None if t.begun => {
+                // Drunk: the sugar, the fruits' magic, how good it was.
+                let now = clock.minutes;
+                let b = t.bottle.clone();
+                let mut r = NetRandom::new((b.hash as i32).wrapping_add(sim.id as i32));
+                let mut draw = |n: usize| (r.next_double() * n as f64) as usize;
+                let rolls = (draw(4), draw(ADJECTIVES.len()), draw(HINTS.len()), rng.random_range(0..LOW.len()));
+                let (mood, said) = verdict(t.quality, snob, insane, glasses, rolls, (rng.random_range(0..11), rng.random()));
+                if let Some(mut m) = moodlets {
+                    m.add(crate::life::MoodletKind::SugarRush, now);
+                    if b.ten && b.share("Flame Fruit") > FLAME_SHARE && t.quality > 5 {
+                        m.add(crate::life::MoodletKind::FlameOn, now);
+                    }
+                    if b.ten && b.share("Lifefruit") > 0.0 {
+                        m.add(crate::life::MoodletKind::FullOfLife, now);
+                    }
+                    if mood > 0 {
+                        m.add_valued(crate::life::MoodletKind::GoodNectar, now, mood, 8.0 * 60.0);
+                    } else if mood < 0 {
+                        m.add_valued(crate::life::MoodletKind::BadNectar, now, mood, 2.0 * 60.0);
+                    }
+                }
+                // (Lifefruit enough in it: a day younger, as eating one.)
+                if b.ten && b.share("Lifefruit") > LIFE_SHARE {
+                    commands.entity(e).insert(crate::aging::AteLifefruit);
+                }
+                did.write(crate::journal::Did::count(e, crate::journal::Stat::NectarGlasses, 1.0));
+                if selected {
+                    notes.push(format!("{}: \"{said}\"", sim.first));
+                }
+                info!("nectar: {} drinks {} (mood {mood}): {said}", sim.first, b.name);
+                commands.entity(e).remove::<Tasting>();
+            }
+            None => {
+                // (Never begun: put off, it's still to come; gone from the queue, it's lost.)
+                if !q.0.iter().any(|a| a.label == TASTE) {
+                    commands.entity(e).remove::<Tasting>();
+                }
+            }
+        }
+    }
+}
+
 /// Bottles worth more by the day (`AppreciateDepreciateDailyUpdate`): those in inventories, and
 /// their quality with it.
 fn appreciate(clock: Res<crate::clock::GameClock>, mut invs: Query<&mut Inventory>, mut last: Local<Option<u32>>) {
@@ -973,13 +1163,14 @@ fn appreciate(clock: Res<crate::clock::GameClock>, mut invs: Query<&mut Inventor
 
 /// `NECTAR_TEST=1` (tests): ten seconds in, a nectar maker put down near the selected Sim, the
 /// camera on it; `NECTAR_FRUIT=<produce>/<tier>*<n>,...` given them; `NECTAR_LEVEL=<n>`;
-/// `NECTAR_DO=add|squish|make|take|all` (all: fruit in, then made, then taken);
+/// `NECTAR_DO=add|squish|make|take|all|taste` (all: fruit in, then made, then taken; taste: a
+/// bottle worth `NECTAR_WORTH` tasted);
 /// `NECTAR_FAST=1`: the machine done in a minute; `NECTAR_PIE=1`: its menu.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn nectar_test(
     mut commands: Commands,
     time: Res<Time>,
-    mut sims: Query<(Entity, &Transform, &mut ActionQueue, &mut Skills, Option<&Inventory>), With<crate::sim::Selected>>,
+    mut sims: Query<(Entity, &Transform, &mut ActionQueue, &mut Skills, Option<&Inventory>, &Sim), With<crate::sim::Selected>>,
     mut makers: Query<(Entity, &GameObject, &Transform, Option<&mut Maker>), Without<crate::sim::Selected>>,
     (catalog, data, grid, ui): (Res<crate::loading::Catalog>, Res<crate::baked::Baked>, Option<Res<crate::nav::NavGrid>>, Option<Res<crate::icons::GameUi>>),
     mut assets: ResMut<crate::objects::ObjectAssets>,
@@ -1017,9 +1208,17 @@ fn nectar_test(
             }
         }
     }
-    let Ok((e, tf, mut q, mut skills, inv)) = sims.single_mut() else { return };
+    let Ok((e, tf, mut q, mut skills, inv, sim)) = sims.single_mut() else { return };
     let do_ = env("NECTAR_DO").unwrap_or_default();
     match stage.0 {
+        // (NECTAR_DO=taste: a bottle of a worth, `NECTAR_WORTH`, tasted; no maker.)
+        0 if do_ == "taste" => {
+            *stage = (9, now);
+            let worth: f32 = env("NECTAR_WORTH").and_then(|v| v.parse().ok()).unwrap_or(40.0);
+            let b = Bottle { name: "Apple Lime Nectar".into(), hash: 0x5eed_1234, week: 1, day: 0, base: worth, mix: vec![("Apple".into(), 0.5), ("Lime".into(), 0.5)], ten: false };
+            let stack = crate::inventory::Stack { kind: ItemKind::Nectar, key: b.key(), name: b.shown(), quality: quality(worth), count: 1, worth: worth as i64 };
+            taste(&mut commands, e, &mut q, stack, sim);
+        }
         0 => {
             *stage = (1, now);
             if let Some(l) = env("NECTAR_LEVEL").and_then(|v| v.parse::<f32>().ok()) {
@@ -1108,7 +1307,7 @@ mod tests {
 
     #[test]
     fn bottles_keep_and_gain_their_worth() {
-        let b = Bottle { name: "Apple Lime Nectar".into(), hash: 0xdead_beef, week: 2, day: 9, base: 20.0, mix: vec![("Apple".into(), 0.6), ("Lime".into(), 0.4)] };
+        let b = Bottle { name: "Apple Lime Nectar".into(), hash: 0xdead_beef, week: 2, day: 9, base: 20.0, mix: vec![("Apple".into(), 0.6), ("Lime".into(), 0.4)], ten: true };
         assert_eq!(b.worth(9), 20);
         assert_eq!(b.worth(14), 24, "four in a hundred of its worth a day");
         let back = Bottle::from_key(&b.key(), &b.shown()).unwrap();
@@ -1116,7 +1315,27 @@ mod tests {
         assert_eq!(back.day, 9);
         assert_eq!(back.name, "Apple Lime Nectar");
         assert_eq!(back.mix.len(), 2);
+        assert!(back.ten && (back.share("Lime") - 0.4).abs() < 1e-3);
         assert_eq!(b.shown(), "Week: 2 - Apple Lime Nectar");
+    }
+
+    #[test]
+    fn a_glass_is_taken_as_the_game_has_it() {
+        assert_eq!(drink_clip(false, false, 3.0, 0), SNIFF);
+        assert_eq!(drink_clip(false, false, 12.0, 0), SWIRL);
+        assert_eq!(drink_clip(false, false, 40.0, 0), SNOOTY);
+        assert_eq!(drink_clip(true, false, 0.0, 0), SNOOTY, "a Snob's a connoisseur");
+        // (A novice: the moods by quality, and a plain word for it.)
+        let (m, said) = verdict(7, false, false, 0.0, (0, 0, 0, 2), (0, 0));
+        assert_eq!(m, 8);
+        assert_eq!(said, "Yum, nectar!");
+        // (A connoisseur's notes.)
+        let (_, said) = verdict(9, false, false, 50.0, (0, 1, 3, 3), (0, 0));
+        assert_eq!(said, "Delicious!  This is oaky with a strong hint of honey.");
+        // (A Snob: only a fine one pleases, the better for it.)
+        assert_eq!(verdict(10, true, false, 0.0, (0, 0, 0, 0), (0, 0)).0, 25);
+        assert_eq!(verdict(7, true, false, 0.0, (0, 0, 0, 0), (0, 0)).0, 0);
+        assert_eq!(verdict(2, false, false, 0.0, (0, 0, 0, 0), (0, 0)).0, -15);
     }
 
     #[test]

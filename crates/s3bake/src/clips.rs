@@ -284,6 +284,9 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_nectarMaker_",
     "a_nectarMaker_",
     "o_nectarMaker_",
+    // (A glass of nectar tasted, and a foul one's face after.)
+    "a2o_drinkNectar_",
+    "a_react_badNectar",
     // (A snake charmed out of its basket: the charmer's, the basket's lid, the snake's own.)
     "a2o_snakeBasket_",
     "o_snakeBasket_",
@@ -1052,8 +1055,9 @@ pub const PROP_ACTORS: &[&str] = &[
     // (A snake charmer's pungi, and the snake charmed.)
     "pungi",
     "snake",
-    // (A bottle of nectar taken from the maker.)
+    // (A bottle of nectar taken from the maker, and a glass of it.)
     "nectarBottle",
+    "glass",
 ];
 
 /// Objects' own halves of clips whose actor isn't named for the object (the pool table's

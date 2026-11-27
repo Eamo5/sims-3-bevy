@@ -962,10 +962,16 @@ pub enum MoodletKind {
     /// A charmed snake kissed atop its head; bitten in the face by one (`snakecharm`).
     SnakeKiss,
     OuchMyFace,
+    /// A glass of nectar tasted, good or bad (as good as it was), warming (flame fruit), or making
+    /// them young again (lifefruit) (`nectar`).
+    GoodNectar,
+    BadNectar,
+    FlameOn,
+    FullOfLife,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 202] = {
+    pub const ALL: [MoodletKind; 206] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -986,7 +992,7 @@ impl MoodletKind {
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
             GoingNuts, Restless, Frustrated, ThirstyHorse, Dehydrated, SqueakyCleanPet, WellRestedPet, PregnantPet, PetSkillFatigue,
             LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, PumpedPony, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
-            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot, HurtHand, SnakeKiss, OuchMyFace,
+            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot, HurtHand, SnakeKiss, OuchMyFace, GoodNectar, BadNectar, FlameOn, FullOfLife,
         ]
     };
 
@@ -1229,6 +1235,10 @@ impl MoodletKind {
             HurtHand => md("Hurt Hand!", "A wise Sim learns from a hurt hand, while others only feel pain.", -25, 3.0),
             SnakeKiss => md("Snake Kiss", "Only the most talented and daring snake charmers are able to attempt to kiss the deadly snake atop its head and succeed!", 25, 2.0),
             OuchMyFace => md("Ouch! My Face!", "Woah! It looks like you just got bitten in the face by a rather unruly snake!", -25, 4.0),
+            GoodNectar => md("Good Nectar", "The flavors of the nectar are so vibrant with fruits that the tongue is practically overwhelmed.", 10, 8.0),
+            BadNectar => md("Bad Nectar", "When nectar tastes that bad it should just be left in the bottle!", -10, 2.0),
+            FlameOn => md("Warm Fuzzies", "Certain foods fill the body with a warm, cozy feeling that's unlike anything else.", 15, 5.0),
+            FullOfLife => md("Full of Life", "There's nothing that compares to feeling young and full of life again.", 50, 8.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1444,6 +1454,10 @@ impl MoodletKind {
             HurtHand => ("HurtHand", true),
             SnakeKiss => ("SnakeKiss", true),
             OuchMyFace => ("OuchMyFace", true),
+            GoodNectar => ("GoodNectar", true),
+            BadNectar => ("BadNectar", true),
+            FlameOn => ("FlameOn", true),
+            FullOfLife => ("FullOfLife", true),
         }
     }
 }

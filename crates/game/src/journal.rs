@@ -61,6 +61,8 @@ pub enum Stat {
     NectarBottles,
     NectarSquishes,
     NectarFruit,
+    /// Glasses of nectar drunk (`mNumberGlassesNectarDrank`).
+    NectarGlasses,
 }
 
 impl Stat {
@@ -94,6 +96,7 @@ impl Stat {
             Stat::NectarBottles => "nectar_bottles",
             Stat::NectarSquishes => "nectar_squishes",
             Stat::NectarFruit => "nectar_fruit",
+            Stat::NectarGlasses => "nectar_glasses",
         }
     }
 }

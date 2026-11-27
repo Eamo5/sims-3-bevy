@@ -217,6 +217,10 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     if s.kind == ItemKind::Journal {
         out.push(("Read".to_string(), ItemButton::Read));
     }
+    // (A bottle of nectar: a glass of it, teens and up.)
+    if s.kind == ItemKind::Nectar && !sim.age.is_little() && sim.age != crate::sim::Age::Child {
+        out.push((crate::nectar::TASTE.to_string(), ItemButton::Taste));
+    }
     // (A pet rock: played with, or put down at their feet, `petstones`.)
     if s.kind == ItemKind::Object && crate::petstones::is_stone(&s.key) && crate::petstones::plays(sim.age) {
         out.push((crate::petstones::play_with(&s.name), ItemButton::PlayStone));
@@ -254,6 +258,8 @@ pub enum ItemButton {
     /// A pet rock played with, or put down at their feet (`petstones`).
     PlayStone,
     PutDownStone,
+    /// A glass of a bottle of nectar poured and drunk (`nectar`'s "Taste Nectar").
+    Taste,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -478,6 +484,12 @@ fn inventory_buttons(
             }
             ItemButton::Read => {
                 queue.push_player(Action::new("Read Medical Journal", ActionKind::ReadJournal, false));
+            }
+            // (A bottle of nectar opened for a glass: the bottle's gone, `nectar`.)
+            ItemButton::Taste => {
+                let Some(worth) = inv.take_one(k) else { continue };
+                crate::nectar::taste(&mut commands, me, &mut queue, Stack { count: 1, worth, ..s.clone() }, sim);
+                chosen.reconcile(&inv);
             }
             ItemButton::ToFridge => {
                 if away.contains(me) {

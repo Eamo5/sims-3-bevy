@@ -121,8 +121,9 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("spyglass", "accessorySpyglass", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("alienScanner", "accessoryAlienScanner", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("bucket", "accessoryBucket", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
-    // (A bottle of nectar taken out of the maker.)
+    // (A bottle of nectar taken out of the maker, and a glass of it tasted.)
     ("nectarBottle", "NectarBottle", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    ("glass", "NectarGlass", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     // (A snake charmer's pungi, its gourd's mouthpiece at the lips.)
     ("pungi", "Pungi", "b__mouth_slot", [0.0, 0.0, 0.269748], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)

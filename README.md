@@ -1115,10 +1115,18 @@ installation is unreachable.
   Feet's (forty batches squished, a tenth more). "Take Nectar" takes the bottles into their
   inventory ("Week: 1 - Apple Lime Nectar", a bottle in hand as they do), where they're worth four
   in a hundred more each day (`kAppreciationPercent`), their quality rising with it
-  (`kQualityValueThresholds`), to sell. The six best nectars each Sim's made are kept, their journal
+  (`kQualityValueThresholds`), to sell, or to open for "Taste Nectar" (`ServeNectar`'s taste): a
+  glass drunk as they've come to drink it (a sniff at first, a swirl after ten glasses, a snooty
+  connoisseur's after thirty, a Snob always, the Insane any way at all, a disgusted face for a
+  connoisseur's foul one), Sugar Rush, Good Nectar or Bad Nectar as good as the bottle
+  (`kQualityBuffMoodLevels`: a Snob only pleased by a fine one, the more for it), a master's flame
+  fruit nectar's Warm Fuzzies and lifefruit nectar's Full of Life (and a day younger), and what they
+  make of it ("All nectar tastes the same to me." to "Delicious!  This is oaky with a strong hint
+  of honey.", the bottle's own notes). The six best nectars each Sim's made are kept, their journal
   counts the bottles, batches and fruit, and the maker's fruit, batch and bottles are kept in saves.
   `NECTAR_TEST=1` with `NECTAR_FRUIT=<produce>/<tier>*<n>,...`, `NECTAR_LEVEL`,
-  `NECTAR_DO=add|squish|make|take|all`, `NECTAR_FAST=1`, `NECTAR_PIE=1` (tests).
+  `NECTAR_DO=add|squish|make|take|all|taste`, `NECTAR_WORTH`, `NECTAR_FAST=1`, `NECTAR_PIE=1`
+  (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for
