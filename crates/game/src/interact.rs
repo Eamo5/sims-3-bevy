@@ -313,6 +313,9 @@ pub enum ObjectKind {
     BoardBreaker,
     /// A chin-up bar (Showtime's `ChinUpBar`): a strength workout (`chinup`).
     ChinUpBar,
+    /// A snake charming basket (World Adventures' `SnakeCharmingBasket`): its snake charmed out
+    /// of it (`snakecharm`).
+    SnakeBasket,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -367,6 +370,8 @@ impl ObjectKind {
             Self::BoardBreaker
         } else if has("objects.hobbiesskills.chinupbar") {
             Self::ChinUpBar
+        } else if has("objects.hobbiesskills.snakecharmingbasket") {
+            Self::SnakeBasket
         } else if has("objects.decorations.flamingo")
             || has("objects.environment.gardengnome")
             || has("objects.environment.magicgnome")
@@ -702,7 +707,8 @@ impl ObjectKind {
             | Self::LaserHarp
             | Self::TrainingDummy
             | Self::BoardBreaker
-            | Self::ChinUpBar => "Hobbies",
+            | Self::ChinUpBar
+            | Self::SnakeBasket => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -797,6 +803,8 @@ impl ObjectKind {
                 // (A training dummy's: before it, `Practice`'s; a chin-up bar's, under it.)
                 | K::TrainingDummy
                 | K::ChinUpBar
+                // (A snake charming basket's: before it, cross-legged.)
+                | K::SnakeBasket
         )
         .then_some(0)
     }
@@ -1588,6 +1596,8 @@ pub enum Special {
     Donate,
     /// A cat's catch on the floor picked up into the Sim's inventory (`petpresent`).
     PocketPrey,
+    /// A snake charming basket's King Cobra bought (`snakecharm`).
+    BuyKingCobra,
 }
 
 impl Special {
@@ -2069,6 +2079,12 @@ static BOX_STALL: [InteractionDef; 1] = [InteractionDef { special: Special::Scru
 static TRAINING_DUMMY: [InteractionDef; 1] = [InteractionDef { skill: Some("MartialArts"), ..def("Practice", 60.0, [0.0, 0.0, 0.0, 0.0, -40.0, 45.0], Pose::Use) }];
 /// (The chin-up bar's `WorkOut.StrengthSingleton`, as the workout bench's, teens and up.)
 static CHIN_UP_BAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, skill: Some("Athletic"), ..def(crate::chinup::CHIN_UPS, 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) }];
+/// (The basket's `Charm`: Snake Charming 650 an hour, Fun 40; and its King Cobra bought at level
+/// eight, `PurchaseKingCobra`.)
+static SNAKE_BASKET: [InteractionDef; 2] = [
+    InteractionDef { skill: Some("SnakeCharming"), ..def(crate::snakecharm::CHARM, 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 40.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::BuyKingCobra, ..def(crate::snakecharm::BUY_COBRA, 0.1, N, Pose::Stand) },
+];
 /// (A cat's catch on the floor: the game's generic `PutInInventory`, a swipe.)
 static PREY: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::PocketPrey, ..def(crate::petpresent::PUT_IN_INVENTORY, 1.5, N, Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
@@ -2386,6 +2402,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Scan Art" => A::new(Some("a_scanWorkOfArt_scan_start_x"), &["a_scanWorkOfArt_scan_loop1_x", "a_scanWorkOfArt_scan_loop2_x"]).ending(&["a_scanWorkOfArt_scan_stop_x"], 1.5),
         "Clean Stall" => A::new(Some("a2o_boxStall_clean_start_x"), &["a2o_boxStall_clean_loop1_x", "a2o_boxStall_clean_loop2_x"]).ending(&["a2o_boxStall_clean_stop_x"], 1.5),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
+        // (A snake charming basket: sat down, the lid off, playing as their skill has them
+        // (`snakecharm`), the lid back on and up.)
+        "Charm" if kind == ObjectKind::SnakeBasket => {
+            A::new(Some("a2o_snakeBasket_start_x"), &["a2o_snakeBasket_beg_loopPlay_x"]).ending(&["a2o_snakeBasket_closeLid_x", "a2o_snakeBasket_stop_x"], 4.3)
+        }
         // (A chin-up bar: up onto it, at it as their Athletic has them, `chinup`, and down.)
         "Do Chin Ups" if kind == ObjectKind::ChinUpBar => A::new(Some("a2o_chinBar_chinUp_start_x"), &["a2o_chinBar_chinUp_low_loop"]).ending(&["a2o_chinBar_chinUp_stop_x"], 1.5),
         // (A training dummy: into the stance, at it as their skill has it, `martialarts`, and out.)
@@ -2954,7 +2975,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar | K::SnakeBasket),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
@@ -3087,6 +3108,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::Prey => &PREY,
         ObjectKind::TrainingDummy => &TRAINING_DUMMY,
         ObjectKind::ChinUpBar => &CHIN_UP_BAR,
+        ObjectKind::SnakeBasket => &SNAKE_BASKET,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -3517,6 +3539,8 @@ pub fn practice_points(name: &str) -> f32 {
         // (WorkOut_Treadmill, WorkOut_WorkoutBench, SwimmingInPool's kSkillGainRatePerMinute.)
         "Work Out" => 780.0,
         "Pump Iron" | "Do Chin Ups" => 1014.0,
+        // (Charm_SnakeCharmingBasket's SkillSnakeCharming.)
+        "Charm" => 650.0,
         // (Practice_TrainingDummy's SkillMartialArts.)
         "Practice" => 650.0,
         "Swim" => 480.0,
@@ -3945,6 +3969,18 @@ pub(crate) fn run_actions(
                 }
                 if matches!(action.phase, Phase::Running(_)) {
                     stand_up_at = Some(action.approach.unwrap_or_else(|| obj.use_point(otf)));
+                    // (Stopped part way, its ending still plays, as the game's exit does: the
+                    // book closed, the lid put back on; then up out of the seat.)
+                    if let ActionKind::Object { def, .. } = action.kind
+                        && let Some(d) = interactions_for(obj.kind).get(def)
+                    {
+                        let up = (d.on_object && d.pose == Pose::Sit).then(|| seat_clips(obj.kind)).flatten().map(|(_, out, secs)| (out, secs));
+                        outro = match (interaction_clip(d.name, obj.kind).filter(|c| !c.end.is_empty()), up) {
+                            (Some(c), up) => Some((c.end, up.map(|u| u.0), c.end_secs + up.map_or(0.0, |u| u.1), target, false)),
+                            (None, Some((out, secs))) => Some((&[], Some(out), secs, target, false)),
+                            (None, None) => None,
+                        };
+                    }
                 }
             }
             finished = true;
@@ -5831,6 +5867,11 @@ pub(crate) fn run_actions(
                                         }
                                         Special::Collect => {
                                             commands.entity(me).insert(crate::collecting::CollectRequest::Pick(*target));
+                                        }
+                                        // (A King Cobra bought for the basket: `snakecharm`.)
+                                        Special::BuyKingCobra => {
+                                            let t = *target;
+                                            commands.queue(move |w: &mut World| crate::snakecharm::buy_cobra(w, me, t));
                                         }
                                         // (A cat's catch picked up: into their inventory, `petpresent`.)
                                         Special::PocketPrey => {

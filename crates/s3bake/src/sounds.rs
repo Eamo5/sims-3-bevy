@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 24;
+pub const SOUNDS_VERSION: u32 = 25;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -104,6 +104,10 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "fx_bbreaker_break_stone_c",
     "fx_bbreaker_break_stone_d",
     "fx_bbreaker_break_stone",
+    // A snake charmer's pungi tunes (the middling and the expert's), and the snake rising.
+    "snake_pungi_med_lp",
+    "snake_pungi_exp_lp",
+    "snake_vox_trans_appear",
     // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
     "thouse_pretend_castle_loop",
     "thouse_pretend_castle_plist",

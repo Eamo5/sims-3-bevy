@@ -985,6 +985,9 @@ fn main() {
             println!("model {mk}");
             for m in s3formats::model::load_model(&set, &mk).unwrap_or_default() {
                 println!("  mesh {:08X} verts {} joints {:?}", m.name_hash, m.positions.len(), m.joints.iter().map(|j| name(*j)).collect::<Vec<_>>());
+                for (h, f) in &m.skin {
+                    println!("    skin {} {:?}", name(*h), f.map(|x| (x * 1000.0).round() / 1000.0));
+                }
                 let mut hist: std::collections::BTreeMap<[u8; 4], usize> = Default::default();
                 for b in &m.blend_indices {
                     *hist.entry(*b).or_default() += 1;

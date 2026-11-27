@@ -121,6 +121,8 @@ const PROPS: &[(&str, &str, &str, [f32; 3], [f32; 3])] = &[
     ("spyglass", "accessorySpyglass", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("alienScanner", "accessoryAlienScanner", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
     ("bucket", "accessoryBucket", "b__R_Hand_slot", [0.0; 3], [0.0; 3]),
+    // (A snake charmer's pungi, its gourd's mouthpiece at the lips.)
+    ("pungi", "Pungi", "b__mouth_slot", [0.0, 0.0, 0.269748], [0.0; 3]),
     // (Whichever stuffed animal or toy is being played with.)
     ("stuffedAnimal", ANY, "b__R_carry_slot", [0.0; 3], [0.0; 3]),
     // (Whichever pet rock is played with.)
@@ -258,7 +260,13 @@ fn hold_props(
             held.2.remove(&i);
         }
         for (i, clip_name) in &want {
-            let (_, object, slot, bind, nudge) = PROPS[*i];
+            let (actor, object, slot, bind, nudge) = PROPS[*i];
+            // (PROP_SLOT=<actor>:<slot>, PROP_NUDGE=<actor>:<x>,<y>,<z> (tests): another slot, a
+            // nudge in it.)
+            let over = |k: &str| std::env::var(k).ok().and_then(|v| v.split_once(':').filter(|(a, _)| a.eq_ignore_ascii_case(actor)).map(|(_, s)| s.to_string()));
+            let slot_over = over("PROP_SLOT");
+            let slot = slot_over.as_deref().unwrap_or(slot);
+            let nudge = over("PROP_NUDGE").map(|s| s.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3).map_or(nudge, |v| [v[0], v[1], v[2]]);
             let entity = match held.0.iter().find(|(h, ..)| h == i) {
                 Some((_, e, _)) => *e,
                 None => {
@@ -340,6 +348,10 @@ fn hold_props(
                 }
                 if let Some(r) = crate::anim::sample_track_quat(&track.rotation, t) {
                     tf.rotation = r;
+                }
+                // (PROP_TURN=<actor>:<x>,<y>,<z> degrees (tests): turned after the clip's.)
+                if let Some(v) = over("PROP_TURN").map(|s| s.split(',').filter_map(|x| x.trim().parse::<f32>().ok()).collect::<Vec<_>>()).filter(|v| v.len() == 3) {
+                    tf.rotation *= Quat::from_euler(EulerRot::XYZ, v[0].to_radians(), v[1].to_radians(), v[2].to_radians());
                 }
             }
             // (The rope the dog's taken hold of, from its mouth to the Sim's hand, as the game's

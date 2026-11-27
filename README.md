@@ -1073,6 +1073,25 @@ installation is unreachable.
   their own accord. `BOARDS_TEST=1` with `BOARDS_WHO`, `BOARDS_LEVEL`, `BOARDS_BOARD=<1-5>`,
   `BOARDS_WATCH=<first name>`, `BOARDS_RESULT=success|miss|hurt`, `BOARDS_CHANGE=<1-5>`,
   `BOARDS_STOP=<seconds>`, `BOARDS_PIE=1` (tests).
+- **The snake charming basket and Snake Charming**, as World Adventures' `SnakeCharmingBasket`
+  and `SnakeCharming`: teens and up "Charm" (Snake Charming 650 an hour, Fun 40). They sit down
+  before it cross-legged and take out the pungi (the game's own, its gourd at their lips), lift
+  the lid off and set it beside (`a2o_snakeBasket_openLid`, the basket's half with it; at rest the
+  lid's on), and play as their skill has them: the beginner's tunes below level four, the
+  middling ones below eight and the expert's after (`kNormalAnimLevel`, `kExpertAnimLevel`; the
+  better ones to the game's pungi loops). Every seven to twelve minutes the snake may rise
+  (`_trans_snakeappear`: one time in ten for a beginner, a third of the time middling, always for
+  an expert), the basket's garter snake or King Cobra its own model swaying to the tune as its
+  half of each clip has it; else they reach in after it (`_beg_touchSnake_shrug`), bitten one
+  time in ten (`_bite`: Hurt Hand!, and they put it away). With the snake out the skilled try a
+  kiss atop its head now and then (`_kissSnake_succeed`, four times in ten middling, seven expert:
+  Snake Kiss) or miss it, and a King Cobra may bite their face (`_epicFail`: Ouch! My Face!, and
+  they're done). An expert with the snake away now and then makes magic of it, a swirl over the
+  basket. When they stop the lid goes back on over the snake and the pungi's put away. At level
+  eight "Purchase King Cobra (§1000)" trades the garter snake for one (`PurchaseKingCobra`: "The
+  basket now has a King Cobra in it.", greyed without the money), kept in saves.
+  `CHARM_TEST=1` with `CHARM_LEVEL`, `CHARM_COBRA=1`, `CHARM_FORCE=snake|none|bite|kiss|bitten|
+  magic`, `CHARM_STOP=<seconds>`, `CHARM_PIE=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for
@@ -2132,7 +2151,9 @@ installation is unreachable.
   before. A menu that would go off the screen is moved onto it, the pointer with it, as the
   game's are. The interaction queue at the top left and the
   notices at the top right are the game's own too: each queued action in its frame with the
-  object's picture or the other Sim's face, the running one's progress bar, a cross to cancel;
+  object's picture or the other Sim's face, the running one's progress bar, a cross to cancel
+  (an interaction stopped part way still plays its ending, as the game's exit does: the book
+  closed, the lid put back on, up out of the seat);
   each notice a speech card with the Sim's face or a system card, closed with its cross. The
   notices are kept as the game's `NotificationManager` keeps them: under its Information and
   Chatty tabs (glowing with news), one on show at a time with the page arrows and numbers back

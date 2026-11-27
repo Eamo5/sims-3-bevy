@@ -1229,7 +1229,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res)))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res, cobras_q)))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1238,7 +1238,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>)),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>, Query<(), With<crate::snakecharm::KingCobra>>)),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -2092,6 +2092,18 @@ fn world_click(
                 // (A training dummy: not while worn out from it, `Practice`'s test.)
                 if obj.kind == ObjectKind::TrainingDummy && moods_q.get(actor).is_ok_and(|m| m.has(crate::life::MoodletKind::Fatigued)) {
                     options.push((d.name.to_string(), ActionKind::Greyed(crate::martialarts::too_fatigued(&actor_sim.first))));
+                    continue;
+                }
+                // (A snake charming basket's King Cobra: at level eight, while it's a garter snake,
+                // greyed short of the money: `PurchaseKingCobra`.)
+                if d.special == Special::BuyKingCobra {
+                    let level = writers.get(actor).map_or(0.0, |w| w.1.0.get("SnakeCharming").copied().unwrap_or(0.0));
+                    let funds = opp_q.4.as_ref().map_or(0, |h| h.funds);
+                    match crate::snakecharm::cobra_offer(level, cobras_q.contains(t), funds, &actor_sim.first) {
+                        Some(Ok(label)) => options.push((label, ActionKind::Object { target: t, def: i })),
+                        Some(Err(why)) => options.push((format!("{} (§{})", crate::snakecharm::BUY_COBRA, crate::snakecharm::COBRA_COST), ActionKind::Greyed(why))),
+                        None => {}
+                    }
                     continue;
                 }
                 // (A chin-up bar: by their traits' name for it, not while worn out.)

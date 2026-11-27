@@ -959,10 +959,13 @@ pub enum MoodletKind {
     HurtFoot,
     /// A board that wouldn't break (`boardbreaker`).
     HurtHand,
+    /// A charmed snake kissed atop its head; bitten in the face by one (`snakecharm`).
+    SnakeKiss,
+    OuchMyFace,
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 200] = {
+    pub const ALL: [MoodletKind; 202] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -983,7 +986,7 @@ impl MoodletKind {
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
             GoingNuts, Restless, Frustrated, ThirstyHorse, Dehydrated, SqueakyCleanPet, WellRestedPet, PregnantPet, PetSkillFatigue,
             LovedPet, Brushed, Praise, Scolded, HygenicHooves, GoodDog, NothingButAir, PumpedPony, TastesLikeChicken, NewKittensPet, NewPuppiesPet, NewFoalPet,
-            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot, HurtHand,
+            Kicked, Marked, ShreddedDignity, Kittens, Puppies, HadAGoodStroll, Splinter, HurtFoot, HurtHand, SnakeKiss, OuchMyFace,
         ]
     };
 
@@ -1224,6 +1227,8 @@ impl MoodletKind {
             Splinter => md("Splinter", "Ouch! Some frisky fun in the great outdoors is just the thing to spice up the love life, but splinters are a real pain in the rear.", -5, 1.0),
             HurtFoot => md("Hurt Foot", "Ouch! I just dropped that stone on my foot.", -25, 3.0),
             HurtHand => md("Hurt Hand!", "A wise Sim learns from a hurt hand, while others only feel pain.", -25, 3.0),
+            SnakeKiss => md("Snake Kiss", "Only the most talented and daring snake charmers are able to attempt to kiss the deadly snake atop its head and succeed!", 25, 2.0),
+            OuchMyFace => md("Ouch! My Face!", "Woah! It looks like you just got bitten in the face by a rather unruly snake!", -25, 4.0),
             FeelingCalm => md(
                 "Feeling Calm",
                 "It turns out it was just anxiety getting the best of your Sim. The object wasn't left turned on and impending disaster wasn't looming. But, double checking helps to calm the anxiety.",
@@ -1437,6 +1442,8 @@ impl MoodletKind {
             Splinter => ("Splinter", true),
             HurtFoot => ("HurtFoot", true),
             HurtHand => ("HurtHand", true),
+            SnakeKiss => ("SnakeKiss", true),
+            OuchMyFace => ("OuchMyFace", true),
         }
     }
 }

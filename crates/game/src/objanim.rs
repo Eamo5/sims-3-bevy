@@ -482,19 +482,30 @@ fn swing_doors(
     }
 }
 
+/// Sims' clips whose object half isn't played: sitting down at a snake charming basket and getting
+/// up again, its lid left on as it rests (their halves have it off beside it).
+const STILL: [&str; 2] = ["a2o_snakeBasket_start_x", "a2o_snakeBasket_stop_x"];
+
 /// The object's half of a Sim's clip (`a2o_fridge_openDoor_x` → `a2o_fridge_openDoor_fridge`):
 /// a clip of the same name for an actor that's neither the Sim nor a prop.
 fn companion(data: &Baked, name: &str) -> Option<String> {
+    if STILL.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+        return None;
+    }
     let stem = name.strip_suffix("_x")?;
     let want = format!("{}_", stem.to_ascii_lowercase());
-    data.0
+    let all: Vec<&String> = data
+        .0
         .clip_names
         .iter()
-        .find(|n| {
+        .filter(|n| {
             let l = n.to_ascii_lowercase();
             l.strip_prefix(&want).is_some_and(|rest| !rest.is_empty() && !rest.contains('_') && rest != "x" && rest != "y" && !crate::props::prop_actor(rest))
         })
-        .cloned()
+        .collect();
+    // (The object's own where there are others too: the snake charming basket's, not its snake's.)
+    let object = stem.split('_').nth(1).map(|o| o.to_ascii_lowercase());
+    all.iter().find(|n| object.as_ref().is_some_and(|o| n.to_ascii_lowercase().ends_with(&format!("_{o}")))).or(all.first()).map(|n| (*n).clone())
 }
 
 /// The pose an object's held in through a Sim's clips that don't move it: a bath's water up

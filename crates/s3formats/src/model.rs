@@ -307,6 +307,34 @@ pub struct MeshData {
     pub state_textures: Vec<(u32, ResourceKey, bool)>,
     /// The MLOD mesh's flags (`MESH_*`: a basin's inside, a shadow caster...).
     pub flags: u32,
+    /// Its skin controller's bones (SKIN): each bone's name hash and the inverse of where the
+    /// mesh was made round it (a 4x3 matrix, by rows), which may differ from the rig's rest
+    /// pose (a snake charming basket's lid made lying off it, its rig resting it on).
+    pub skin: Vec<(u32, [f32; 12])>,
+}
+
+/// A skin controller (SKIN, 0x01D0E76B): its tag and version, its bones' name hashes, then a
+/// 4x3 inverse bind matrix for each.
+pub fn parse_skin(d: &[u8]) -> Option<Vec<(u32, [f32; 12])>> {
+    let mut r = Reader::new(d);
+    if &r.fourcc().ok()? != b"SKIN" {
+        return None;
+    }
+    let _version = r.u32().ok()?;
+    let n = r.u32().ok()? as usize;
+    if n > 512 {
+        return None;
+    }
+    let names: Vec<u32> = (0..n).map(|_| r.u32()).collect::<Result<_, _>>().ok()?;
+    let mut out = Vec::with_capacity(n);
+    for name in names {
+        let mut f = [0.0f32; 12];
+        for x in &mut f {
+            *x = r.f32().ok()?;
+        }
+        out.push((name, f));
+    }
+    Some(out)
 }
 
 /// A mesh that's the inside of a basin (a sink's bowl), the game drawing it through the counter
@@ -401,7 +429,7 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
         // Skin controller, joints, scale offset, then the geometry states.
         let mut states_raw: Vec<(u32, usize, usize)> = Vec::new();
         let mut joint_refs: Vec<u32> = Vec::new();
-        let _skin = r.u32();
+        let skin_ref = r.u32().unwrap_or(0);
         if let Ok(joints) = r.u32()
             && (0..joints.min(256)).all(|_| r.u32().map(|j| joint_refs.push(j)).is_ok())
             && r.u32().is_ok()
@@ -442,6 +470,7 @@ pub fn decode_mlod(rcol: &Rcol, mlod: &[u8]) -> R<Vec<MeshData>> {
             bounds_max: bmax,
             joints: joint_refs,
             flags: prim_flags >> 8,
+            skin: if skin_ref != 0 { rcol.resolve(skin_ref).and_then(|(_, d)| parse_skin(d)).unwrap_or_default() } else { Vec::new() },
             ..Default::default()
         };
         let skinned = !m.joints.is_empty() && vrtf.elems.iter().any(|e| e.usage == 3);
