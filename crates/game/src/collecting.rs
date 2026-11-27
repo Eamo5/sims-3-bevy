@@ -41,6 +41,9 @@ impl Plugin for CollectingPlugin {
 pub struct Collection {
     pub found: BTreeSet<String>,
     pub held: BTreeMap<String, (u32, i64)>,
+    /// The kinds of space rock analyzed so far (`RockNames`' keys: the game's `RockAnalyzed`).
+    #[serde(default)]
+    pub rocks: BTreeSet<String>,
 }
 
 impl Collection {

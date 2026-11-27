@@ -228,6 +228,13 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     if s.kind == ItemKind::Journal {
         out.push(("Read".to_string(), ItemButton::Read));
     }
+    // (A space rock not yet analyzed: looked over, one or the stack, `spacerocks`.)
+    if crate::spacerocks::unanalyzed(s) {
+        out.push((crate::spacerocks::ANALYZE.to_string(), ItemButton::Analyze(false)));
+        if s.count > 1 {
+            out.push((crate::spacerocks::ANALYZE_ALL.to_string(), ItemButton::Analyze(true)));
+        }
+    }
     // (A bottle of nectar: a glass of it, teens and up.)
     if s.kind == ItemKind::Nectar && !sim.age.is_little() && sim.age != crate::sim::Age::Child {
         out.push((crate::nectar::TASTE.to_string(), ItemButton::Taste));
@@ -273,6 +280,8 @@ pub enum ItemButton {
     Taste,
     /// A photograph given a title (`photos`, the game's `NameImageObject`).
     NamePhoto,
+    /// Space rocks analyzed, one or the stack (`spacerocks`).
+    Analyze(bool),
     /// A camera's default size or mode set (`photos::Size`, `photos::Style` as numbers), its
     /// photos sold or erased (asked first).
     CameraSize(u8),
@@ -503,6 +512,9 @@ fn inventory_buttons(
             }
             ItemButton::Read => {
                 queue.push_player(Action::new("Read Medical Journal", ActionKind::ReadJournal, false));
+            }
+            ItemButton::Analyze(all) => {
+                crate::spacerocks::start(&mut commands, me, sim, &mut queue, &s, *all);
             }
             // (A photograph's title: the game's box to type it in, `photos`.)
             ItemButton::NamePhoto => {

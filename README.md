@@ -2014,7 +2014,14 @@ installation is unreachable.
   the finder's inventory, and the Collection Journal (J) is the game's own dialog: its
   statistics, metals, gems, insects and fish tabs, and the game's table of each kind's finds
   (picture and name, greyed until found; rarity; how many the household holds; what one
-  fetches).
+  fetches). A space rock is only a space rock till it's looked over from the inventory (the
+  game's *Analyze Space Rock*, or *Analyze All* of a stack, the rock in a thought balloon): then
+  it's one of the game's `RockNames`, a Howardite to a Mesosiderite, worth its multiplier times
+  what it was (0.5 to 10), kept apart from the rest, and the game's words say how it came out,
+  quite common to astounding (a Gatherer's ten times rosier, as the game's
+  `kGathererTraitSpaceRocksAnalyzeBetter`). With half the kinds analyzed a new kind's tried for
+  five times over, with all of them one worth two and a half times or more (the Collecting
+  skill's rock collector challenges). `ANALYZE_TEST=1|all|menu` (tests).
 - **Celebrities** (Late Night), as the game's `CelebrityManager` and `Celebrity` tables have
   them: each Sim's level, Fame Leecher to Superstar, the world's own celebrities as its
   `CharacterImport` says (Bridgeport's twenty: Matthew Hamming and Lola Belle Superstars), kept

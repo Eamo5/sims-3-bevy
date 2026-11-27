@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 185;
+pub const GAMEDATA_VERSION: u32 = 186;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -1613,6 +1613,9 @@ pub struct GameDataBaked {
     pub plants: Vec<PlantInfo>,
     pub roofs: Vec<RoofPattern>,
     pub collectibles: Vec<CollectibleInfo>,
+    /// What an analyzed space rock turns out to be (`RockGemMetal`'s `RockNames`).
+    #[serde(default)]
+    pub rock_names: Vec<RockName>,
     pub spawners: Vec<SpawnerInfo>,
     /// The build catalogue's fences.
     pub fences: Vec<FenceStyle>,
@@ -1997,6 +2000,15 @@ pub enum CollectKind {
     Butterfly,
     Beetle,
     Fish,
+}
+
+/// What a space rock analyzed turns out to be (a row of `RockNames`): its key, its name, and what
+/// the rock's worth is multiplied by.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RockName {
+    pub key: String,
+    pub name: String,
+    pub multiplier: f32,
 }
 
 /// Something to find about town: a gem, metal, space rock, insect or fish (base game rows of the
@@ -4296,6 +4308,15 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 });
             }
         }
+        // (What space rocks turn out to be: their names and what they multiply a rock's worth by.)
+        for f in records(&x, "RockNames") {
+            let key = get(&f, "Name");
+            if key.is_empty() {
+                continue;
+            }
+            let name = text("RockGemMetal/RockNames", &key);
+            out.rock_names.push(RockName { name: if name.is_empty() { pretty(&key) } else { name }, key, multiplier: f.get("ValueMultiplier").and_then(|v| v.trim().parse().ok()).unwrap_or(1.0) });
+        }
         for f in records(&x, "Spawners") {
             let class = short(&get(&f, "SpawnerClassName"));
             if class.is_empty() {
@@ -4361,6 +4382,15 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                     over_max: false,
                 });
             }
+        }
+        // (What space rocks turn out to be: their names and what they multiply a rock's worth by.)
+        for f in records(&x, "RockNames") {
+            let key = get(&f, "Name");
+            if key.is_empty() {
+                continue;
+            }
+            let name = text("RockGemMetal/RockNames", &key);
+            out.rock_names.push(RockName { name: if name.is_empty() { pretty(&key) } else { name }, key, multiplier: f.get("ValueMultiplier").and_then(|v| v.trim().parse().ok()).unwrap_or(1.0) });
         }
         for f in records(&x, "Spawners") {
             let class = short(&get(&f, "SpawnerClassName"));
