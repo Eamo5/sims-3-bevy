@@ -2068,7 +2068,7 @@ fn photo_test(
 
 /// `PHOTO_MENU=<label>[><label>...]` (tests): once a menu's up, the submenus starting so opened
 /// one after another, a second apart (into a camera's settings, say).
-fn photo_menu_test(mut commands: Commands, time: Res<Time>, mut pie: ResMut<crate::hud::PieMenu>, mut step: Local<(usize, f32)>) {
+fn photo_menu_test(mut commands: Commands, time: Res<Time>, mut pie: ResMut<crate::hud::PieMenu>, mut step: Local<(usize, f32)>, options: Query<(Entity, &crate::hud::PieOption)>) {
     let Ok(path) = std::env::var("PHOTO_MENU") else { return };
     let now = time.elapsed_secs();
     let Some(want) = path.split('>').nth(step.0) else { return };
@@ -2079,6 +2079,11 @@ fn photo_menu_test(mut commands: Commands, time: Res<Time>, mut pie: ResMut<crat
     let label = pie.options[k].0.clone();
     if crate::hud::choose_submenu(&mut commands, &mut pie, k) {
         info!("photo test: chose {label}");
+        *step = (step.0 + 1, now);
+    } else if let Some((b, _)) = options.iter().find(|(_, o)| o.0 == k) {
+        // (Not a submenu: it's pressed, as a click would.)
+        commands.entity(b).insert(Interaction::Pressed);
+        info!("photo test: pressed {label}");
         *step = (step.0 + 1, now);
     }
 }

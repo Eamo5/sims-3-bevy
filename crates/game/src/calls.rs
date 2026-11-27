@@ -31,6 +31,46 @@ impl Plugin for CallsPlugin {
 #[derive(Resource, Default)]
 pub struct PhonesSilenced(pub bool);
 
+/// A Sim's cell phone's ringtone (the game's `PhoneCell.RingtoneId`): one of `RINGTONES`, kept in
+/// saves.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Ringtone(pub u8);
+
+/// The game's ringtones (its `Ringtones` table): each one's name (`ChangeRingtone:<Ringtone>`'s
+/// words) and sound, the first its default.
+pub const RINGTONES: [(&str, &str); 6] = [
+    ("Old Standard", "phone_ring_normal"),
+    ("Staccato Beeps", "phone_ring_cela"),
+    ("Ecclectic Electric", "phone_ring_celb"),
+    ("My First Ringtone", "phone_ring_celc"),
+    ("Piccolo Pipes", "phone_ring_celd"),
+    ("Red Alert", "phone_ring_cele"),
+];
+
+/// The phone's menu for it ("Phone Settings..." › "Change Ringtone..." ›, the game's path).
+pub const PHONE_SETTINGS: &str = "Phone Settings...";
+pub const RINGTONE_MENU: &str = "Change Ringtone...";
+
+impl Ringtone {
+    pub fn name(self) -> &'static str {
+        RINGTONES.get(self.0 as usize).map_or(RINGTONES[0].0, |r| r.0)
+    }
+
+    pub fn sound(self) -> &'static str {
+        RINGTONES.get(self.0 as usize).map_or(RINGTONES[0].1, |r| r.1)
+    }
+
+    /// The one of that name.
+    pub fn named(name: &str) -> Option<Ringtone> {
+        RINGTONES.iter().position(|r| r.0 == name).map(|i| Ringtone(i as u8))
+    }
+
+    /// Those to change to: all but the one it is (the game's `AddInteractions`).
+    pub fn others(self) -> impl Iterator<Item = Ringtone> {
+        (0..RINGTONES.len() as u8).map(Ringtone).filter(move |r| *r != self)
+    }
+}
+
 /// The phone ringing for a Sim: who's calling, what for, and till when it rings.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Ringing {
@@ -82,7 +122,7 @@ fn place_calls(
     clock: Res<GameClock>,
     mut next: Local<Option<f64>>,
     mut callees: Query<
-        (Entity, &Sim, &Relationships, &mut ActionQueue),
+        (Entity, &Sim, &Relationships, &mut ActionQueue, Option<&Ringtone>),
         (
             With<HouseholdMember>,
             Without<Ringing>,
@@ -126,7 +166,7 @@ fn place_calls(
     let least = if kind == 2 { INVITE_LIKING } else { CHAT_LIKING };
     // (Who could call whom: the better they get on, the likelier.)
     let mut pairs: Vec<(Entity, Entity, f32)> = Vec::new();
-    for (callee, sim, rels, q) in &callees {
+    for (callee, sim, rels, q, _) in &callees {
         if !sim.age.is_grown() && sim.age != crate::sim::Age::Child || q.0.front().is_some_and(|a| a.label == "Sleep" || !a.autonomous) {
             continue;
         }
@@ -148,7 +188,7 @@ fn place_calls(
     }) else {
         return;
     };
-    let Ok((_, sim, _, mut q)) = callees.get_mut(callee) else { return };
+    let Ok((_, sim, _, mut q, tone)) = callees.get_mut(callee) else { return };
     let (cname, cid) = callers.get(caller).map(|c| (c.1.first.clone(), c.1.id)).unwrap_or_default();
     let home = (kind == 2).then(|| caller_home(&world, town.as_deref(), &story, &dormant, household.as_ref().map(|h| h.lot_index), cid)).flatten();
     info!("calls: {cname} rings {} ({})", sim.first, if kind == 2 { "to hang out" } else { "for a chat" });
@@ -164,7 +204,8 @@ fn place_calls(
             q.0.push_back(answer);
         }
     }
-    play.write(crate::sound::PlaySound::ui("phone_ring_cela_ui"));
+    // (Their cell phone's ringtone, as they chose it.)
+    play.write(crate::sound::PlaySound::ui(&format!("{}_ui", tone.copied().unwrap_or_default().sound())));
     // (A test's one call made.)
     if forced.is_some() {
         *next = Some(f64::INFINITY);
@@ -321,6 +362,17 @@ fn caller_home(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ringtones_are_the_games_and_offered_but_the_one_it_has() {
+        let now = Ringtone::default();
+        assert_eq!((now.name(), now.sound()), ("Old Standard", "phone_ring_normal"));
+        let others: Vec<&str> = now.others().map(|r| r.name()).collect();
+        assert_eq!(others, ["Staccato Beeps", "Ecclectic Electric", "My First Ringtone", "Piccolo Pipes", "Red Alert"]);
+        assert_eq!(Ringtone::named("Red Alert"), Some(Ringtone(5)));
+        assert_eq!(Ringtone(5).sound(), "phone_ring_cele");
+        assert!(Ringtone(2).others().all(|r| r != Ringtone(2)) && Ringtone(2).others().count() == 5);
+    }
 
     #[test]
     fn calls_come_in_the_games_proportions() {

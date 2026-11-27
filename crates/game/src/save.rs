@@ -191,6 +191,9 @@ pub struct SavedSim {
     /// A scene memorized to paint from (`photos`): its picture and frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memorized_scene: Option<(String, u8)>,
+    /// Their cell phone's ringtone (`calls::Ringtone`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub ringtone: u8,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -404,6 +407,10 @@ fn is_zero(v: &i32) -> bool {
 }
 
 fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u8(v: &u8) -> bool {
     *v == 0
 }
 
@@ -768,6 +775,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         photo_records: Vec::new(),
         forum_posts: Vec::new(),
         memorized_scene: None,
+        ringtone: 0,
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -1075,7 +1083,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>, Option<&crate::photos::Memorized>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>, Option<&crate::forums::Posts>, Option<&crate::photos::Memorized>, Option<&crate::calls::Ringtone>),
                     Has<crate::town::Townie>,
                     Has<crate::visit::LotGuest>,
                 ),
@@ -1133,7 +1141,7 @@ fn save_game(
     // (Passers-by are kept only once the household knows them: then as Sims met, away.)
     let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts, memorized), townie, guest))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records, forum_posts, memorized, ringtone), townie, guest))) in &sims {
         if (townie || guest) && !known.contains(&e) {
             continue;
         }
@@ -1227,6 +1235,7 @@ fn save_game(
             photo_records: photo_records.map(|r| r.to_saved()).unwrap_or_default(),
             forum_posts: forum_posts.map(|p| p.0.clone()).unwrap_or_default(),
             memorized_scene: memorized.map(|m| (m.id.clone(), m.frame)),
+            ringtone: ringtone.map_or(0, |r| r.0),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1535,6 +1544,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.forum_posts.is_empty() {
             ec.insert(crate::forums::Posts(s.forum_posts.clone()));
+        }
+        if s.ringtone != 0 {
+            ec.insert(crate::calls::Ringtone(s.ringtone));
         }
         if let Some((id, frame)) = s.memorized_scene.clone() {
             ec.insert(crate::photos::Memorized { id, frame });

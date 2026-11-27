@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 31;
+pub const SOUNDS_VERSION: u32 = 32;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -121,6 +121,12 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "ui_photo_sting_bad",
     // A photography collection completed.
     "sting_obj_collect_piece_final",
+    // The cell phone's ringtones (the game's `Ringtones` table's sounds, as heard by the player).
+    "phone_ring_normal_ui",
+    "phone_ring_celb_ui",
+    "phone_ring_celc_ui",
+    "phone_ring_celd_ui",
+    "phone_ring_cele_ui",
     // Play Tag: the laugh as they run (a grown-up's, a child's).
     "vo_playtag_runA",
     "vo_playtag_runC",

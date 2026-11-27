@@ -3231,6 +3231,19 @@ fn pie_buttons(
     if matches!(kind, ActionKind::Greyed(_)) {
         return;
     }
+    // (A ringtone chosen: the cell phone's, there and then (the game's `ChangeRingtone`, an
+    // immediate interaction), and a ring of it to hear, `calls`.)
+    if pie.title == crate::calls::RINGTONE_MENU
+        && let (Some(a), Some(tone)) = (pie.actor, crate::calls::Ringtone::named(&label))
+    {
+        close_pie(&mut commands, &mut pie);
+        commands.entity(a).insert(tone);
+        info!("phone: the ringtone's now {}", tone.name());
+        commands.queue(move |w: &mut World| {
+            w.write_message(crate::sound::PlaySound::ui(&format!("{}_ui", tone.sound())));
+        });
+        return;
+    }
     // (Learned at once: a notice, the menu closed.)
     if let ActionKind::Notice(words) = &kind {
         close_pie(&mut commands, &mut pie);
@@ -4510,7 +4523,7 @@ fn phone_button(
     ),
     world: Res<CurrentWorld>,
     ui: Option<Res<crate::layout::UiAssets>>,
-    painters: Query<&crate::interact::Skills>,
+    (painters, tones): (Query<&crate::interact::Skills>, Query<&crate::calls::Ringtone>),
 ) {
     if asked.is_some() {
         commands.remove_resource::<OpenPhone>();
@@ -4551,6 +4564,15 @@ fn phone_button(
     if me.age.is_grown() && me.age != crate::sim::Age::Child {
         options.push(("Real Estate and Travel Services... ›".to_string(), submenu_kind(pie.submenus.len())));
         pie.submenus.push(("Real Estate and Travel Services".to_string(), vec![("Check Real Estate".to_string(), ActionKind::CheckRealEstate)]));
+    }
+    // (The cell phone's "Phone Settings..." › "Change Ringtone..." ›: any but the one it rings
+    // with, `calls`.)
+    if !me.age.is_little() {
+        let list: Vec<(String, ActionKind)> = tones.get(actor).copied().unwrap_or_default().others().map(|r| (r.name().to_string(), ActionKind::Notice(String::new()))).collect();
+        let ring = pie.submenus.len();
+        pie.submenus.push((crate::calls::RINGTONE_MENU.to_string(), list));
+        pie.submenus.push((crate::calls::PHONE_SETTINGS.to_string(), vec![(format!("{} ›", crate::calls::RINGTONE_MENU), submenu_kind(ring))]));
+        options.push((format!("{} ›", crate::calls::PHONE_SETTINGS), submenu_kind(ring + 1)));
     }
     if !known.is_empty() {
         let chat = known.iter().map(|(_, e, n)| (format!("Chat with {n}"), ActionKind::PhoneChat { target: *e })).collect();

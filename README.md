@@ -460,7 +460,10 @@ installation is unreachable.
   gives up waiting after six hours. Calls come in too, as the game's (unless
   the phones are silenced, the game's *Silence Phone*): every six hours or so,
   from seven in the morning to ten at night, someone the household knows may ring (for a chat,
-  liking them 25 or more; to hang out, 40 or more). The phone rings, it's answered with the
+  liking them 25 or more; to hang out, 40 or more). The phone rings (with that Sim's ringtone:
+  *Phone Settings... › Change Ringtone... ›* offers the game's others, Old Standard, Staccato
+  Beeps, Ecclectic Electric, My First Ringtone, Piccolo Pipes and Red Alert, from its
+  `Ringtones` table, a ring of the new one heard as it's chosen, kept in saves), it's answered with the
   game's clip, and the game's question comes up: "Bella would like to chat. Does Mia want to
   talk?" (Sure: a chat on the phone), or "Do you want to hang out?" (I'll Come Over: off to
   the caller's home in town; At My Place, when they've none: they come over). Left ringing
