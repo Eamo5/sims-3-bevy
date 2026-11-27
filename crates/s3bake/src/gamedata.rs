@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 183;
+pub const GAMEDATA_VERSION: u32 = 184;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -3266,8 +3266,9 @@ fn bake_cas_colourways(root: &BakeRoot, pkgs: &PackageSet) -> Result<usize, Stri
 
 /// Geometry states the game switches objects to (`alt_states.pack`): a dollhouse smashed, an
 /// outdoor trash can with its lid off, an activity table's blocks as they're built up (`blocks`),
-/// a nectar maker's bin with no fruit in it (`nectar`).
-pub const ALT_STATES: [&str; 13] = ["dollhouseSmashed", "BinOnly", "pile", "midPointStructure", "house", "castle", "bridge", "sphinx", "tower", "empty", "partiallyFull", "full", "fruitNone"];
+/// a nectar maker's bin with no fruit in it (`nectar`), a photograph's frame on a wall or a desk
+/// (`photos`).
+pub const ALT_STATES: [&str; 15] = ["dollhouseSmashed", "BinOnly", "pile", "midPointStructure", "house", "castle", "bridge", "sphinx", "tower", "empty", "partiallyFull", "full", "fruitNone", "frameWall", "frameDesk"];
 
 /// A model's key in one of its other states (`alt_states.pack`): the state's hash its group.
 pub fn alt_state_key(model: crate::types::Key, state: u32) -> crate::types::Key {
@@ -5315,12 +5316,17 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
 
 /// Encodes RGBA8 as PNG.
 fn encode_png(img: &s3formats::dds::Rgba) -> Vec<u8> {
+    encode_rgba_png(img.width as u32, img.height as u32, &img.data)
+}
+
+/// Encodes RGBA8 pixels (`width` × `height`) as PNG.
+pub fn encode_rgba_png(width: u32, height: u32, data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
-    let mut enc = png::Encoder::new(&mut out, img.width as u32, img.height as u32);
+    let mut enc = png::Encoder::new(&mut out, width, height);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     if let Ok(mut w) = enc.write_header() {
-        let _ = w.write_image_data(&img.data);
+        let _ = w.write_image_data(data);
     }
     out
 }

@@ -4202,7 +4202,12 @@ fn keyboard_shortcuts(
     positions: Query<&Transform, With<Sim>>,
     mut cam: Query<&mut SimsCamera>,
     mut pie: ResMut<PieMenu>,
+    grabbing: Option<Res<crate::photos::Grabbing>>,
 ) {
+    // (Taking a picture: its own keys, `photos`.)
+    if grabbing.is_some() {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) {
         close_pie(&mut commands, &mut pie);
     }
@@ -4447,6 +4452,10 @@ fn phone_button(
     if out_q.contains(actor) {
         let why = ui.as_ref().and_then(|u| u.localize("Gameplay/Objects/Electronics/Phone/CallForServices:ServicesOnlyOnHomeLot")).unwrap_or_else(|| "You can only call for services on your home lot.".into());
         options[0].1 = ActionKind::Greyed(why);
+    }
+    // (A photo with the phone's camera, children and up: `photos`.)
+    if !me.age.is_little() {
+        options.push((crate::photos::TAKE_PHOTO.to_string(), crate::photos::take_photo(actor)));
     }
     // Calling someone they know: for a chat, or to invite them over.
     pie.submenus.clear();

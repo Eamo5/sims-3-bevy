@@ -641,8 +641,10 @@ pub(crate) fn game_menu_key(
     buy: Option<Res<crate::buy::BuyMode>>,
     mut clock: Option<ResMut<crate::clock::GameClock>>,
     (play_mode, popups, planner): (Option<Res<State<crate::PlayMode>>>, Query<(), With<crate::popupmenu::OpenPopup>>, Option<Res<crate::planner::OutfitPlanner>>),
+    grabbing: Option<Res<crate::photos::Grabbing>>,
 ) {
-    if !keys.just_pressed(KeyCode::Escape) || options_open(&panel) {
+    // (Escape puts the camera away while a picture's being taken: `photos`.)
+    if !keys.just_pressed(KeyCode::Escape) || options_open(&panel) || grabbing.is_some() {
         return;
     }
     // Escape first closes pie menus and buy mode (and an open popup or wardrobe closes itself).

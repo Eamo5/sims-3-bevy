@@ -356,7 +356,7 @@ pub fn object(data: &PaintingsBaked, s: &Stack) -> Option<(Key, Key)> {
 
 /// Paintings' pictures for the inventory, loaded once.
 #[derive(Resource, Default)]
-pub struct PaintingImages(HashMap<Key, Option<(Handle<Image>, UVec2)>>);
+pub struct PaintingImages(pub(crate) HashMap<Key, Option<(Handle<Image>, UVec2)>>);
 
 /// A painting's picture: its texture and the part of it the canvas shows (pixels).
 pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &crate::baked::BakedData, s: &Stack) -> Option<(Handle<Image>, Rect)> {

@@ -68,6 +68,8 @@ pub enum Question {
     NamePet { pet: Entity, suggested: String },
     /// A batch of nectar's name (typed in; the one suggested if not: `nectar`).
     NameNectar { maker: Entity, suggested: String },
+    /// A photograph's title (typed in: `photos`): whose inventory it's in, and its key.
+    NamePhoto { sim: Entity, key: String, suggested: String },
 }
 
 impl Question {
@@ -75,7 +77,7 @@ impl Question {
     pub fn sim(&self) -> Option<Entity> {
         match self {
             Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } | Question::SellHorse { sim, .. } | Question::BuyHorse { sim, .. } | Question::NameHorse { sim, .. } => Some(*sim),
-            Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } | Question::DeleteCollection { .. } | Question::NamePet { .. } | Question::NameNectar { .. } => None,
+            Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } | Question::DeleteCollection { .. } | Question::NamePet { .. } | Question::NameNectar { .. } | Question::NamePhoto { .. } => None,
         }
     }
 }

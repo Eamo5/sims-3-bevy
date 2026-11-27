@@ -516,6 +516,12 @@ impl UiAssets {
         self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find(|w| w.0 == id)).map(|w| &w.1)
     }
 
+    /// One of a layout's exported windows by the designers' comment on it (the screen grab's
+    /// "Cellphone Photography Screen Grab").
+    pub fn export_commented(&self, name: &str, comment: &str) -> Option<&UiWindow> {
+        self.by_id.get(&s3pkg::fnv64(name)).and_then(|&i| self.data.layouts[i].1.iter().find(|w| w.1.comment == comment)).map(|w| &w.1)
+    }
+
     /// An interface picture's pixels (its width, height and RGBA): a hit mask's, to see where a
     /// shaped button is.
     pub fn image_pixels(&self, key: u64) -> Option<(u32, u32, Vec<u8>)> {

@@ -44,6 +44,9 @@ pub enum ItemKind {
     /// Bottles of nectar of a batch (`nectar`): its make in the key (`nectar::Bottle::key`), its
     /// nectar quality the quality, worth more as it ages.
     Nectar,
+    /// A photograph the Sim took (`photos`): its picture, size and style in the key
+    /// (`photos::Photo::key`), its title the name.
+    Photo,
 }
 
 /// Items of one kind (and, for produce, one quality).
@@ -176,6 +179,9 @@ pub fn stack_picture(
     if s.kind == ItemKind::Painting {
         return crate::paintings::image(pictures, images, &baked?.0, s).map(|(h, r)| (h, Some(r)));
     }
+    if s.kind == ItemKind::Photo {
+        return crate::photos::image(pictures, images, s).map(|h| (h, None));
+    }
     let ui = ui?;
     if matches!(s.kind, ItemKind::Reward | ItemKind::Object | ItemKind::Keepsake | ItemKind::Coupon | ItemKind::Nectar) {
         let name = match s.kind {
@@ -213,6 +219,11 @@ pub fn stack_actions(sim: &Sim, s: &Stack) -> Vec<(String, ItemButton)> {
     }
     if s.kind == ItemKind::Painting {
         out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
+    }
+    // (A photograph: hung up, or given a title, `photos`.)
+    if s.kind == ItemKind::Photo {
+        out.push(("Hang on a Wall".to_string(), ItemButton::Hang));
+        out.push((crate::photos::NAME.to_string(), ItemButton::NamePhoto));
     }
     if s.kind == ItemKind::Journal {
         out.push(("Read".to_string(), ItemButton::Read));
@@ -260,6 +271,8 @@ pub enum ItemButton {
     PutDownStone,
     /// A glass of a bottle of nectar poured and drunk (`nectar`'s "Taste Nectar").
     Taste,
+    /// A photograph given a title (`photos`, the game's `NameImageObject`).
+    NamePhoto,
 }
 
 /// The tile's colour for produce, by quality (grey for the worst, gold for perfect).
@@ -360,7 +373,7 @@ pub fn draw_tab(
             if s.kind == ItemKind::Produce && !sim.age.is_little() {
                 buttons.push((ItemButton::Eat, "Eat".to_string()));
             }
-            if s.kind == ItemKind::Painting {
+            if matches!(s.kind, ItemKind::Painting | ItemKind::Photo) {
                 buttons.push((ItemButton::Hang, "Hang on a Wall".to_string()));
             }
             if matches!(s.kind, ItemKind::Reward | ItemKind::Object) {
@@ -485,6 +498,10 @@ fn inventory_buttons(
             ItemButton::Read => {
                 queue.push_player(Action::new("Read Medical Journal", ActionKind::ReadJournal, false));
             }
+            // (A photograph's title: the game's box to type it in, `photos`.)
+            ItemButton::NamePhoto => {
+                crate::photos::ask_title(&mut commands, me, &s);
+            }
             // (A bottle of nectar opened for a glass: the bottle's gone, `nectar`.)
             ItemButton::Taste => {
                 let Some(worth) = inv.take_one(k) else { continue };
@@ -513,6 +530,7 @@ fn inventory_buttons(
                 // it isn't put down).
                 let object = baked.as_ref().and_then(|b| match s.kind {
                     ItemKind::Reward | ItemKind::Object => b.0.catalog.iter().find(|c| c.instance_name == s.key).map(|c| (c.objd, None)),
+                    ItemKind::Photo => crate::photos::frame(&b.0, &s).map(|o| (o, None)),
                     _ => crate::paintings::object(&b.0.paintings, &s).map(|(o, d)| (o, Some(d))),
                 });
                 let Some((objd, design)) = object else { continue };

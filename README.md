@@ -1127,6 +1127,20 @@ installation is unreachable.
   `NECTAR_TEST=1` with `NECTAR_FRUIT=<produce>/<tier>*<n>,...`, `NECTAR_LEVEL`,
   `NECTAR_DO=add|squish|make|take|all|taste`, `NECTAR_WORTH`, `NECTAR_FAST=1`, `NECTAR_PIE=1`
   (tests).
+- **Photos with the phone**, as the game's `PhoneCell.TakePhoto`: children and up "Take Photo"
+  from the phone, and the view goes to their eyes (`ActivatePhotographMode`), the Sim and their
+  plumbob hidden, the walls up and the interface away, framed by the game's own screen grab
+  (`ScreenGrab`'s "Capture Image": the phone's green viewfinder, the world outside it dimmed by
+  its shade, "Press C to capture, and Z and X to zoom in and out."); they look about with the
+  camera's keys or a drag and zoom with Z, X or the wheel, C takes the picture (the phone's
+  `ui_camera_photo` click) and Escape puts the phone away, the camera back where it was. The
+  picture is what's inside the viewfinder, kept beside the saves, and becomes a photograph in
+  their inventory: "Untitled" (the game's `InitialTitle`), worth nothing (a phone's camera earns no
+  Photography), its own picture on its tile, to give a title ("Name...", the game's "Name
+  Photograph" box), sell, or hang on a wall in the game's little photograph frame
+  (`PhotographFrameSmall`, in its `frameWall` state), the picture in it, in hand in Buy mode and
+  where it hangs, kept in saves. `PHOTO_TEST=1` with `PHOTO_CAPTURE_AT=<seconds>`, `PHOTO_YAW`,
+  `PHOTO_PITCH`, `PHOTO_ZOOM`, `PHOTO_HANG=1`, `PHOTO_PIE=1`, `PHOTO_PHONE=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

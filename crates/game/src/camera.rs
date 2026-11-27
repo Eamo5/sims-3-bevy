@@ -33,7 +33,24 @@ pub struct SimsCamera {
     /// A Sim the camera's following about, wherever they go (the game's camera follow: the
     /// selected Sim's portrait clicked again, or C), till the camera's moved.
     pub follow: Option<Entity>,
+    /// Looking out through a Sim's camera or phone (the game's `ActivatePhotographMode`):
+    /// from their eyes, turned about, zoomed in and out (`photos`).
+    pub photo: Option<PhotoView>,
 }
+
+/// The camera at a Sim's eyes, taking a picture: where it is, which way it looks, and how far
+/// it's zoomed (its field of view, radians, and how far it may go each way).
+#[derive(Clone, Copy, Debug)]
+pub struct PhotoView {
+    pub eye: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub fov: f32,
+    pub fovs: (f32, f32),
+}
+
+/// The camera's usual field of view.
+pub const FOV: f32 = 50.0;
 
 impl SimsCamera {
     pub fn new(focus: Vec3) -> Self {
@@ -46,6 +63,7 @@ impl SimsCamera {
             smooth_focus: focus,
             smooth_distance: 30.0,
             follow: None,
+            photo: None,
         }
     }
 
@@ -73,7 +91,7 @@ fn spawn_camera(mut commands: Commands, world: Res<CurrentWorld>, start: Option<
     commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
-            fov: 50f32.to_radians(),
+            fov: FOV.to_radians(),
             near: 0.1,
             far: 6000.0,
             ..default()
@@ -156,9 +174,63 @@ fn camera_control(
     buy: Res<crate::buy::BuyMode>,
     followed: Query<&GlobalTransform>,
     (settings, windows): (Res<crate::options::Settings>, Query<&Window, With<bevy::window::PrimaryWindow>>),
+    mut lens: Query<&mut Projection, With<SimsCamera>>,
 ) {
     let Ok((mut cam, mut tf)) = q.single_mut() else { return };
     let dt = time.delta_secs();
+
+    // Through a Sim's camera: turned about where they stand (dragged, or the keys), zoomed with
+    // the wheel or Z and X.
+    if let Some(mut v) = cam.photo {
+        let wheel = match scroll.unit {
+            MouseScrollUnit::Line => scroll.delta.y,
+            MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
+        };
+        let mut zoom = -wheel * 0.08;
+        if keys.pressed(KeyCode::KeyZ) {
+            zoom -= dt * 0.8;
+        }
+        if keys.pressed(KeyCode::KeyX) {
+            zoom += dt * 0.8;
+        }
+        v.fov = (v.fov * (1.0 + zoom)).clamp(v.fovs.0, v.fovs.1);
+        // (Turned less as it's zoomed in.)
+        let slow = v.fov / FOV.to_radians();
+        if mouse.pressed(MouseButton::Middle) || mouse.pressed(MouseButton::Right) {
+            let (sx, sy) = (if settings.invert_h { -1.0 } else { 1.0 }, if settings.invert_v { -1.0 } else { 1.0 });
+            v.yaw -= motion.delta.x * 0.004 * sx * slow;
+            v.pitch -= motion.delta.y * 0.003 * sy * slow;
+        }
+        let turn = dt * 1.2 * slow;
+        if keys.any_pressed([KeyCode::KeyQ, KeyCode::KeyA, KeyCode::ArrowLeft]) {
+            v.yaw += turn;
+        }
+        if keys.any_pressed([KeyCode::KeyE, KeyCode::KeyD, KeyCode::ArrowRight]) {
+            v.yaw -= turn;
+        }
+        if keys.any_pressed([KeyCode::KeyT, KeyCode::KeyW, KeyCode::ArrowUp]) {
+            v.pitch += turn;
+        }
+        if keys.any_pressed([KeyCode::KeyG, KeyCode::KeyS, KeyCode::ArrowDown]) {
+            v.pitch -= turn;
+        }
+        v.pitch = v.pitch.clamp(-1.3, 1.3);
+        cam.photo = Some(v);
+        let look = Vec3::new(-v.yaw.sin() * v.pitch.cos(), v.pitch.sin(), -v.yaw.cos() * v.pitch.cos());
+        *tf = Transform::from_translation(v.eye).looking_to(look, Vec3::Y);
+        if let Ok(mut p) = lens.single_mut()
+            && let Projection::Perspective(pp) = p.as_mut()
+        {
+            pp.fov = v.fov;
+        }
+        return;
+    }
+    if let Ok(mut p) = lens.single_mut() {
+        let zoomed = matches!(p.as_ref(), Projection::Perspective(pp) if (pp.fov - FOV.to_radians()).abs() > 1e-4);
+        if zoomed && let Projection::Perspective(pp) = p.as_mut() {
+            pp.fov = FOV.to_radians();
+        }
+    }
 
     // Zoom
     let wheel = match scroll.unit {

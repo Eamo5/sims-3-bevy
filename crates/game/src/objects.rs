@@ -355,6 +355,13 @@ impl ObjectAssets {
         parts
     }
 
+    /// A catalogue object drawn as given from now on (a photograph's frame always in its wall
+    /// state), its designs drawn afresh.
+    pub fn set_object(&mut self, objd: Key, parts: Vec<ModelPart>) {
+        self.designed.retain(|(o, _), _| *o != objd);
+        self.objects.insert(objd, parts);
+    }
+
     /// The catalogue's SpeedTree objects and their species (from the game data).
     pub fn set_garden(&mut self, garden: &[(Key, s3bake::TreeKindBaked)]) {
         for (k, kind) in garden {
