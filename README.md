@@ -1141,6 +1141,20 @@ installation is unreachable.
   (`PhotographFrameSmall`, in its `frameWall` state), the picture in it, in hand in Buy mode and
   where it hangs, kept in saves. `PHOTO_TEST=1` with `PHOTO_CAPTURE_AT=<seconds>`, `PHOTO_YAW`,
   `PHOTO_PITCH`, `PHOTO_ZOOM`, `PHOTO_HANG=1`, `PHOTO_PIE=1`, `PHOTO_PHONE=1` (tests).
+- **Still lifes at the easel**, as the game's `PaintStillLife`: from Painting five an easel's
+  menu has "Paint Still-Life", and "Paint Stylized Still-Life... ›" with Genius, Insane and
+  Somber as the game unlocks them (`SkillOwnerCanPaint`: level six and the Artistic, Genius,
+  Insane or Grumpy trait for each, Somber for anyone at nine, Genius after a masterpiece). At the
+  easel the same screen grab comes up as the game's "Capture Subject" ("Press C to capture and I
+  to change the size of the portrait..."), the world dimmed outside its gilt frame, small, medium
+  or large, the camera kept on the painter; C captures what's in the frame and they paint it on
+  the canvas that frame's for (`CanvasSizeForScreenGrab`), the canvas time as any painting, its
+  worth and quality (fine, brilliant, a masterpiece) as any of theirs. The picture's painted in
+  its style: brushed into strokes (the quietest corner about each point), plain and a touch
+  richer, a genius's few bold tones, the insane's colours turned about, or the somber's grey-blue
+  gloom; it shows on the canvas as they paint, on its tile in their inventory and wherever it's
+  hung, kept in saves. `PHOTO_TEST=1` with `PHOTO_STILL=basic|genius|insane|somber`,
+  `PHOTO_LEVEL`, `PHOTO_FRAME=<0-2>`, `PHOTO_FAST=1` (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

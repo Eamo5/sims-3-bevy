@@ -269,8 +269,8 @@ fn easel_canvases(
 ) {
     let Some(baked) = baked else { return };
     let data = &baked.0.paintings;
-    // (Painter, easel, canvas, picture, whether it's showing.)
-    let mut painting: Vec<(Entity, Entity, u8, Option<Key>, bool)> = Vec::new();
+    // (Painter, easel, canvas, picture, whether it's showing, and the painting's key.)
+    let mut painting: Vec<(Entity, Entity, u8, Option<Key>, bool, String)> = Vec::new();
     for (me, sim, mut queue, skills, plan, wishes, journal) in &mut painters {
         let Some(a) = queue.0.front_mut() else { continue };
         if a.cancel || a.completed { continue; }
@@ -278,6 +278,10 @@ fn easel_canvases(
         let target = *target;
         let Ok(obj) = objects.get(target) else { continue };
         if crate::interact::interactions_for(obj.kind).get(*def).is_none_or(|d| d.special != Special::SellPainting) {
+            continue;
+        }
+        // (A still life not begun till its subject's captured: `photos`.)
+        if crate::photos::still_style(&a.label).is_some() && !plan.as_ref().is_some_and(|p| p.painted.as_ref().is_some_and(|x| crate::photos::still(&x.key).is_some())) {
             continue;
         }
         let level = skills.level("Painting");
@@ -296,7 +300,7 @@ fn easel_canvases(
             let elapsed = elapsed.max(l.minutes);
             commands.entity(target).insert(LeftOnEasel { minutes: elapsed, ..l.clone() });
             let design = key_picture(&l.painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
-            painting.push((me, target, l.size, design, elapsed >= painting_minutes(l.size, journal) / 3.0));
+            painting.push((me, target, l.size, design, elapsed >= painting_minutes(l.size, journal) / 3.0, l.painted.key.clone()));
             continue;
         }
         let requested = a.canvas_choice.take();
@@ -317,13 +321,13 @@ fn easel_canvases(
         let design = key_picture(&painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
         // (Kept on the easel as it comes, should they stop short.)
         commands.entity(target).insert(LeftOnEasel { painter: sim.id, size, painted: painted.clone(), minutes: elapsed });
-        painting.push((me, target, size, design, elapsed >= painting_minutes(size, journal) / 3.0));
+        painting.push((me, target, size, design, elapsed >= painting_minutes(size, journal) / 3.0, painted.key.clone()));
     }
     // (Those left on easels nobody's at: standing there as far as they'd come.)
     for (easel, l) in &left {
         if !painting.iter().any(|p| p.1 == easel) {
             let design = key_picture(&l.painted.key).map(|(_, pic)| s3bake::gamedata::painting_texture(&pic));
-            painting.push((easel, easel, l.size, design, l.minutes >= CANVAS_MINUTES[l.size.min(2) as usize] / 3.0));
+            painting.push((easel, easel, l.size, design, l.minutes >= CANVAS_MINUTES[l.size.min(2) as usize] / 3.0, l.painted.key.clone()));
         }
     }
     // The canvases of those who've stopped go (and one's put up afresh as the picture comes).
@@ -332,7 +336,7 @@ fn easel_canvases(
             commands.entity(e).try_despawn();
         }
     }
-    for (me, easel, size, design, shown) in painting {
+    for (me, easel, size, design, shown, key) in painting {
         if canvases.iter().any(|(_, c)| c.painter == me && c.shown == shown) {
             continue;
         }
@@ -344,6 +348,10 @@ fn easel_canvases(
         let at = slot.map_or(Transform::IDENTITY, |(p, r)| Transform::from_translation(Vec3::from(p)).with_rotation(Quat::from_array(r)));
         let e = spawn_parts(&mut commands, &parts, at);
         commands.entity(e).insert(EaselCanvas { painter: me, shown });
+        // (A still life's own picture on it, once it's showing: `photos`.)
+        if shown && crate::photos::still(&key).is_some() {
+            commands.entity(e).insert(crate::photos::StillCanvas(key));
+        }
         commands.entity(easel).add_child(e);
     }
 }
@@ -360,6 +368,11 @@ pub struct PaintingImages(pub(crate) HashMap<Key, Option<(Handle<Image>, UVec2)>
 
 /// A painting's picture: its texture and the part of it the canvas shows (pixels).
 pub fn image(cache: &mut PaintingImages, images: &mut Assets<Image>, baked: &crate::baked::BakedData, s: &Stack) -> Option<(Handle<Image>, Rect)> {
+    // (A still life's: its own picture, all of it.)
+    if let Some((_, _, id)) = crate::photos::still(&s.key) {
+        let (h, dim) = crate::photos::picture(cache, images, &id)?;
+        return Some((h, Rect::new(0.0, 0.0, dim.x as f32, dim.y as f32)));
+    }
     let data = &baked.paintings;
     let (size, pic) = picture(data, s)?;
     let key = s3bake::gamedata::painting_texture(&pic);

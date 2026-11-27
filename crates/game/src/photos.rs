@@ -9,6 +9,12 @@
 //! no Photography), its own picture on its tile, to give a title ("Name...", the game's
 //! `NameImageObject`), sell, or hang on a wall in the game's little photo frame
 //! (`PhotographFrameSmall` in its wall state), the picture in it.
+//!
+//! The same screen grab gives a painter at an easel their still life (`PaintStillLife`, Painting
+//! five and up): "Capture Subject" in the game's gilt frames, small, medium or large (`I`), the
+//! camera kept on them; the subject captured is painted in the style chosen (plain, or a genius's,
+//! the insane's or the somber's as skill and traits allow) on the canvas its frame was for, and
+//! shows on the canvas as they paint, in their inventory and hung on a wall.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -47,11 +53,10 @@ pub const TITLE_LENGTH: usize = 40;
 /// window (`0x100` on), its target (`1`), and the dimming outside it (its `FrameDrawable`'s
 /// shade).
 const LAYOUT: &str = "ScreenGrab";
-const CELL_PHONE: u32 = 0xF59E_A6BB;
-const CELL_PHONE_COMMENT: &str = "Cellphone Photography Screen Grab";
 const FRAME_BASE: u32 = 0x100;
 const TARGET: u32 = 1;
 const PHONE_SHADE: u32 = 0x9300_0000;
+const PAINTING_SHADE: u32 = 0xBF00_0000;
 /// How far a phone zooms (its field of view, degrees).
 const PHONE_ZOOM: (f32, f32) = (18.0, 60.0);
 /// The picture part of a photograph's frame (its stand-in texture, the picture drawn in its
@@ -122,6 +127,133 @@ impl Photo {
     }
 }
 
+/// A still life's style (`PaintingStyle`'s paint styles: `PaintBasic`, and the stylized
+/// `PaintGenius`, `PaintInsane` and `PaintSomber`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PaintStyle {
+    Basic,
+    Genius,
+    Insane,
+    Somber,
+}
+
+impl PaintStyle {
+    pub const ALL: [PaintStyle; 4] = [PaintStyle::Basic, PaintStyle::Genius, PaintStyle::Insane, PaintStyle::Somber];
+    pub const STYLIZED: [PaintStyle; 3] = [PaintStyle::Genius, PaintStyle::Insane, PaintStyle::Somber];
+
+    /// The game's word for it (`Easel:PaintGenius`...).
+    pub fn name(self) -> &'static str {
+        ["Basic", "Genius", "Insane", "Somber"][self as usize]
+    }
+}
+
+/// The game's words for painting a still life, the Painting it takes (`PaintStillLife`'s
+/// `SkillThreshold`), and when the stylized ones come (`kPaintingStyleUnlockLevel` with the right
+/// traits, `kSpecialPaintingStyleUnlockLevels` for the somber one, or a masterpiece for genius).
+pub const STILL_LIFE: &str = "Paint Still-Life";
+pub const STYLIZED: &str = "Paint Stylized Still-Life...";
+pub const STILL_LIFE_LEVEL: u32 = 5;
+const STYLE_LEVEL: u32 = 6;
+const SOMBER_LEVEL: u32 = 9;
+
+/// Whether a painter can paint in a style (`SkillOwnerCanPaint`, the XML's traits).
+pub fn can_paint(style: PaintStyle, level: u32, traits: &[crate::life::Trait], masterpieces: f64) -> bool {
+    use crate::life::Trait;
+    let has = |t: &[Trait]| t.iter().any(|t| traits.contains(t));
+    match style {
+        PaintStyle::Basic => level >= STILL_LIFE_LEVEL,
+        PaintStyle::Genius => masterpieces > 0.0 || (level >= STYLE_LEVEL && has(&[Trait::Artistic, Trait::Genius])),
+        PaintStyle::Insane => level >= STYLE_LEVEL && has(&[Trait::Artistic, Trait::Insane]),
+        PaintStyle::Somber => level >= SOMBER_LEVEL || (level >= STYLE_LEVEL && has(&[Trait::Artistic, Trait::Grumpy])),
+    }
+}
+
+/// The still life an easel's action is painting, by its name on the menu.
+pub fn still_style(label: &str) -> Option<PaintStyle> {
+    if label == STILL_LIFE {
+        return Some(PaintStyle::Basic);
+    }
+    PaintStyle::STYLIZED.into_iter().find(|s| s.name() == label)
+}
+
+/// A still life painting's key (`painting:<canvas>:still-<style>-<picture>#<n>`): its canvas,
+/// style and picture.
+pub fn still_key(size: u8, style: PaintStyle, id: &str, n: u32) -> String {
+    format!("painting:{size}:still-{}-{id}#{n}", style as u8)
+}
+
+/// What a still life's key holds.
+pub fn still(key: &str) -> Option<(u8, PaintStyle, String)> {
+    let (size, rest) = key.strip_prefix("painting:")?.split_once(':')?;
+    let mut p = rest.split('#').next()?.strip_prefix("still-")?.splitn(2, '-');
+    let style = *PaintStyle::ALL.get(p.next()?.parse::<usize>().ok()?)?;
+    let id = p.next().filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()))?.to_string();
+    Some((size.parse::<u8>().ok()?.min(2), style, id))
+}
+
+/// A picture painted (RGBA, `w` × `h`): its colours gathered into strokes (the quietest of the
+/// four corners about each pixel: a Kuwahara filter), then the style's palette: plain, a
+/// genius's few bold tones, the insane's turned colours, or the somber's grey-blue gloom.
+pub fn paint_filter(px: &mut [u8], w: u32, h: u32, style: PaintStyle) {
+    let (w, h) = (w as i32, h as i32);
+    let r = (w.min(h) / 60).clamp(2, 5);
+    let src = px.to_vec();
+    let at = |x: i32, y: i32| {
+        let i = ((y.clamp(0, h - 1) * w + x.clamp(0, w - 1)) * 4) as usize;
+        [src[i] as f32, src[i + 1] as f32, src[i + 2] as f32]
+    };
+    for y in 0..h {
+        for x in 0..w {
+            let mut best = (f32::MAX, [0.0f32; 3]);
+            for (dx, dy) in [(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let (mut sum, mut sq, mut n) = ([0.0f32; 3], 0.0f32, 0.0f32);
+                for j in 0..=r {
+                    for i in 0..=r {
+                        let c = at(x + i * dx, y + j * dy);
+                        for k in 0..3 {
+                            sum[k] += c[k];
+                        }
+                        let l = 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+                        sq += l * l;
+                        n += 1.0;
+                    }
+                }
+                let mean = sum.map(|s| s / n);
+                let l = 0.299 * mean[0] + 0.587 * mean[1] + 0.114 * mean[2];
+                let var = sq / n - l * l;
+                if var < best.0 {
+                    best = (var, mean);
+                }
+            }
+            let [mut r0, mut g0, mut b0] = best.1;
+            let l = 0.299 * r0 + 0.587 * g0 + 0.114 * b0;
+            match style {
+                PaintStyle::Basic => {
+                    // (A touch richer.)
+                    [r0, g0, b0] = [r0, g0, b0].map(|c| l + (c - l) * 1.15);
+                }
+                PaintStyle::Genius => {
+                    // (Bold: fewer tones, more contrast.)
+                    [r0, g0, b0] = [r0, g0, b0].map(|c| (((l + (c - l) * 1.4 - 128.0) * 1.25 + 128.0) / 51.0).round() * 51.0);
+                }
+                PaintStyle::Insane => {
+                    // (Its colours turned about, louder.)
+                    [r0, g0, b0] = [b0, r0, g0].map(|c| l + (c - l) * 1.7);
+                }
+                PaintStyle::Somber => {
+                    let g = l * 0.8 + 0.2 * (r0 + g0 + b0) / 3.0;
+                    [r0, g0, b0] = [g * 0.72, g * 0.78, g * 0.92];
+                }
+            }
+            let i = ((y * w + x) * 4) as usize;
+            px[i] = r0.round().clamp(0.0, 255.0) as u8;
+            px[i + 1] = g0.round().clamp(0.0, 255.0) as u8;
+            px[i + 2] = b0.round().clamp(0.0, 255.0) as u8;
+            px[i + 3] = 255;
+        }
+    }
+}
+
 /// Where photographs' pictures are kept: beside the saves.
 fn dir() -> PathBuf {
     crate::save::saves_dir().join("photos")
@@ -172,14 +304,27 @@ pub fn crop(px: &[u8], w: u32, h: u32, rect: URect) -> (u32, u32, Vec<u8>) {
 pub enum GrabKind {
     /// A phone's photo (`CellPhonePhotography`).
     Phone,
+    /// A still life's subject, to paint in a style (`Painting`).
+    Painting(PaintStyle),
 }
 
-/// A picture taken: by whom, for what, and the photograph.
+impl GrabKind {
+    /// The layout's export for it (by its designers' comment), its frames, and its shade.
+    fn layout(self) -> (&'static str, &'static [u32], u32) {
+        match self {
+            GrabKind::Phone => ("Cellphone Photography Screen Grab", &[FRAME_BASE], PHONE_SHADE),
+            GrabKind::Painting(_) => ("Painting Screen Grab", &[FRAME_BASE, FRAME_BASE + 1, FRAME_BASE + 2], PAINTING_SHADE),
+        }
+    }
+}
+
+/// A picture taken: by whom, for what, its picture (by id) and the frame it was taken in.
 #[derive(Message, Clone, Debug)]
 pub struct Grabbed {
     pub sim: Entity,
     pub kind: GrabKind,
-    pub photo: Photo,
+    pub id: String,
+    pub frame: usize,
 }
 
 /// A screen grab under way (`ScreenGrabController`): who for, what for, the frame and style,
@@ -188,11 +333,14 @@ pub struct Grabbed {
 pub struct Grabbing {
     pub sim: Entity,
     pub kind: GrabKind,
-    size: Size,
+    /// The action it's for (its name on the queue).
+    label: String,
     style: Style,
     stage: Stage,
     root: Option<Entity>,
-    target: Option<Entity>,
+    /// Its frames' windows and their targets, and the one chosen (`I` for the next).
+    frames: Vec<(Entity, Option<Entity>)>,
+    frame: usize,
     /// The world outside the frame dimmed (the base window's frame drawable): four pieces turning
     /// about it.
     shades: Vec<Entity>,
@@ -216,15 +364,16 @@ enum Stage {
 }
 
 impl Grabbing {
-    pub fn new(kind: GrabKind, sim: Entity) -> Self {
+    pub fn new(kind: GrabKind, sim: Entity, label: &str) -> Self {
         Grabbing {
             sim,
             kind,
-            size: Size::Tiny,
+            label: label.to_string(),
             style: Style::Plain,
             stage: Stage::Open,
             root: None,
-            target: None,
+            frames: Vec::new(),
+            frame: 0,
             shades: Vec::new(),
             hidden: Vec::new(),
             view: None,
@@ -247,19 +396,44 @@ pub fn take_photo(sim: Entity) -> ActionKind {
     ActionKind::Outro { clips: &[], then: None, secs: 1.0e9, stand_at: None, target: sim }
 }
 
-/// The selected Sim's photo begun: the grab.
-fn start_grab(mut commands: Commands, grabbing: Option<Res<Grabbing>>, sims: Query<(Entity, &ActionQueue), With<Selected>>, time: Res<Time>) {
+/// Whether the action's a still life at an easel, not yet begun on (its subject's still to be
+/// captured): its style.
+fn still_life(a: &Action, objects: &Query<&crate::interact::GameObject>, plan: Option<&crate::paintings::PaintPlan>) -> Option<PaintStyle> {
+    let ActionKind::Object { target, def } = a.kind else { return None };
+    let o = objects.get(target).ok()?;
+    if crate::interact::interactions_for(o.kind).get(def).is_none_or(|d| d.special != crate::interact::Special::SellPainting) {
+        return None;
+    }
+    let style = still_style(&a.label)?;
+    (!plan.is_some_and(|p| p.painted.as_ref().is_some_and(|x| still(&x.key).is_some()))).then_some(style)
+}
+
+/// The selected Sim's photo begun, or their still life: the grab.
+fn start_grab(
+    mut commands: Commands,
+    grabbing: Option<Res<Grabbing>>,
+    sims: Query<(Entity, &ActionQueue, Option<&crate::paintings::PaintPlan>), With<Selected>>,
+    objects: Query<&crate::interact::GameObject>,
+    time: Res<Time>,
+) {
     if grabbing.is_some() {
         return;
     }
-    for (e, q) in &sims {
-        if q.0.front().is_some_and(|a| taking(a) && !a.cancel && matches!(a.phase, Phase::Running(_))) {
-            let mut g = Grabbing::new(GrabKind::Phone, e);
-            g.auto = std::env::var("PHOTO_CAPTURE_AT").ok().and_then(|v| v.parse().ok());
-            g.began = time.elapsed_secs();
-            commands.insert_resource(g);
-            info!("photos: a screen grab for a phone photo");
-        }
+    for (e, q, plan) in &sims {
+        let Some(a) = q.0.front().filter(|a| !a.cancel && matches!(a.phase, Phase::Running(_))) else { continue };
+        let kind = if taking(a) {
+            GrabKind::Phone
+        } else if let Some(style) = still_life(a, &objects, plan) {
+            GrabKind::Painting(style)
+        } else {
+            continue;
+        };
+        let mut g = Grabbing::new(kind, e, &a.label);
+        g.auto = std::env::var("PHOTO_CAPTURE_AT").ok().and_then(|v| v.parse().ok());
+        g.frame = std::env::var("PHOTO_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        g.began = time.elapsed_secs();
+        commands.insert_resource(g);
+        info!("photos: a screen grab ({kind:?})");
     }
 }
 
@@ -304,24 +478,34 @@ fn grab(
     let g = &mut *g;
     let walls = &mut *walls;
     // (Put away from the queue, or the Sim gone: stopped.)
-    let still = sims.get(g.sim).is_ok_and(|s| s.2.0.front().is_some_and(|a| taking(a) && !a.cancel));
+    let still = sims.get(g.sim).is_ok_and(|s| s.2.0.front().is_some_and(|a| a.label == g.label && !a.cancel));
     let mut done: Option<bool> = (!still).then_some(false);
+    let phone = g.kind == GrabKind::Phone;
+    // (A still life's painting not begun till its subject's captured.)
+    if !phone
+        && let Ok((.., mut q, _)) = sims.get_mut(g.sim)
+        && let Some(a) = q.0.front_mut()
+    {
+        a.phase = Phase::Running(0.0);
+    }
     match g.stage {
         Stage::Open => {
             let Some(mut ui) = ui else { return };
-            let Some(mut w) = ui.export(LAYOUT, CELL_PHONE).or_else(|| ui.export_commented(LAYOUT, CELL_PHONE_COMMENT)).cloned() else {
+            let (comment, frames, shade) = g.kind.layout();
+            let Some(mut w) = ui.export_commented(LAYOUT, comment).cloned() else {
                 warn!("photos: no screen grab layout");
                 done = Some(false);
                 return finish(&mut commands, g, done, &mut cams, &mut sims, &mut roots, &mut seen, walls);
             };
             localize(&ui, &mut w);
             w.flags |= s3bake::ui::WIN_VISIBLE;
-            // (A phone's one frame: its small portrait.)
-            let frame = FRAME_BASE;
-            for c in w.children.iter_mut().filter(|c| c.id == frame) {
-                c.flags |= s3bake::ui::WIN_VISIBLE;
-                // (The viewfinder at its own size, round the target: the phone's frame isn't
-                // stretched to its window.)
+            g.frame = g.frame.min(frames.len() - 1);
+            for c in w.children.iter_mut().filter(|c| frames.contains(&c.id)) {
+                if c.id == frames[g.frame] {
+                    c.flags |= s3bake::ui::WIN_VISIBLE;
+                }
+                // (The frame's picture at its own size, round the target: a phone's viewfinder
+                // isn't stretched to its window.)
                 if let Some(s3bake::ui::UiDrawable::Image { flags, .. }) = &mut c.drawable {
                     *flags = 0;
                 }
@@ -329,37 +513,55 @@ fn grab(
             let s = ui.spawn_root(&mut commands, &mut images, &mut fonts, &w);
             let Some(root) = s.root else { return };
             commands.entity(root).insert((GlobalZIndex(60), Interaction::default(), FocusPolicy::Block, crate::hud::BlocksWorld, DespawnOnExit(crate::AppState::InGame)));
-            g.target = s.id(frame).and_then(|f| s.within(f, TARGET));
+            g.frames = frames.iter().filter_map(|f| s.id(*f).map(|e| (e, s.within(e, TARGET)))).collect();
             // (The world outside the target dimmed, as the base window's frame drawable has it:
-            // under the frame's picture, out to the screen's edges.)
-            // (Under the layout's windows.)
-            g.shades = (0..4).map(|_| commands.spawn((Node { position_type: PositionType::Absolute, ..default() }, BackgroundColor(crate::layout::color(PHONE_SHADE)), Pickable::IGNORE)).id()).collect();
+            // under the layout's windows, out to the screen's edges.)
+            g.shades = (0..4).map(|_| commands.spawn((Node { position_type: PositionType::Absolute, ..default() }, BackgroundColor(crate::layout::color(shade)), Pickable::IGNORE)).id()).collect();
             commands.entity(root).insert_children(0, &g.shades);
             g.root = Some(root);
-            // The camera to their eyes, looking the way they face.
-            if let (Ok(mut cam), Ok((tf, sim, ..))) = (cams.single_mut(), sims.get(g.sim)) {
+            if let Ok(mut cam) = cams.single_mut() {
                 g.view = Some((cam.focus, cam.yaw, cam.pitch, cam.distance, cam.height_offset, cam.follow));
-                let f = tf.rotation * Vec3::Z;
-                let zoom = std::env::var("PHOTO_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(crate::camera::FOV);
-                let turn = std::env::var("PHOTO_YAW").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
-                cam.photo = Some(crate::camera::PhotoView {
-                    eye: tf.translation + Vec3::Y * eye_height(sim.age) + f * 0.12,
-                    yaw: (-f.x).atan2(-f.z) + turn,
-                    pitch: std::env::var("PHOTO_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(-0.05),
-                    fov: zoom.clamp(PHONE_ZOOM.0, PHONE_ZOOM.1).to_radians(),
-                    fovs: (PHONE_ZOOM.0.to_radians(), PHONE_ZOOM.1.to_radians()),
-                });
+            }
+            if let (Ok(mut cam), Ok((tf, sim, ..))) = (cams.single_mut(), sims.get(g.sim)) {
+                if phone {
+                    // The camera to their eyes, looking the way they face.
+                    let f = tf.rotation * Vec3::Z;
+                    let zoom = std::env::var("PHOTO_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(crate::camera::FOV);
+                    let turn = std::env::var("PHOTO_YAW").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+                    cam.photo = Some(crate::camera::PhotoView {
+                        eye: tf.translation + Vec3::Y * eye_height(sim.age) + f * 0.12,
+                        yaw: (-f.x).atan2(-f.z) + turn,
+                        pitch: std::env::var("PHOTO_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(-0.05),
+                        fov: zoom.clamp(PHONE_ZOOM.0, PHONE_ZOOM.1).to_radians(),
+                        fovs: (PHONE_ZOOM.0.to_radians(), PHONE_ZOOM.1.to_radians()),
+                    });
+                } else {
+                    // (A still life's subject: the camera kept on the painter, `tetherCamera`.)
+                    cam.look_at(tf.translation);
+                    cam.follow(g.sim);
+                    if let Some(d) = std::env::var("PHOTO_DIST").ok().and_then(|v| v.parse::<f32>().ok()) {
+                        cam.distance = d;
+                    }
+                    if let Some(y) = std::env::var("PHOTO_YAW").ok().and_then(|v| v.parse::<f32>().ok()) {
+                        let f = tf.rotation * Vec3::Z;
+                        cam.yaw = f.x.atan2(f.z) + y;
+                    }
+                }
             }
             hide(g, &mut roots, &mut seen, &sims);
-            g.walls = Some(*walls);
-            *walls = crate::building::WallMode::Up;
+            // (The walls up for a phone's photo, from the Sim's eyes: `SetWallsViewMode`.)
+            if phone {
+                g.walls = Some(*walls);
+                *walls = crate::building::WallMode::Up;
+            }
             g.stage = Stage::Framing;
         }
         Stage::Framing => {
             // (The interface, the Sim and their plumbob kept out of the picture.)
             hide(g, &mut roots, &mut seen, &sims);
             // (Where the picture's to be cut from the window's: the target, in pixels.)
-            if let (Some((c, at)), Some((screen, _))) = (g.target.and_then(|t| nodes.get(t).ok()), g.root.and_then(|r| nodes.get(r).ok())) {
+            let target = g.frames.get(g.frame).and_then(|f| f.1);
+            if let (Some((c, at)), Some((screen, _))) = (target.and_then(|t| nodes.get(t).ok()), g.root.and_then(|r| nodes.get(r).ok())) {
                 let half = c.size() * 0.5;
                 let (min, max) = (at.translation - half, at.translation + half);
                 g.rect = URect::new(min.x.max(0.0) as u32, min.y.max(0.0) as u32, max.x.max(0.0) as u32, max.y.max(0.0) as u32);
@@ -379,14 +581,25 @@ fn grab(
                 }
             }
             let auto = g.auto.is_some_and(|s| time.elapsed_secs() - g.began > s);
-
+            // (I: the next size of frame, `ChangeSize`.)
+            if keys.just_pressed(KeyCode::KeyI) && g.frames.len() > 1 {
+                if let Some((f, _)) = g.frames.get(g.frame) {
+                    commands.entity(*f).insert(Visibility::Hidden);
+                }
+                g.frame = (g.frame + 1) % g.frames.len();
+                if let Some((f, _)) = g.frames.get(g.frame) {
+                    commands.entity(*f).insert(Visibility::Inherited);
+                }
+            }
             if keys.just_pressed(KeyCode::Escape) {
                 keys.clear_just_pressed(KeyCode::Escape);
                 done = Some(false);
             } else if (keys.just_pressed(KeyCode::KeyC) || auto) && g.rect.width() > 4 && g.rect.height() > 4 {
                 keys.clear_just_pressed(KeyCode::KeyC);
-
-                sounds.write(crate::sound::PlaySound { name: CLICK.into(), at: None, volume: 1.0, speed: 1.0 });
+                // (A phone's click; the painter's capture is quiet.)
+                if phone {
+                    sounds.write(crate::sound::PlaySound { name: CLICK.into(), at: None, volume: 1.0, speed: 1.0 });
+                }
                 for e in g.root.iter().chain(&g.shades) {
                     commands.entity(*e).insert(Visibility::Hidden);
                 }
@@ -417,14 +630,18 @@ fn grab(
             let taken = g.shot.lock().ok().and_then(|mut s| s.take());
             if let Some((w, h, px)) = taken {
                 let (cw, ch, mut pic) = crop(&px, w, h, g.rect);
-                filter(&mut pic, cw, ch, g.style);
-                let photo = Photo { id: format!("{:016x}", rand::random::<u64>()), size: g.size, style: g.style };
-                let path = photo.path();
+                // (A photo in its style; a still life painted in its.)
+                match g.kind {
+                    GrabKind::Phone => filter(&mut pic, cw, ch, g.style),
+                    GrabKind::Painting(style) => paint_filter(&mut pic, cw, ch, style),
+                }
+                let id = format!("{:016x}", rand::random::<u64>());
+                let path = dir().join(format!("{id}.png"));
                 let _ = std::fs::create_dir_all(dir());
                 match std::fs::write(&path, s3bake::gamedata::encode_rgba_png(cw, ch, &pic)) {
                     Ok(()) => {
                         info!("photos: took a {cw}x{ch} picture ({})", path.display());
-                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, photo });
+                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, id, frame: g.frame });
                         done = Some(true);
                     }
                     Err(e) => {
@@ -453,8 +670,10 @@ fn hide(
             *v = Visibility::Hidden;
         }
     }
+    // (A painter stays at the easel, in sight; only their plumbob's put away.)
     let bob = sims.get(g.sim).ok().and_then(|s| s.3.map(|p| p.0));
-    for e in std::iter::once(g.sim).chain(bob) {
+    let sim = (g.kind == GrabKind::Phone).then_some(g.sim);
+    for e in sim.into_iter().chain(bob) {
         if let Ok(mut v) = seen.get_mut(e)
             && *v != Visibility::Hidden
         {
@@ -497,20 +716,57 @@ fn finish(
             (cam.focus, cam.yaw, cam.pitch, cam.distance, cam.height_offset, cam.follow) = (focus, yaw, pitch, distance, height, follow);
         }
     }
+    // (A phone's photo done; a still life's painting begun, or, its subject not captured, not.)
     if let Ok((.., mut q, _)) = sims.get_mut(g.sim)
-        && q.0.front().is_some_and(taking)
+        && let Some(a) = q.0.front_mut()
+        && a.label == g.label
     {
-        q.0.pop_front();
+        match g.kind {
+            GrabKind::Phone => {
+                q.0.pop_front();
+            }
+            GrabKind::Painting(_) if !taken => a.cancel = true,
+            GrabKind::Painting(_) => {}
+        }
     }
     info!("photos: the grab's over ({})", if taken { "taken" } else { "put away" });
     commands.remove_resource::<Grabbing>();
 }
 
-/// A phone's photo into its taker's inventory: "Untitled", worth nothing.
-fn photo_taken(mut commands: Commands, mut grabbed: MessageReader<Grabbed>) {
+/// A phone's photo into its taker's inventory: "Untitled", worth nothing. A still life's subject
+/// to paint: the painting decided (its worth and quality as any of theirs, on the canvas its
+/// frame was for, `CanvasSizeForScreenGrab`), its picture the subject in its style.
+#[allow(clippy::type_complexity)]
+fn photo_taken(
+    mut commands: Commands,
+    mut grabbed: MessageReader<Grabbed>,
+    sims: Query<(&Sim, &crate::interact::Skills, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
+    baked: Option<Res<crate::baked::Baked>>,
+) {
     for g in grabbed.read() {
-        if g.kind == GrabKind::Phone {
-            crate::inventory::give(&mut commands, g.sim, ItemKind::Photo, g.photo.key(), UNTITLED.into(), 0, 0, 1);
+        match g.kind {
+            GrabKind::Phone => {
+                let photo = Photo { id: g.id.clone(), size: Size::Tiny, style: Style::Plain };
+                crate::inventory::give(&mut commands, g.sim, ItemKind::Photo, photo.key(), UNTITLED.into(), 0, 0, 1);
+            }
+            GrabKind::Painting(style) => {
+                let Ok((sim, skills, wishes, journal)) = sims.get(g.sim) else { continue };
+                let size = g.frame.min(2) as u8;
+                let mut rng = rand::rng();
+                let mut p = crate::paintings::paint(
+                    baked.as_ref().map(|b| &b.0.paintings),
+                    size,
+                    skills.level("Painting"),
+                    &sim.traits,
+                    sim.age == Age::Child,
+                    crate::wishes::has(wishes, "ExtraCreative"),
+                    crate::journal::earned(journal, "Proficient Painter"),
+                    &mut rng,
+                );
+                p.key = still_key(size, style, &g.id, rand::Rng::random(&mut rng));
+                info!("photos: {} paints a still life ({}, {})", sim.first, style.name(), p.key);
+                commands.entity(g.sim).insert(crate::paintings::PaintPlan { size, painted: Some(p) });
+            }
         }
     }
 }
@@ -555,68 +811,130 @@ pub fn frame(baked: &crate::baked::BakedData, s: &Stack) -> Option<Key> {
 /// A photograph's picture (loaded once), for its tile and its frame.
 pub fn image(cache: &mut crate::paintings::PaintingImages, images: &mut Assets<Image>, s: &Stack) -> Option<Handle<Image>> {
     let p = Photo::from_key(&s.key)?;
-    let key: Key = (0x5048_4F54, 0, s3pkg::fnv64(&p.id));
+    picture(cache, images, &p.id).map(|(h, _)| h)
+}
+
+/// A picture taken (a photo's, a still life's), by its id: loaded once, and its size.
+pub fn picture(cache: &mut crate::paintings::PaintingImages, images: &mut Assets<Image>, id: &str) -> Option<(Handle<Image>, UVec2)> {
+    let key: Key = (0x5048_4F54, 0, s3pkg::fnv64(id));
     cache
         .0
         .entry(key)
         .or_insert_with(|| {
-            let png = std::fs::read(p.path()).ok()?;
+            let png = std::fs::read(dir().join(format!("{id}.png"))).ok()?;
             let (w, h, px) = s3bake::gamedata::decode_icon(&png)?;
             let img = Image::new(Extent3d { width: w, height: h, depth_or_array_layers: 1 }, TextureDimension::D2, px, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD);
             Some((images.add(img), UVec2::new(w, h)))
         })
         .clone()
-        .map(|(h, _)| h)
 }
 
-/// A photograph's frame showing its picture.
+/// A still life's canvas on an easel, showing its picture.
+#[derive(Component)]
+pub struct StillCanvas(pub String);
+
+/// A canvas's face for a still life: the canvas's own colour, the picture where the game's
+/// pictures go on it (its `uv`, fractions of the face).
+pub fn canvas_face(pic: &[u8], w: u32, h: u32, uv: [f32; 4]) -> (u32, Vec<u8>) {
+    const SIZE: u32 = 512;
+    let mut out: Vec<u8> = [232u8, 226, 212, 255].repeat((SIZE * SIZE) as usize);
+    let (x0, y0, x1, y1) = ((uv[0] * SIZE as f32) as u32, (uv[1] * SIZE as f32) as u32, (uv[2] * SIZE as f32).ceil() as u32, (uv[3] * SIZE as f32).ceil() as u32);
+    let (x1, y1) = (x1.min(SIZE).max(x0 + 1), y1.min(SIZE).max(y0 + 1));
+    // (Smoothly: each pixel blended from the four of the picture about it.)
+    let at = |x: u32, y: u32, k: usize| pic[((y.min(h - 1) * w + x.min(w - 1)) * 4) as usize + k] as f32;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let fx = (((x - x0) as f32 + 0.5) / (x1 - x0) as f32 * w as f32 - 0.5).max(0.0);
+            let fy = (((y - y0) as f32 + 0.5) / (y1 - y0) as f32 * h as f32 - 0.5).max(0.0);
+            let (ix, iy, tx, ty) = (fx as u32, fy as u32, fx.fract(), fy.fract());
+            let d = ((y * SIZE + x) * 4) as usize;
+            for k in 0..4 {
+                let top = at(ix, iy, k) * (1.0 - tx) + at(ix + 1, iy, k) * tx;
+                let bottom = at(ix, iy + 1, k) * (1.0 - tx) + at(ix + 1, iy + 1, k) * tx;
+                out[d + k] = (top * (1.0 - ty) + bottom * ty).round() as u8;
+            }
+        }
+    }
+    (SIZE, out)
+}
+
+/// A photograph's frame (or a still life's canvas) showing its picture.
 #[derive(Component)]
 struct PhotoShown;
 
-/// Photographs' frames drawn in their wall state, and hung photographs (and one held up in Buy
-/// mode) with their pictures in them.
+/// Photographs' frames drawn in their wall state; hung photographs and still lifes, one held up
+/// in Buy mode, and a still life's canvas on the easel, with their pictures in them.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn frames(
     mut commands: Commands,
     hung: Query<(Entity, &crate::paintings::Hung, &crate::interact::GameObject), Without<PhotoShown>>,
+    easels: Query<(Entity, &StillCanvas), Without<PhotoShown>>,
     buy: Res<crate::buy::BuyMode>,
     kids: Query<&Children>,
     mut parts: Query<&mut MeshMaterial3d<StandardMaterial>>,
     data: Option<Res<crate::baked::Baked>>,
     (mut assets, mut cache): (ResMut<crate::objects::ObjectAssets>, ResMut<crate::paintings::PaintingImages>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
-    mut walls: Local<HashMap<Key, Handle<StandardMaterial>>>,
+    mut stand_ins: Local<HashMap<Key, Vec<Handle<StandardMaterial>>>>,
     mut pictures: Local<HashMap<String, Handle<StandardMaterial>>>,
 ) {
     let Some(data) = data else { return };
-    // (Once: each size's frame in its wall state, and its picture's stand-in material.)
-    if walls.is_empty() {
+    // (Once: each size's photograph frame in its wall state, and the stand-ins for the pictures
+    // in the frames and on the canvases.)
+    if stand_ins.is_empty() {
+        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
         for size in Size::ALL {
             let Some(objd) = data.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case(size.frame())).map(|c| c.objd) else { continue };
-            let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
             let state = assets.object_in_state(&mut ctx, objd, s3pkg::fnv32(ON_WALL));
             let state = if state.iter().any(|p| p.tex == Some(PLACEHOLDER)) { state } else { assets.object(&mut ctx, objd) };
-            if let Some(p) = state.iter().find(|p| p.tex == Some(PLACEHOLDER)) {
-                walls.insert(objd, p.material.clone());
-            }
+            stand_ins.insert(objd, state.iter().filter(|p| p.tex == Some(PLACEHOLDER)).map(|p| p.material.clone()).collect());
             assets.set_object(objd, state);
         }
-        if walls.is_empty() {
-            walls.insert((0, 0, 0), Handle::default());
+        let face = data.0.paintings.face;
+        for c in &data.0.paintings.canvases {
+            let faces = assets.object(&mut ctx, c.objd).iter().filter(|p| p.tex.is_some_and(|k| k.0 == face.0 && k.2 == face.2)).map(|p| p.material.clone()).collect();
+            stand_ins.insert(c.objd, faces);
         }
+        stand_ins.entry((0, 0, 0)).or_default();
     }
-    let ghost = buy.placing.as_ref().and_then(|p| p.item.as_ref().filter(|i| i.kind == ItemKind::Photo).map(|i| (p.ghost, p.objd, i.clone())));
-    let mut todo: Vec<(Entity, Key, Stack, bool)> = hung.iter().filter(|(_, h, _)| h.0.kind == ItemKind::Photo).map(|(e, h, o)| (e, o.objd, h.0.clone(), true)).collect();
-    todo.extend(ghost.map(|(e, o, s)| (e, o, s, false)));
+    // (What to show where: the entity, its object, the picture (a photo's or a still life's), and
+    // whether it's for good.)
+    let canvas = |size: u8| data.0.paintings.canvases.get(size as usize).map(|c| (c.objd, c.uv));
+    let mut todo: Vec<(Entity, Key, Stack, bool)> = hung.iter().filter(|(_, h, _)| shows_own(&h.0)).map(|(e, h, o)| (e, o.objd, h.0.clone(), true)).collect();
+    if let Some(p) = buy.placing.as_ref()
+        && let Some(i) = p.item.as_ref().filter(|i| shows_own(i))
+    {
+        todo.push((p.ghost, p.objd, i.clone(), false));
+    }
+    for (e, c) in &easels {
+        let Some((objd, _)) = still(&c.0).and_then(|(size, ..)| canvas(size)) else { continue };
+        todo.push((e, objd, Stack { kind: ItemKind::Painting, key: c.0.clone(), name: String::new(), quality: 0, count: 1, worth: 0 }, true));
+    }
     for (e, objd, s, mark) in todo {
-        let Some(stand_in) = walls.get(&objd).cloned() else { continue };
-        let Some(id) = Photo::from_key(&s.key).map(|p| p.id) else { continue };
-        let picture = match pictures.get(&id) {
+        let Some(stand_in) = stand_ins.get(&objd).cloned().filter(|v| !v.is_empty()) else { continue };
+        // (Its material, made once.)
+        let (name, id, uv) = match (Photo::from_key(&s.key), still(&s.key)) {
+            (Some(p), _) => (format!("photo:{}", p.id), p.id, None),
+            (None, Some((size, _, id))) => (format!("still:{size}:{id}"), id, canvas(size).map(|c| c.1)),
+            _ => continue,
+        };
+        let picture = match pictures.get(&name) {
             Some(m) => m.clone(),
             None => {
-                let Some(img) = image(&mut cache, &mut images, &s) else { continue };
-                let m = mats.add(StandardMaterial { base_color_texture: Some(img), perceptual_roughness: 0.45, reflectance: 0.35, ..default() });
-                pictures.insert(id, m.clone());
+                let img = match uv {
+                    // (A still life: on a canvas's face, where the game's pictures go.)
+                    Some(uv) => {
+                        let Some((w, h, px)) = std::fs::read(dir().join(format!("{id}.png"))).ok().and_then(|png| s3bake::gamedata::decode_icon(&png)) else { continue };
+                        let (size, face) = canvas_face(&px, w, h, uv);
+                        images.add(Image::new(Extent3d { width: size, height: size, depth_or_array_layers: 1 }, TextureDimension::D2, face, TextureFormat::Rgba8UnormSrgb, RenderAssetUsages::RENDER_WORLD))
+                    }
+                    None => {
+                        let Some((h, _)) = picture(&mut cache, &mut images, &id) else { continue };
+                        h
+                    }
+                };
+                let m = mats.add(StandardMaterial { base_color_texture: Some(img), perceptual_roughness: if uv.is_some() { 0.8 } else { 0.45 }, reflectance: 0.35, ..default() });
+                pictures.insert(name, m.clone());
                 m
             }
         };
@@ -624,7 +942,7 @@ fn frames(
         let mut swapped = false;
         for c in children.iter() {
             if let Ok(mut m) = parts.get_mut(c) {
-                if m.0 == stand_in {
+                if stand_in.contains(&m.0) {
                     m.0 = picture.clone();
                     swapped = true;
                 } else if m.0 == picture {
@@ -634,34 +952,43 @@ fn frames(
         }
         if swapped && mark {
             commands.entity(e).insert(PhotoShown);
-            debug!("photos: {} shows its picture", s.name);
+            debug!("photos: {} shows its picture", s.key);
         }
     }
+}
+
+/// Whether an item hangs with a picture of its own (a photograph, a still life).
+fn shows_own(s: &Stack) -> bool {
+    (s.kind == ItemKind::Photo && Photo::from_key(&s.key).is_some()) || (s.kind == ItemKind::Painting && still(&s.key).is_some())
 }
 
 /// `PHOTO_TEST=1` (tests): ten seconds in, the selected Sim takes a photo with their phone
 /// (`PHOTO_CAPTURE_AT=<seconds>`: taken that long into the grab; `PHOTO_YAW`, `PHOTO_PITCH`,
 /// `PHOTO_ZOOM`: which way and how far zoomed); `PHOTO_HANG=1`: taken, it's hung on the nearest
 /// wall and the camera's on it; `PHOTO_PIE=1`: its inventory menu instead; `PHOTO_PHONE=1`: just
-/// the phone's menu.
+/// the phone's menu; `PHOTO_STILL=basic|genius|insane|somber`: a still life at the lot's easel
+/// instead (`PHOTO_LEVEL`, `PHOTO_FRAME=<0-2>`, `PHOTO_DIST`; `PHOTO_FAST=1`: its painting
+/// hurried), hung likewise once done.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn photo_test(
     mut commands: Commands,
     time: Res<Time>,
-    mut sims: Query<(Entity, &Transform, &mut ActionQueue, Option<&crate::inventory::Inventory>), With<Selected>>,
+    mut sims: Query<(Entity, &Transform, &mut ActionQueue, Option<&crate::inventory::Inventory>, &mut crate::interact::Skills, Option<&crate::paintings::PaintPlan>), With<Selected>>,
+    objects: Query<(Entity, &crate::interact::GameObject, &Transform), Without<Selected>>,
     grabbing: Option<Res<Grabbing>>,
     building: Option<Res<crate::building::ActiveBuilding>>,
     (data, catalog, mut assets): (Res<crate::baked::Baked>, Res<crate::loading::Catalog>, ResMut<crate::objects::ObjectAssets>),
     (mut meshes, mut images, mut mats): (ResMut<Assets<Mesh>>, ResMut<Assets<Image>>, ResMut<Assets<StandardMaterial>>),
     mut cams: Query<&mut crate::camera::SimsCamera>,
     mut stage: Local<(u8, f32)>,
-    (world, mut wall_mode): (Res<crate::loading::CurrentWorld>, ResMut<crate::building::WallMode>),
+    (world, mut wall_mode, grid, mut put_down): (Res<crate::loading::CurrentWorld>, ResMut<crate::building::WallMode>, Option<Res<crate::nav::NavGrid>>, Local<bool>),
 ) {
     if std::env::var_os("PHOTO_TEST").is_none() {
         return;
     }
     let now = time.elapsed_secs();
-    let Ok((me, tf, mut q, inv)) = sims.single_mut() else { return };
+    let Ok((me, tf, mut q, inv, mut skills, plan)) = sims.single_mut() else { return };
+    let still_life = std::env::var("PHOTO_STILL").ok();
     match stage.0 {
         0 if now > 10.0 => {
             *stage = (1, now);
@@ -671,11 +998,65 @@ fn photo_test(
                 commands.insert_resource(crate::hud::OpenPhone);
                 return;
             }
+            // (PHOTO_STILL=<style>: a still life at the lot's easel instead, at Painting
+            // `PHOTO_LEVEL`.)
+            if let Some(style) = still_life.as_deref() {
+                let easel = objects.iter().filter(|(_, o, _)| o.kind == crate::interact::ObjectKind::Easel).min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation))).map(|e| e.0);
+                let Some(easel) = easel else {
+                    // (None on the lot: one put down beside them, a moment to settle.)
+                    *stage = (0, now);
+                    if !*put_down {
+                        *put_down = true;
+                        let Some(key) = data.0.catalog.iter().find(|c| c.instance_name.eq_ignore_ascii_case("Easel")).map(|c| c.objd) else { return };
+                        let free = |p: Vec2| grid.as_deref().and_then(|g| g.cell_of(p).map(|(x, z)| !g.is_blocked(x, z))).unwrap_or(true);
+                        let here = tf.translation.xz();
+                        let spot = (3..20).flat_map(|r| (0..12).map(move |k| here + Vec2::from_angle(k as f32 * std::f32::consts::TAU / 12.0) * r as f32 * 0.5)).find(|c| (-4..=4).all(|i| (-4..=4).all(|j| free(*c + Vec2::new(i as f32, j as f32) * 0.4)))).unwrap_or(here + Vec2::X * 2.0);
+                        let y = crate::building::walk_height(&world.data, building.as_deref(), Vec3::new(spot.x, tf.translation.y, spot.y));
+                        let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
+                        if let Some(o) = crate::home::spawn_game_object(&mut commands, &mut assets, &mut ctx, &catalog, key, Vec3::new(spot.x, y, spot.y), 0.0) {
+                            commands.entity(o.entity).insert(crate::save::Bought);
+                            info!("photo test: an easel put down");
+                        }
+                    }
+                    return;
+                };
+                let level = std::env::var("PHOTO_LEVEL").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(6.0);
+                skills.0.insert("Painting", level);
+                // (PHOTO_STILL=menu: the easel's menu.)
+                if style == "menu" {
+                    commands.insert_resource(crate::hud::PieFor(easel));
+                    *stage = (9, now);
+                    return;
+                }
+                let def = crate::interact::interactions_for(crate::interact::ObjectKind::Easel).iter().position(|d| d.special == crate::interact::Special::SellPainting).unwrap_or(0);
+                let label = PaintStyle::ALL.into_iter().find(|s| s.name().eq_ignore_ascii_case(style)).filter(|s| *s != PaintStyle::Basic).map_or(STILL_LIFE, |s| s.name());
+                q.push_player(Action::new(label, ActionKind::Object { target: easel, def }, false));
+                info!("photo test: painting a still life ({label})");
+                return;
+            }
             q.push_player(Action::new(TAKE_PHOTO, take_photo(me), false));
             info!("photo test: taking a photo");
         }
-        1 if grabbing.is_none() && now - stage.1 > 2.0 => {
-            let Some(s) = inv.and_then(|i| i.0.iter().find(|s| s.kind == ItemKind::Photo)).cloned() else { return };
+        // (A still life's painting hurried along, once it's begun.)
+        1 if still_life.is_some()
+            && grabbing.is_none()
+            && let Some(p) = plan.filter(|p| p.painted.as_ref().is_some_and(|x| still(&x.key).is_some()))
+            && now - stage.1 > 2.0 =>
+        {
+            let size = p.size;
+            if let Some(a) = q.0.front_mut()
+                && let Phase::Running(t) = a.phase
+                && t < 1.0
+                && std::env::var_os("PHOTO_FAST").is_some()
+            {
+                a.phase = Phase::Running(crate::paintings::CANVAS_MINUTES[size as usize] * 0.9);
+                *stage = (3, now);
+                info!("photo test: hurried along");
+            }
+        }
+        1 | 3 if grabbing.is_none() && now - stage.1 > 2.0 => {
+            let want = |s: &&Stack| if still_life.is_some() { s.kind == ItemKind::Painting && still(&s.key).is_some() } else { s.kind == ItemKind::Photo };
+            let Some(s) = inv.and_then(|i| i.0.iter().find(want)).cloned() else { return };
             *stage = (2, now);
             info!("photo test: took {} ({})", s.name, s.key);
             if std::env::var_os("PHOTO_PIE").is_some() {
@@ -686,7 +1067,8 @@ fn photo_test(
             if std::env::var_os("PHOTO_HANG").is_none() {
                 return;
             }
-            let (Some(b), Some(objd)) = (building, frame(&data.0, &s)) else { return };
+            let object = if s.kind == ItemKind::Photo { frame(&data.0, &s).map(|o| (o, None)) } else { crate::paintings::object(&data.0.paintings, &s).map(|(o, d)| (o, Some(d))) };
+            let (Some(b), Some((objd, design))) = (building, object) else { return };
             // (On the nearest straight wall with nothing behind.)
             let here = b.local(tf.translation);
             let y = b.levels.get(1).copied().unwrap_or(0.0);
@@ -707,7 +1089,7 @@ fn photo_test(
             });
             let Some((pos, rot)) = spot else { return };
             let mut ctx = crate::objects::AssetCtx { baked: &data.0, meshes: &mut meshes, images: &mut images, materials: &mut mats };
-            if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, None) {
+            if let Some(o) = crate::home::spawn_game_object_design(&mut commands, &mut assets, &mut ctx, &catalog, objd, pos, rot, design) {
                 commands.entity(o.entity).insert((crate::save::Bought, crate::paintings::Hung(s.clone())));
                 info!("photo test: hung at {pos:.1?}");
             }
@@ -740,6 +1122,50 @@ mod tests {
         assert_eq!(Size::Tiny.frame(), "PhotographFrameSmall");
         assert_eq!(Size::Small.frame(), "PhotographFrameB");
         assert!(p.path().ends_with("photos/00ab12cd34ef5678.png") || p.path().ends_with("photos\\00ab12cd34ef5678.png"));
+    }
+
+    #[test]
+    fn still_lifes_come_with_skill_and_traits() {
+        use crate::life::Trait;
+        let key = still_key(2, PaintStyle::Somber, "00aa11bb22cc33dd", 7);
+        assert_eq!(key, "painting:2:still-3-00aa11bb22cc33dd#7");
+        assert_eq!(still(&key), Some((2, PaintStyle::Somber, "00aa11bb22cc33dd".into())));
+        assert_eq!(still("painting:1:SomePicture#3"), None, "the game's own pictures aren't still lifes");
+        assert_eq!(still_style(STILL_LIFE), Some(PaintStyle::Basic));
+        assert_eq!(still_style("Insane"), Some(PaintStyle::Insane));
+        assert_eq!(still_style("Paint"), None);
+        // (Level five for a still life; six and the traits for the stylized; nine for somber
+        // regardless, or a masterpiece for genius.)
+        assert!(!can_paint(PaintStyle::Basic, 4, &[], 0.0));
+        assert!(can_paint(PaintStyle::Basic, 5, &[], 0.0));
+        assert!(!can_paint(PaintStyle::Insane, 6, &[Trait::Genius], 0.0));
+        assert!(can_paint(PaintStyle::Insane, 6, &[Trait::Artistic], 0.0));
+        assert!(can_paint(PaintStyle::Genius, 1, &[], 1.0));
+        assert!(!can_paint(PaintStyle::Somber, 8, &[], 0.0));
+        assert!(can_paint(PaintStyle::Somber, 9, &[], 0.0));
+        assert!(can_paint(PaintStyle::Somber, 6, &[Trait::Grumpy], 0.0));
+    }
+
+    #[test]
+    fn a_still_life_is_painted_in_its_style() {
+        // (Half red, half blue: strokes keep the halves; a somber one's grey-blue, a genius's
+        // tones few.)
+        let (w, h) = (12u32, 12u32);
+        let px: Vec<u8> = (0..w * h).flat_map(|i| if i % w < 6 { [220, 30, 30, 255] } else { [30, 30, 220, 255] }).collect();
+        let mut basic = px.clone();
+        paint_filter(&mut basic, w, h, PaintStyle::Basic);
+        assert!(basic[0] > 200 && basic[2] < 60, "{:?}", &basic[..4]);
+        let mut somber = px.clone();
+        paint_filter(&mut somber, w, h, PaintStyle::Somber);
+        assert!(somber[2] > somber[0], "blue-grey: {:?}", &somber[..4]);
+        let mut genius = px;
+        paint_filter(&mut genius, w, h, PaintStyle::Genius);
+        assert!(genius.chunks(4).all(|p| p[..3].iter().all(|c| c % 51 == 0)), "posterized");
+        // (Its face: the canvas's colour round the picture.)
+        let (size, face) = canvas_face(&[255, 0, 0, 255], 1, 1, [0.25, 0.25, 0.75, 0.75]);
+        assert_eq!(face[..4], [232, 226, 212, 255]);
+        let mid = ((size / 2 * size + size / 2) * 4) as usize;
+        assert_eq!(face[mid..mid + 4], [255, 0, 0, 255]);
     }
 
     #[test]

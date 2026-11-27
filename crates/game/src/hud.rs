@@ -2858,6 +2858,22 @@ fn world_click(
                         crate::paintings::CANVASES.iter().map(|c| (format!("Paint: {c}"), ActionKind::Object { target: t, def: i })).collect();
                     options.push(("Paint ›".to_string(), submenu_kind(pie.submenus.len())));
                     pie.submenus.push(("Paint".to_string(), list));
+                    // (A still life of what they see, from level five, and stylized as their
+                    // traits and skill allow: `photos`, the game's `PaintStillLife`.)
+                    let level = writers.get(actor).map_or(0.0, |w| w.1.0.get("Painting").copied().unwrap_or(0.0)) as u32;
+                    let masterpieces = journals_q.get(actor).map_or(0.0, |j| j.get(crate::journal::Stat::Masterpieces));
+                    if crate::photos::can_paint(crate::photos::PaintStyle::Basic, level, &actor_sim.traits, masterpieces) {
+                        options.push((crate::photos::STILL_LIFE.to_string(), ActionKind::Object { target: t, def: i }));
+                        let styles: Vec<(String, ActionKind)> = crate::photos::PaintStyle::STYLIZED
+                            .into_iter()
+                            .filter(|s| crate::photos::can_paint(*s, level, &actor_sim.traits, masterpieces))
+                            .map(|s| (s.name().to_string(), ActionKind::Object { target: t, def: i }))
+                            .collect();
+                        if !styles.is_empty() {
+                            options.push((format!("{} ›", crate::photos::STYLIZED), submenu_kind(pie.submenus.len())));
+                            pie.submenus.push((crate::photos::STYLIZED.trim_end_matches('.').to_string(), styles));
+                        }
+                    }
                     continue;
                 }
                 if d.special == Special::ToggleAlarm {
