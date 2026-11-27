@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 28;
+pub const SOUNDS_VERSION: u32 = 29;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -119,6 +119,8 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "ui_photo_size",
     "ui_photo_type",
     "ui_photo_sting_bad",
+    // A photography collection completed.
+    "sting_obj_collect_piece_final",
     // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
     "thouse_pretend_castle_loop",
     "thouse_pretend_castle_plist",

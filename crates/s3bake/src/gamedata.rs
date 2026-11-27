@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::BakeRoot;
 use crate::pack::{PackReader, PackWriter, read_value, write_value};
 
-pub const GAMEDATA_VERSION: u32 = 184;
+pub const GAMEDATA_VERSION: u32 = 185;
 /// Interface images.
 pub const T_ICON: u32 = 0x2F7D0004;
 const T_XML: u32 = 0x0333406C;
@@ -214,6 +214,40 @@ pub struct CompositionInfo {
     pub name: String,
     pub clip: String,
     pub master: bool,
+}
+
+/// A photography subject (the `Photography` table's `Subjects`): its key and collection, whether
+/// it's hidden (a part of others), the skill and simoleons it's worth new, how its score's
+/// scaled, its name and title (the title's `{0.SimName}`s its key objects'), how it's scored
+/// (`SubjectScoringFunctions`'s method and its arguments), and its pack.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct PhotoSubject {
+    pub key: String,
+    pub collection: String,
+    pub hidden: bool,
+    pub skill_points: i32,
+    pub value: i32,
+    pub scale: f32,
+    pub name: String,
+    pub title: String,
+    pub method: String,
+    pub args: Vec<String>,
+    pub sku: String,
+}
+
+/// A collection of photography subjects: its name, the level it shows from, whether the
+/// camera's subject line names it, its score's scale, and what its photos are worth more (and
+/// once it's complete).
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct PhotoCollection {
+    pub key: String,
+    pub name: String,
+    pub min_level: i32,
+    pub hide_in_ui: bool,
+    pub score: f32,
+    pub value: f32,
+    pub value_complete: f32,
+    pub sku: String,
 }
 
 /// One of the game's Lessons (its tutorialettes, the `Tutorial` table): its `Lessons` name, its
@@ -1625,6 +1659,11 @@ pub struct GameDataBaked {
     /// The base game's Lessons.
     #[serde(default)]
     pub lessons: Vec<LessonInfo>,
+    /// Photography's subjects and collections (`photosubjects`).
+    #[serde(default)]
+    pub photo_subjects: Vec<PhotoSubject>,
+    #[serde(default)]
+    pub photo_collections: Vec<PhotoCollection>,
     pub recipes: Vec<RecipeInfo>,
     /// The Seasons tuning (`Seasons` table and SeasonsManager's managers).
     pub seasons: SeasonsTuning,
@@ -5064,6 +5103,60 @@ pub fn bake_gamedata(root: &BakeRoot, pkgs: &PackageSet, install_root: &std::pat
                 }
             }
             rest = &tag[sp..];
+        }
+    }
+
+    // Photography's subjects and their collections (World Adventures' `Photography` table: each
+    // row's empty fields as its first row has them), in the game's words.
+    let photography = pkg
+        .of_type(T_XML)
+        .find(|e| names.get(&e.key.i).is_some_and(|n| n == "Photography"))
+        .and_then(|e| pkg.read(e).ok())
+        .or_else(|| pkgs.read_ti(T_XML, s3pkg::fnv64("Photography")))
+        .map(|d| String::from_utf8_lossy(&d).into_owned());
+    if let Some(x) = photography {
+        let text = |sheet: &str, k: &str| if k.is_empty() { String::new() } else { strings.get(&s3pkg::fnv64(&format!("Gameplay/Excel/Photography/{sheet}:{k}").to_ascii_lowercase())).cloned().unwrap_or_default() };
+        let rows = records(&x, "Subjects");
+        let defaults = rows.first().cloned().unwrap_or_default();
+        let field = |f: &HashMap<String, String>, k: &str| f.get(k).filter(|v| !v.is_empty()).or_else(|| defaults.get(k)).cloned().unwrap_or_default();
+        for f in rows.iter().skip(1) {
+            let key = field(f, "Key");
+            if key.is_empty() {
+                continue;
+            }
+            let args: Vec<String> = (0..4).map(|i| field(f, &format!("Arg{i}"))).map(|a| if a.trim() == ")" { String::new() } else { a }).collect();
+            out.photo_subjects.push(PhotoSubject {
+                key,
+                collection: field(f, "Collection"),
+                hidden: field(f, "MinLevel").parse::<i32>().is_ok_and(|l| l < 0),
+                skill_points: field(f, "SkillPoints").parse().unwrap_or(0),
+                value: field(f, "Value").parse().unwrap_or(0),
+                scale: field(f, "Scale").parse().unwrap_or(1.0),
+                name: text("Subjects", &field(f, "NameKey")),
+                title: text("Subjects", &field(f, "TitleKey")),
+                method: field(f, "Method"),
+                args,
+                sku: field(f, "SKU"),
+            });
+        }
+        let rows = records(&x, "Collections");
+        let defaults = rows.first().cloned().unwrap_or_default();
+        let field = |f: &HashMap<String, String>, k: &str| f.get(k).filter(|v| !v.is_empty()).or_else(|| defaults.get(k)).cloned().unwrap_or_default();
+        for f in rows.iter().skip(1) {
+            let key = field(f, "Key");
+            if key.is_empty() {
+                continue;
+            }
+            out.photo_collections.push(PhotoCollection {
+                name: text("Collections", &field(f, "NameKey")),
+                min_level: field(f, "MinLevel").parse().unwrap_or(0),
+                hide_in_ui: field(f, "HideInCaptureUI").eq_ignore_ascii_case("true"),
+                score: field(f, "Score").parse().unwrap_or(1.0),
+                value: field(f, "ValueMultiplier").parse().unwrap_or(1.0),
+                value_complete: field(f, "ValueMultiplierWhenComplete").parse().unwrap_or(1.25),
+                sku: field(f, "SKU"),
+                key,
+            });
         }
     }
 

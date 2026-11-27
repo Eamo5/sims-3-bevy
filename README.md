@@ -1184,6 +1184,29 @@ installation is unreachable.
   `PHOTO_TEST=1` with `PHOTO_CAMERA=<camera>`, `PHOTO_LEVEL`, `PHOTO_SIZE`, `PHOTO_STYLE`,
   `PHOTO_SPOIL=gnome|finger|blurry|noise|none`, `PHOTO_PIE=1`, `PHOTO_MENU=<label>[>...]`,
   `PHOTO_PLACE=1` (tests).
+- **Photography's subjects**, as the game's `PhotographySubjects` and `SubjectScoringFunctions`:
+  what a camera's aimed at is scored against each of the `Photography` table's four hundred-odd
+  subjects (each row's blanks its first row's) by the subject's own method: the things in the
+  frame (the share of it each covers, their outlines on the screen, those behind the house's
+  walls or far off left out) by their classes and catalogue names (a couch, a TV, the garden
+  gnomes, the town's rabbit holes), the plants by kind, the Sims by who and what they are and do
+  (the maid, the repairman, the police, a ghost, a career's top, their running interaction as
+  the game names it — chess, fishing, painting, making out — eating or cleaning, sitting,
+  swimming, carrying a child, jogging, their moodlets), what they are to the photographer (a
+  relative, their child, their spouse, a friend, an enemy, a housemate) and to each other
+  (friends, lovers, enemies), the hour and the lot, and the subjects made of others
+  (`Op_And`, `Op_All`, `Op_AtLeastOne`, `KeyObjectCount`: two of my friends, lovers at night, the
+  maid at work, a still life of three to six things). The best, scaled by its collection and
+  twenty times over if the photographer's never caught it (ten if not today), is the photo's
+  subject, named under the frame as they aim ("My Child (Family and Friends)", the collection
+  named once the photographer's level shows it). Taken, a new subject adds its skill points to
+  Photography's and its simoleons to the photo's worth (half the first time each day), its
+  collection makes it worth more (more again once complete), the photo's titled as the subject
+  ("My child:Arlo Bunch"), and the game says what it was ("You captured "My Child," that's a new
+  subject worth §8! There are only 9 subjects left to complete the "Family and Friends"
+  collection. Have you tried to capture "My Grandchild" yet?", "New Today: ...", "Why don't you try
+  capturing something a little different?", a collection's completion with its sting). Each
+  photographer's captures are kept in saves. `PHOTO_DEBUG=1` logs what's seen (tests).
 - **What Sims do for who they are**, as the game's `TraitFunctions`, on their own menu and by
   free will: the Insane "Talk To Self" (half an hour yelling at and mocking nobody, the game's
   own clips, for fun and company); the Neurotic "Freak Out" (teens and up, then Tranquil for

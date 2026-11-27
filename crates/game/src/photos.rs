@@ -37,7 +37,7 @@ pub struct PhotosPlugin;
 impl Plugin for PhotosPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Grabbed>()
-            .add_systems(Update, (start_grab, grab, photo_taken, titled, photos_gone, frames, photo_test, photo_menu_test).chain().after(crate::interact::run_actions).run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (start_grab, grab, aim, photo_taken, titled, photos_gone, frames, photo_test, photo_menu_test).chain().after(crate::interact::run_actions).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -140,10 +140,11 @@ pub fn shot_cost(camera: &CameraModel, size: Size, style: Style) -> i64 {
     BASE_COST + SIZE_COST[size as usize] + STYLE_COST[style as usize] + camera.cost
 }
 
-/// A photo's worth (`OnPhotoTakenPreInstantiate`): its base and subject's worth, by the camera,
-/// the photographer's level, its size and style, a bad photo's tenth, a Photographer's Eye's.
-pub fn photo_value(camera: &CameraModel, level: u32, size: Size, style: Style, subject: f32, bad: bool, eye: bool) -> i64 {
-    let mut m = camera.value * LEVEL_VALUE[level.min(10) as usize] * SIZE_VALUE[size as usize] * STYLE_VALUE[style as usize];
+/// A photo's worth (`OnPhotoTakenPreInstantiate`): its base and subject's worth (and its
+/// collection's multiplier), by the camera, the photographer's level, its size and style, a bad
+/// photo's tenth, a Photographer's Eye's.
+pub fn photo_value(camera: &CameraModel, level: u32, size: Size, style: Style, (subject, collection): (f32, f32), bad: bool, eye: bool) -> i64 {
+    let mut m = camera.value * collection * LEVEL_VALUE[level.min(10) as usize] * SIZE_VALUE[size as usize] * STYLE_VALUE[style as usize];
     if bad {
         m *= BAD_VALUE;
     }
@@ -563,6 +564,8 @@ pub struct Grabbed {
     pub size: Size,
     pub style: Style,
     pub spoilt: Option<Spoilt>,
+    /// What it's of (`photosubjects`): the subject, and its key objects' names.
+    pub subject: Option<(String, Vec<String>)>,
 }
 
 /// A screen grab under way (`ScreenGrabController`): who for, what for, the frame and style,
@@ -587,6 +590,10 @@ pub struct Grabbing {
     wide: bool,
     ui: Option<crate::layout::Spawned>,
     tip: Option<(Entity, f32)>,
+    /// What the camera's aimed at (`photosubjects`: the subject, its key objects' names), and when
+    /// it was last looked at.
+    subject: Option<(String, Vec<String>)>,
+    aimed: f32,
     /// The world outside the frame dimmed (the base window's frame drawable): four pieces turning
     /// about it.
     shades: Vec<Entity>,
@@ -625,6 +632,8 @@ impl Grabbing {
             wide: false,
             ui: None,
             tip: None,
+            subject: None,
+            aimed: f32::MIN,
             shades: Vec::new(),
             hidden: Vec::new(),
             view: None,
@@ -950,7 +959,6 @@ fn grab(
                         };
                         set(&mut texts, INFO, format!("{} / {} / §{price} per shot", style_name(g.style), size_name(g.size)));
                         set(&mut texts, SHOTS_LEFT, if shots > MOST_SHOTS { format!("Shots remaining: {MOST_SHOTS}+") } else { format!("Shots remaining: {shots}") });
-                        set(&mut texts, SUBJECT, String::new());
                         for (id, lit) in [(KEY_FILTER, styles.len() > 1), (KEY_SIZE, sizes.len() > 1), (KEY_ZOOM_IN, zooms), (KEY_ZOOM_OUT, zooms), (KEY_TAKE, shots > 0)] {
                             let colour = crate::layout::color(if lit { 0xFFFF_FFFF } else { DISABLED });
                             if let Some(mut c) = ui.text(id).and_then(|e| colours.get_mut(e).ok())
@@ -1073,7 +1081,7 @@ fn grab(
                 match std::fs::write(&path, s3bake::gamedata::encode_rgba_png(cw, ch, &pic)) {
                     Ok(()) => {
                         info!("photos: took a {cw}x{ch} picture ({})", path.display());
-                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, id, frame: g.frame, size: g.size, style: g.style, spoilt });
+                        grabbed.write(Grabbed { sim: g.sim, kind: g.kind, id, frame: g.frame, size: g.size, style: g.style, spoilt, subject: g.subject.clone() });
                         done = Some(true);
                     }
                     Err(e) => {
@@ -1085,6 +1093,55 @@ fn grab(
         }
     }
     finish(&mut commands, g, done, &mut cams, &mut sims, &mut roots, &mut seen, walls);
+}
+
+/// A camera's aim, a few times a second (`UpdateCameraParameters`): the subject it's on, named
+/// under the frame ("A Couch (Still Life)").
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn aim(
+    grabbing: Option<ResMut<Grabbing>>,
+    mut scenes: crate::photosubjects::SceneParams,
+    cams: Query<(&Camera, &GlobalTransform), With<crate::camera::SimsCamera>>,
+    photographers: Query<(&crate::interact::Skills, Option<&crate::photosubjects::PhotoRecords>)>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    (mut texts, mut places, time): (Query<&mut Text>, Query<&mut Node>, Res<Time>),
+) {
+    let Some(mut g) = grabbing else { return };
+    if !matches!(g.kind, GrabKind::Camera(_)) || g.stage != Stage::Framing {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now - g.aimed < 0.3 {
+        return;
+    }
+    g.aimed = now;
+    let (Ok((camera, at)), Ok(window)) = (cams.single(), windows.single()) else { return };
+    let k = window.scale_factor();
+    let frame = Rect::new(g.rect.min.x as f32 / k, g.rect.min.y as f32 / k, g.rect.max.x as f32 / k, g.rect.max.y as f32 / k);
+    if frame.width() < 4.0 {
+        return;
+    }
+    let (skills, records) = photographers.get(g.sim).map_or((None, None), |(s, r)| (Some(s), r));
+    let level = skills.map_or(0, |s| s.level(SKILL));
+    let aimed = scenes.aim(camera, at, frame, g.sim, records, level);
+    let line = aimed.as_ref().map(|a| a.line.clone()).unwrap_or_default();
+    g.subject = aimed.map(|a| (a.key, a.names));
+    // (Its words, just under the frame.)
+    if let Some(ui) = &g.ui
+        && let Some(e) = ui.id(SUBJECT)
+    {
+        if let Some(mut t) = ui.text(SUBJECT).and_then(|t| texts.get_mut(t).ok())
+            && t.0 != line
+        {
+            t.0 = line;
+        }
+        if let Ok(mut n) = places.get_mut(e) {
+            let top = Val::Px(frame.max.y + 10.0);
+            if n.top != top {
+                n.top = top;
+            }
+        }
+    }
 }
 
 /// The interface's windows, the Sim and their plumbob hidden for the grab (what was showing kept
@@ -1172,8 +1229,8 @@ fn finish(
 fn photo_taken(
     mut commands: Commands,
     mut grabbed: MessageReader<Grabbed>,
-    mut sims: Query<(&Sim, &mut crate::interact::Skills, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>)>,
-    baked: Option<Res<crate::baked::Baked>>,
+    mut sims: Query<(&Sim, &mut crate::interact::Skills, Option<&crate::wishes::Wishes>, Option<&crate::journal::SkillJournal>, Option<&mut crate::photosubjects::PhotoRecords>)>,
+    (baked, ui, clock): (Option<Res<crate::baked::Baked>>, Option<Res<crate::icons::GameUi>>, Res<crate::clock::GameClock>),
     (mut notes, mut life, mut sounds): (ResMut<crate::interact::Notifications>, MessageWriter<crate::life::LifeEvent>, MessageWriter<crate::sound::PlaySound>),
 ) {
     for g in grabbed.read() {
@@ -1182,28 +1239,52 @@ fn photo_taken(
                 let photo = Photo { id: g.id.clone(), size: Size::Tiny, style: Style::Plain };
                 crate::inventory::give(&mut commands, g.sim, ItemKind::Photo, photo.key(), UNTITLED.into(), 0, 0, 1);
             }
-            // A camera's photo: worth what the camera, the photographer, its size and mode make
-            // it (a spoilt one a tenth), and Photography for the taking.
+            // A camera's photo: its subject captured (`photosubjects`: new, or new today, worth
+            // its skill points and simoleons, its collection more), worth what the camera, the
+            // photographer, its size and mode make it (a spoilt one a tenth), titled for its
+            // subject, and Photography for the taking.
             GrabKind::Camera(c) => {
-                let Ok((sim, mut skills, ..)) = sims.get_mut(g.sim) else { continue };
+                let Ok((sim, mut skills, _, _, records)) = sims.get_mut(g.sim) else { continue };
                 let level = skills.level(SKILL);
                 let eye = sim.traits.contains(&crate::life::Trait::PhotographersEye);
-                let worth = photo_value(c, level, g.size, g.style, 0.0, g.spoilt.is_some(), eye);
+                let mut fresh = crate::photosubjects::PhotoRecords::default();
+                let had = records.is_some();
+                let rec: &mut crate::photosubjects::PhotoRecords = match records {
+                    Some(r) => r.into_inner(),
+                    None => &mut fresh,
+                };
+                let cap = ui.as_ref().map(|u| {
+                    let subjects = crate::photosubjects::Subjects::new(&u.data.photo_subjects, &u.data.photo_collections);
+                    let (key, names) = g.subject.clone().unwrap_or_else(|| ("Nothing".into(), Vec::new()));
+                    crate::photosubjects::capture(&subjects, rec, &key, &names, (clock.minutes / 1440.0) as u32, rand::random())
+                });
+                let (value, multiplier, bonus) = cap.as_ref().map_or((0.0, 1.0, 0.0), |c| (c.value, c.multiplier, c.points));
+                let worth = photo_value(c, level, g.size, g.style, (value, multiplier), g.spoilt.is_some(), eye);
+                let title = cap.as_ref().map(|c| c.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| UNTITLED.into());
                 let photo = Photo { id: g.id.clone(), size: g.size, style: g.style };
-                crate::inventory::give(&mut commands, g.sim, ItemKind::Photo, photo.key(), UNTITLED.into(), 0, worth, 1);
-                // (A spoilt one's sting: `PlayFailSting`.)
+                crate::inventory::give(&mut commands, g.sim, ItemKind::Photo, photo.key(), title.clone(), 0, worth, 1);
+                if !had {
+                    commands.entity(g.sim).insert(fresh);
+                }
+                // (A spoilt one's sting: `PlayFailSting`; a collection complete's.)
                 if g.spoilt.is_some() {
                     sounds.write(crate::sound::PlaySound::ui("ui_photo_sting_bad"));
                 }
-                let points = BASE_POINTS * crate::life::skill_rate(&sim.traits, SKILL);
+                if let Some(words) = cap.as_ref().and_then(|c| crate::photosubjects::note_words(c, worth)) {
+                    if matches!(cap.as_ref().and_then(|c| c.note.as_ref()), Some(crate::photosubjects::Note::New { remaining: 0, .. })) {
+                        sounds.write(crate::sound::PlaySound::ui("sting_obj_collect_piece_final"));
+                    }
+                    notes.push(words);
+                }
+                let points = (BASE_POINTS + bonus) * crate::life::skill_rate(&sim.traits, SKILL);
                 if let Some(l) = skills.add_points(SKILL, points) {
                     notes.push(format!("{} reached level {l} in {SKILL}!", sim.first));
                     life.write(crate::life::LifeEvent::new(g.sim, crate::life::LifeEventKind::SkillUp { skill: SKILL, level: l }));
                 }
-                info!("photos: {} took a {} {} photo worth §{worth}{}", sim.first, style_name(g.style), size_name(g.size), if g.spoilt.is_some() { " (spoilt)" } else { "" });
+                info!("photos: {} took a {} {} photo, \"{title}\" ({:?}), worth §{worth}, {points} points{}", sim.first, style_name(g.style), size_name(g.size), g.subject.as_ref().map(|s| &s.0), if g.spoilt.is_some() { " (spoilt)" } else { "" });
             }
             GrabKind::Painting(style) => {
-                let Ok((sim, skills, wishes, journal)) = sims.get(g.sim) else { continue };
+                let Ok((sim, skills, wishes, journal, _)) = sims.get(g.sim) else { continue };
                 let size = g.frame.min(2) as u8;
                 let mut rng = rand::rng();
                 let mut p = crate::paintings::paint(
@@ -1782,10 +1863,10 @@ mod tests {
         assert_eq!(shot_cost(dear, Size::Panorama, Style::Vignette), 10 + 35 + 7 + 12);
         // (Five simoleons' base, by the camera, the level, size and style; a spoilt one a tenth;
         // a Photographer's Eye's a quarter more.)
-        assert_eq!(photo_value(dear, 10, Size::Panorama, Style::Vignette, 0.0, false, false), 45);
-        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, 20.0, false, false), 27);
-        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, 20.0, true, false), 2);
-        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, 20.0, false, true), 34);
+        assert_eq!(photo_value(dear, 10, Size::Panorama, Style::Vignette, (0.0, 1.0), false, false), 45);
+        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, (20.0, 1.0), false, false), 27);
+        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, (20.0, 1.0), true, false), 2);
+        assert_eq!(photo_value(medium, 5, Size::Medium, Style::Plain, (20.0, 1.0), false, true), 34);
         // (What the skill and the camera allow.)
         assert_eq!(sizes_at(0, dear).collect::<Vec<_>>(), vec![Size::Small]);
         assert_eq!(sizes_at(5, dear).collect::<Vec<_>>(), vec![Size::Small, Size::Medium, Size::Large]);

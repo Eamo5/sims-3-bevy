@@ -232,6 +232,7 @@ mod chinup;
 mod snakecharm;
 mod nectar;
 mod photos;
+mod photosubjects;
 mod petgarden;
 mod pettoys;
 mod pettraits;

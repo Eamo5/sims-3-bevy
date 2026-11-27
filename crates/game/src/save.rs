@@ -182,6 +182,9 @@ pub struct SavedSim {
     /// Their cameras' default sizes and modes (`photos`): by camera, the size and mode numbers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub camera_settings: Vec<(String, u8, u8)>,
+    /// The photography subjects they've caught (`photosubjects`): each's count and the day last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub photo_records: Vec<(String, u32, u32)>,
     /// Ranked chess: wins, losses and rank.
     #[serde(default)]
     pub chess: Option<crate::chess::ChessRecord>,
@@ -756,6 +759,7 @@ pub(crate) fn saved_look(sim: &Sim) -> SavedSim {
         charities: None,
         nectar_recipes: Vec::new(),
         camera_settings: Vec::new(),
+        photo_records: Vec::new(),
         chess: None,
         inventory: Default::default(),
         toddler: None,
@@ -1063,7 +1067,7 @@ fn save_game(
                     Option<&crate::portraits::Staged>,
                     Option<&crate::classes::ClassesTaken>,
                     Option<&crate::skillbooks::SkillBooks>,
-                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>),
+                    (Option<&crate::novels::Novels>, Has<crate::computertraits::BookClub>, Option<&crate::timeoff::TimeOff>, Option<&crate::charity::Charities>, Option<&crate::nectar::Recipes>, Option<&crate::photos::CameraSettings>, Option<&crate::photosubjects::PhotoRecords>),
                     Has<crate::town::Townie>,
                     Has<crate::visit::LotGuest>,
                 ),
@@ -1121,7 +1125,7 @@ fn save_game(
     // (Passers-by are kept only once the household knows them: then as Sims met, away.)
     let known: std::collections::HashSet<Entity> = sims.iter().filter(|q| q.9).flat_map(|q| q.8.0.keys().copied()).collect();
     let mut saved = Vec::new();
-    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings), townie, guest))) in &sims {
+    for (e, sim, tf, floor, motives, skills, moodlets, job, rels, member, selected, away, visiting, wishes, (aging, pregnancy, opps, out, ltw, author, recipes, chess, inventory, toddler, pension, journal, school, homework, (rabbit, temperature, wearing, outfit_chosen, staged, classes, books, (novels, book_club, time_off, charities, nectar_recipes, camera_settings, photo_records), townie, guest))) in &sims {
         if (townie || guest) && !known.contains(&e) {
             continue;
         }
@@ -1212,6 +1216,7 @@ fn save_game(
             charities: charities.cloned(),
             nectar_recipes: nectar_recipes.map(|r| r.0.clone()).unwrap_or_default(),
             camera_settings: camera_settings.map(|c| c.to_saved()).unwrap_or_default(),
+            photo_records: photo_records.map(|r| r.to_saved()).unwrap_or_default(),
             chess: chess.copied(),
             inventory: inventory.cloned().unwrap_or_default(),
             toddler: toddler.copied(),
@@ -1514,6 +1519,9 @@ pub(crate) fn apply_loaded_game(
         }
         if !s.camera_settings.is_empty() {
             ec.insert(crate::photos::CameraSettings::from_saved(&s.camera_settings));
+        }
+        if !s.photo_records.is_empty() {
+            ec.insert(crate::photosubjects::PhotoRecords::from_saved(&s.photo_records));
         }
         if !s.skill_books.is_empty() {
             ec.insert(crate::skillbooks::SkillBooks(s.skill_books.clone()));
