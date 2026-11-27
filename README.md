@@ -693,7 +693,11 @@ installation is unreachable.
   there are none (`DONATE_TEST=1`, tests). City hall, the science lab, the military base, the theatre and the mausoleum can be
   visited: Bored, by age, else Fascinated, Intrigued, Impressed, Educated or excited. The
   mausoleum's catacombs can be explored for gems, seeds and old books, with a one-in-four
-  chance of being Horrified. Meals, drinks, shows, games and visits can be gone to with someone,
+  chance of being Horrified. At city hall, from nine to six, a young adult or older can
+  *Change Name... ›* (the game's `CityHall.ChangeName`): their own, or a child's of theirs who's
+  a teen or younger, as its picker offers; inside, the game's "Official Name Change" box asks
+  for the new first name, then the new last (each kept as it was if nothing's typed), and the
+  family tree takes the new name (`NAME_TEST=1`, tests). Meals, drinks, shows, games and visits can be gone to with someone,
   as the game's "Eat Here With...": a *With ›* menu lists the household and any visitors about;
   both go, and they come back liking each other more (the game's 5 to 15). `--do "VenueWith
   bistro:Eat Here"` takes another of the household along.

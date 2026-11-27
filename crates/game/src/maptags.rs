@@ -571,7 +571,7 @@ fn tag_clicks(
     mut cam: Query<&mut SimsCamera>,
     (ui, opps, clock): (Option<Res<crate::icons::GameUi>>, Query<(Option<&crate::opportunities::SimOpportunities>, Option<&crate::careers::Job>), With<crate::sim::Selected>>, Res<crate::clock::GameClock>),
     (town, story, dormant, household): (Option<Res<crate::premade::TownPremades>>, Res<crate::story::TownStory>, Res<crate::household::Dormant>, Option<Res<crate::interact::Household>>),
-    learners: Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>, Has<crate::little::Pregnancy>)>,
+    (learners, genealogy): (Query<(&crate::sim::Sim, Option<&crate::classes::ClassesTaken>, Has<crate::little::Pregnancy>)>, Res<crate::family::Genealogy>),
     company_q: Query<(Entity, &crate::sim::Sim, Has<crate::interact::Visitor>, Option<&crate::visit::OnLot>), Or<(With<crate::sim::HouseholdMember>, With<crate::interact::Visitor>)>>,
 ) {
     for (i, tag, collectible) in &tags {
@@ -646,6 +646,14 @@ fn tag_clicks(
                 .collect();
             options.extend(tasks);
             pie.submenus.clear();
+            // (City hall's "Change Name... ›": `cityhall`.)
+            if let Ok((me, ..)) = learners.get(actor) {
+                let who = crate::cityhall::renamable((actor, me), clock.hour_f(), &genealogy.children(me.id), company_q.iter().map(|c| (c.0, c.1)));
+                if let Some((label, list)) = crate::cityhall::menu(lot, tag.lot, &who) {
+                    options.push((format!("{label} ›"), crate::hud::submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((label, list));
+                }
+            }
             if !company.is_empty() {
                 for (name, task) in outings {
                     let list: Vec<(String, ActionKind)> = company.iter().map(|c| (c.clone(), ActionKind::Visit { lot: tag.lot, activity: task })).collect();

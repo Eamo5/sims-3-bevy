@@ -287,7 +287,7 @@ fn type_into_box(
     mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut boxes: Query<&mut Text, With<TypedBox>>,
     mut ok: Query<(&crate::dialog::AnswerButton, &mut Interaction)>,
-    mut asking: Local<Option<Entity>>,
+    mut asking: Local<Option<(Entity, String)>>,
 ) {
     use bevy::input::keyboard::Key;
     // (A name's twenty letters at most; an epitaph's longer.)
@@ -302,14 +302,16 @@ fn type_into_box(
         Some(crate::dialog::Question::NamePet { pet, suggested }) => (*pet, suggested, 20),
         Some(crate::dialog::Question::NameNectar { maker, suggested }) => (*maker, suggested, crate::nectar::NAME_LENGTH),
         Some(crate::dialog::Question::NamePhoto { sim, suggested, .. }) => (*sim, suggested, crate::photos::TITLE_LENGTH),
+        Some(crate::dialog::Question::ChangeName { sim, suggested, .. }) => (*sim, suggested, crate::cityhall::NAME_LENGTH),
         _ => {
             *asking = None;
             keys.clear();
             return;
         }
     };
-    if *asking != Some(who) {
-        *asking = Some(who);
+    // (A new question, or the next about the same one: a last name after the first.)
+    if asking.as_ref().is_none_or(|(w, s)| *w != who || s != suggested) {
+        *asking = Some((who, suggested.clone()));
         typed.0 = suggested.clone();
     }
     let mut enter = false;
@@ -396,7 +398,7 @@ fn question_dialogs(
             // (A horse sold or bought at its price: yes or no.)
             crate::dialog::Question::SellHorse { .. } | crate::dialog::Question::BuyHorse { .. } | crate::dialog::Question::CameraPhotos { .. } => "TwoButtonDialog",
             // (A newborn's name: the game's box to type it in.)
-            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } | crate::dialog::Question::NamePet { .. } | crate::dialog::Question::NameNectar { .. } | crate::dialog::Question::NamePhoto { .. } => "StringInputDialog",
+            crate::dialog::Question::NameBaby { .. } | crate::dialog::Question::Engrave { .. } | crate::dialog::Question::NameDiscovery { .. } | crate::dialog::Question::RenameProperty { .. } | crate::dialog::Question::SaveName { .. } | crate::dialog::Question::NameObject { .. } | crate::dialog::Question::NameHorse { .. } | crate::dialog::Question::NamePet { .. } | crate::dialog::Question::NameNectar { .. } | crate::dialog::Question::NamePhoto { .. } | crate::dialog::Question::ChangeName { .. } => "StringInputDialog",
             crate::dialog::Question::CareerPath { .. } if ask.answers.len() == 3 => "ThreeButtonDialog",
             _ => return,
         };
@@ -446,7 +448,8 @@ fn question_dialogs(
             | crate::dialog::Question::NameHorse { suggested, .. }
             | crate::dialog::Question::NamePet { suggested, .. }
             | crate::dialog::Question::NameNectar { suggested, .. }
-            | crate::dialog::Question::NamePhoto { suggested, .. } => {
+            | crate::dialog::Question::NamePhoto { suggested, .. }
+            | crate::dialog::Question::ChangeName { suggested, .. } => {
                 // The title ("It's a Girl!"), the words, the name in its box, OK.
                 for w in s.all_with(NAME_TITLE) {
                     if let Some(t) = s.text_of(w) {

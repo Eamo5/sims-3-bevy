@@ -72,13 +72,16 @@ pub enum Question {
     NamePhoto { sim: Entity, key: String, suggested: String },
     /// A camera's photos sold, or erased (yes), or kept (`photos`).
     CameraPhotos { sim: Entity, sell: bool },
+    /// A new first or last name for a Sim, at city hall (typed in; the one they had if not:
+    /// `cityhall`).
+    ChangeName { sim: Entity, last: bool, suggested: String },
 }
 
 impl Question {
     /// The Sim the question is about.
     pub fn sim(&self) -> Option<Entity> {
         match self {
-            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } | Question::SellHorse { sim, .. } | Question::BuyHorse { sim, .. } | Question::NameHorse { sim, .. } | Question::CameraPhotos { sim, .. } => Some(*sim),
+            Question::CareerPath { sim, .. } | Question::LifetimeWish { sim, .. } | Question::Reward { sim, .. } | Question::CareerEvent { sim, .. } | Question::NameBaby { sim, .. } | Question::PhoneCall { sim, .. } | Question::NameDiscovery { sim, .. } | Question::RenameProperty { sim, .. } | Question::ConfirmLifetimeWish { sim, .. } | Question::SellHorse { sim, .. } | Question::BuyHorse { sim, .. } | Question::NameHorse { sim, .. } | Question::CameraPhotos { sim, .. } | Question::ChangeName { sim, .. } => Some(*sim),
             Question::Household(_) | Question::Engrave { .. } | Question::SaveName { .. } | Question::Overwrite { .. } | Question::NameObject { .. } | Question::DeleteCollection { .. } | Question::NamePet { .. } | Question::NameNectar { .. } | Question::NamePhoto { .. } => None,
         }
     }

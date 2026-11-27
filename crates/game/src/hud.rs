@@ -3130,6 +3130,13 @@ fn world_click(
                     _ => None,
                 }).collect();
                 options.extend(opp_tasks);
+                // (City hall's "Change Name... ›": their own, or a young child's of theirs,
+                // `cityhall`.)
+                let who = crate::cityhall::renamable((actor, actor_sim), opp_q.2.hour_f(), &family.children(actor_sim.id), company_q.iter().map(|c| (c.0, c.1)));
+                if let Some((label, list)) = crate::cityhall::menu(l, lot, &who) {
+                    options.push((format!("{label} ›"), submenu_kind(pie.submenus.len())));
+                    pie.submenus.push((label, list));
+                }
                 if !company.is_empty() {
                     for (name, task) in outings {
                         let list: Vec<(String, ActionKind)> = company.iter().map(|c| (c.clone(), ActionKind::Visit { lot, activity: task })).collect();
@@ -3502,6 +3509,16 @@ fn pie_buttons(
     {
         q.push_player(Action::new(label.clone(), kind.clone(), false));
         commands.entity(a).insert(crate::potty::PottyTraining { toddler, asked: false });
+        return;
+    }
+    // A name changed at city hall: whose, and off there (`cityhall`).
+    if title == crate::cityhall::CHANGE_NAME
+        && let ActionKind::Visit { .. } = kind
+        && let (Some(a), Some(person)) = (actor, people.iter().find(|p| p.1.full_name() == label).map(|p| p.0))
+        && let Ok(mut q) = queues.get_mut(a)
+    {
+        q.push_player(Action::new(crate::cityhall::CHANGE_NAME, kind.clone(), false));
+        commands.entity(a).insert(crate::cityhall::ChangingName(person));
         return;
     }
     // A portrait of someone: the painter to the easel, the sitter before it (`photos`).

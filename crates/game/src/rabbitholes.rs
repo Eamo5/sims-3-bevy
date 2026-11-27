@@ -383,6 +383,10 @@ fn outings(
                 } else {
                     notes.push(format!("{} is home from school.", sim.first));
                 }
+            } else if std::ptr::eq(at.activity, &crate::cityhall::CHANGE_NAME_ACT) {
+                // (The name's box: `cityhall`.)
+                commands.queue(move |w: &mut World| crate::cityhall::begin(w, e));
+                notes.push(format!("{} is back from city hall.", sim.first));
             } else if std::ptr::eq(at.activity, &crate::little::MEDICAL_ADVICE) {
                 // (The doctor's advice, for the baby's traits: `little`.)
                 commands.entity(e).queue_silenced(|mut w: EntityWorldMut| {
