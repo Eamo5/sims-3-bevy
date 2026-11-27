@@ -1013,6 +1013,12 @@ installation is unreachable.
 - **The workout bench** (The Exercise Queen): "Pump Iron", for teens and up, in athletic wear:
   on to the bench, then the game's bench presses, leg extensions and pec flys in turn, building
   Athletic.
+- **The chin-up bar**, Showtime's `ChinUpBar`: teens and up "Do Chin Ups" (the Daredevil's "Do
+  Extreme Chin Ups", a Natural Born Performer's "Do Chin Ups with Flair"), a strength workout as the
+  bench's, in workout clothes: up to the bar (`a2o_chinBar_chinUp_start`) and at it as their
+  Athletic has them (the low chin ups to level five, middling to seven, high to nine, one-armed
+  after: `GetSkillLevelParameterForJazzGraph`), and down; greyed "Too tired to do chin ups!" while
+  Fatigued.
 - **Jogging**: clicking the selected Sim offers "Go Jogging": out to the street in athletic
   wear and up and down its sidewalk at a jog (the game's jogging clip) for an hour, or until
   they're worn out, then home (and usually to the shower). It trains Athletic, builds fitness,

@@ -311,6 +311,8 @@ pub enum ObjectKind {
     /// A board breaker (World Adventures' `BoardBreaker`): boards broken on it, watched
     /// (`boardbreaker`).
     BoardBreaker,
+    /// A chin-up bar (Showtime's `ChinUpBar`): a strength workout (`chinup`).
+    ChinUpBar,
     ScratchingPost,
     ChewToy,
     WaterTrough,
@@ -363,6 +365,8 @@ impl ObjectKind {
             Self::TrainingDummy
         } else if has("objects.hobbiesskills.boardbreaker") {
             Self::BoardBreaker
+        } else if has("objects.hobbiesskills.chinupbar") {
+            Self::ChinUpBar
         } else if has("objects.decorations.flamingo")
             || has("objects.environment.gardengnome")
             || has("objects.environment.magicgnome")
@@ -697,7 +701,8 @@ impl ObjectKind {
             | Self::Drums
             | Self::LaserHarp
             | Self::TrainingDummy
-            | Self::BoardBreaker => "Hobbies",
+            | Self::BoardBreaker
+            | Self::ChinUpBar => "Hobbies",
             Self::Snowman | Self::SnowAngel | Self::LeafPile => "Outdoors",
             Self::FirePit | Self::PicnicBasket | Self::PicnicTable | Self::Car | Self::Bicycle | Self::ChildBicycle | Self::BikeRack => "Outdoors",
             Self::Buffet => "Surfaces",
@@ -789,8 +794,9 @@ impl ObjectKind {
                 | K::Slide
                 // (A slippy slide's: at its foot, facing down it.)
                 | K::SlippySlide
-                // (A training dummy's: before it, `Practice`'s.)
+                // (A training dummy's: before it, `Practice`'s; a chin-up bar's, under it.)
                 | K::TrainingDummy
+                | K::ChinUpBar
         )
         .then_some(0)
     }
@@ -2061,6 +2067,8 @@ static SLIPPY_SLIDE: [InteractionDef; 1] = [InteractionDef { special: Special::S
 static BOX_STALL: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean Stall", 15.0, [0.0, 0.0, -4.0, 0.0, -15.0, 0.0], Pose::Use) }];
 /// (Practice_TrainingDummy: Fun 45 an hour, Hygiene -40, Martial Arts; an hour at a time.)
 static TRAINING_DUMMY: [InteractionDef; 1] = [InteractionDef { skill: Some("MartialArts"), ..def("Practice", 60.0, [0.0, 0.0, 0.0, 0.0, -40.0, 45.0], Pose::Use) }];
+/// (The chin-up bar's `WorkOut.StrengthSingleton`, as the workout bench's, teens and up.)
+static CHIN_UP_BAR: [InteractionDef; 1] = [InteractionDef { autonomous: false, skill: Some("Athletic"), ..def(crate::chinup::CHIN_UPS, 60.0, [-10.0, 0.0, -25.0, 0.0, -40.0, 5.0], Pose::Exercise) }];
 /// (A cat's catch on the floor: the game's generic `PutInInventory`, a swipe.)
 static PREY: [InteractionDef; 1] = [InteractionDef { autonomous: false, special: Special::PocketPrey, ..def(crate::petpresent::PUT_IN_INVENTORY, 1.5, N, Pose::Use) }];
 static LITTER_BOX: [InteractionDef; 1] = [InteractionDef { special: Special::Scrub, ..def("Clean", 6.0, [0.0, 0.0, 0.0, 0.0, -20.0, 0.0], Pose::Use) }];
@@ -2378,6 +2386,8 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Scan Art" => A::new(Some("a_scanWorkOfArt_scan_start_x"), &["a_scanWorkOfArt_scan_loop1_x", "a_scanWorkOfArt_scan_loop2_x"]).ending(&["a_scanWorkOfArt_scan_stop_x"], 1.5),
         "Clean Stall" => A::new(Some("a2o_boxStall_clean_start_x"), &["a2o_boxStall_clean_loop1_x", "a2o_boxStall_clean_loop2_x"]).ending(&["a2o_boxStall_clean_stop_x"], 1.5),
         "Fill Bowl" => A::new(None, &["a2o_petBowl_putFood_x"]),
+        // (A chin-up bar: up onto it, at it as their Athletic has them, `chinup`, and down.)
+        "Do Chin Ups" if kind == ObjectKind::ChinUpBar => A::new(Some("a2o_chinBar_chinUp_start_x"), &["a2o_chinBar_chinUp_low_loop"]).ending(&["a2o_chinBar_chinUp_stop_x"], 1.5),
         // (A training dummy: into the stance, at it as their skill has it, `martialarts`, and out.)
         "Practice" if kind == ObjectKind::TrainingDummy => A::new(Some("a_neutral2MA_x"), &["a2o_trainingDummy_beg_loop"]).ending(&["a_MA2neutral_x"], 1.5),
         // (A cat's catch picked up off the floor: the game's generic swipe.)
@@ -2944,7 +2954,7 @@ impl ObjectKind {
             Age::Baby => false,
             Age::Toddler => matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::PottyChair | K::StuffedToy | K::HighChair | K::ActivityTable),
             // (Children can't cook or light fires, and the goggles are for teens and up.)
-            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker),
+            Age::Child => !matches!(self, K::Crib | K::Xylophone | K::PegBox | K::PottyChair | K::HighChair | K::HotTub | K::Stove | K::Fireplace | K::FirePit | K::VrGoggles | K::WorkoutBench | K::Puddle | K::Car | K::Bicycle | K::TrainingDummy | K::BoardBreaker | K::ChinUpBar),
             _ => !matches!(self, K::Crib | K::ToyBox | K::Xylophone | K::PegBox | K::JungleGym | K::Slide | K::SpringRider | K::CostumeChest | K::StuffedToy | K::ToyOven | K::ActivityTable | K::ChildBicycle),
         }
     }
@@ -3076,6 +3086,7 @@ pub fn interactions_for(kind: ObjectKind) -> &'static [InteractionDef] {
         ObjectKind::BoxStall => &BOX_STALL,
         ObjectKind::Prey => &PREY,
         ObjectKind::TrainingDummy => &TRAINING_DUMMY,
+        ObjectKind::ChinUpBar => &CHIN_UP_BAR,
         ObjectKind::LitterBox => &LITTER_BOX,
         _ => &[],
     }
@@ -3505,7 +3516,7 @@ pub fn practice_points(name: &str) -> f32 {
         "Practice Speech" => 420.0,
         // (WorkOut_Treadmill, WorkOut_WorkoutBench, SwimmingInPool's kSkillGainRatePerMinute.)
         "Work Out" => 780.0,
-        "Pump Iron" => 1014.0,
+        "Pump Iron" | "Do Chin Ups" => 1014.0,
         // (Practice_TrainingDummy's SkillMartialArts.)
         "Practice" => 650.0,
         "Swim" => 480.0,

@@ -2094,6 +2094,13 @@ fn world_click(
                     options.push((d.name.to_string(), ActionKind::Greyed(crate::martialarts::too_fatigued(&actor_sim.first))));
                     continue;
                 }
+                // (A chin-up bar: by their traits' name for it, not while worn out.)
+                if obj.kind == ObjectKind::ChinUpBar {
+                    let label = crate::chinup::label(&actor_sim.traits).to_string();
+                    let tired = moods_q.get(actor).is_ok_and(|m| m.has(crate::life::MoodletKind::Fatigued));
+                    options.push((label, if tired { ActionKind::Greyed(crate::chinup::TOO_TIRED.into()) } else { ActionKind::Object { target: t, def: i } }));
+                    continue;
+                }
                 // (Being sick in it's never asked for: `nausea`; nor a book put back.)
                 if matches!(d.special, Special::Vomit | Special::ReturnBook) {
                     continue;

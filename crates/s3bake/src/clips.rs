@@ -277,6 +277,8 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a_MA2neutral",
     // (A new belt shown off.)
     "a_react_newMartialArtsBelt",
+    // (Chin ups on a chin-up bar.)
+    "a2o_chinBar_",
     // (Boards broken on a board breaker, and those watching.)
     "a2o_boardBreaker_",
     "a_fire_watch",
