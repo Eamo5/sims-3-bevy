@@ -1,5 +1,6 @@
 //! Disturbances, as the game's `ReactToDisturbance` has them. A TV on or a stereo playing in the
-//! room of a Sim asleep, or a baby or toddler crying there, wakes them with a Rude Awakening (not
+//! room of a Sim asleep, a dishwasher running near them there (`dishwasher`: those awake pull a
+//! face at it, `BadNoise`), or a baby or toddler crying there, wakes them with a Rude Awakening (not
 //! a Heavy Sleeper): they get up, and turn the TV or stereo off. A baby or toddler of the
 //! household crying at home gives those about Crying Baby while it cries (the game's buff
 //! refreshes every few minutes it hears them). A Light Sleeper wakes, too, to a conversation in
@@ -59,7 +60,8 @@ fn disturb(
     mut last: Local<f32>,
     clock: Res<crate::clock::GameClock>,
     building: Option<Res<crate::building::ActiveBuilding>>,
-    noisy: Query<(Entity, &Transform, &GameObject), Or<(With<crate::effects::TvOn>, With<crate::music::StereoOn>)>>,
+    noisy: Query<(Entity, &Transform, &GameObject), Or<(With<crate::effects::TvOn>, With<crate::music::StereoOn>, With<crate::dishwasher::Noisy>)>>,
+    mut heard: Local<std::collections::HashSet<(Entity, Entity)>>,
     littles: Query<(Entity, &Transform, &Sim, Option<&crate::anim::ActionClip>), With<HouseholdMember>>,
     objects: Query<&GameObject>,
     visitors: Query<(Entity, &Transform, &ActionQueue, &Visibility), (With<Sim>, Without<HouseholdMember>)>,
@@ -82,6 +84,9 @@ fn disturb(
     };
     // The noise makers on, and the little ones crying (their crying clips).
     let noises: Vec<(Entity, Vec3, ObjectKind)> = noisy.iter().map(|(e, tf, o)| (e, tf.translation, o.kind)).collect();
+    // (A dishwasher's heard only near it in its room; once quiet, it's not been heard.)
+    let reaches = |n: &(Entity, Vec3, ObjectKind), at: Vec3| same_room(at, n.1) && (n.2 != ObjectKind::Dishwasher || at.distance(n.1) <= crate::dishwasher::NOISE_RADIUS);
+    heard.retain(|(d, _)| noises.iter().any(|n| n.0 == *d));
     let crying: Vec<(Entity, Vec3)> = littles
         .iter()
         .filter(|(_, _, s, clip)| s.age.is_little() && clip.is_some_and(|c| c.loops.first().is_some_and(|l| l.contains("cry"))))
@@ -119,7 +124,7 @@ fn disturb(
         // Woken: a TV or stereo in the room (not a Technophobe by a TV), a little one crying
         // there, or for a Light Sleeper, someone talking or at something noisy.
         if asleep(&queue) && !sim.traits.contains(&Trait::HeavySleeper) {
-            let noise = noises.iter().find(|n| same_room(at, n.1) && !(technophobe && n.2 == ObjectKind::Tv));
+            let noise = noises.iter().find(|n| reaches(n, at) && !(technophobe && n.2 == ObjectKind::Tv));
             let cry = crying.iter().find(|c| c.0 != me && same_room(at, c.1));
             let talk = sim.traits.contains(&Trait::LightSleeper) && loud.iter().any(|l| l.0 != me && same_room(at, l.1));
             if noise.is_some() || cry.is_some() || talk {
@@ -136,6 +141,15 @@ fn disturb(
                     queue.0.insert(at, Action::new("Turn Off", ActionKind::Object { target, def }, false));
                 }
             }
+        }
+        // (Awake by a dishwasher running, the first time: a face pulled at it, the game's
+        // `BadNoise`.)
+        if !asleep(&queue)
+            && let Some(d) = noises.iter().find(|n| n.2 == ObjectKind::Dishwasher && reaches(n, at))
+            && heard.insert((d.0, me))
+        {
+            debug!("{} minds the dishwasher's noise", sim.first);
+            commands.entity(me).insert(crate::reactions::Pending::new(&["BadNoise"], Some(d.1), clock.minutes + 30.0));
         }
         // A little one of theirs crying at home.
         let hears = crying.iter().any(|c| same_room(at, c.1) || at.distance(c.1) <= CRY_RANGE);

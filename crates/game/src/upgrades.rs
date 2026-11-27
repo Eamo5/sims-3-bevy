@@ -70,7 +70,9 @@ impl Upgrade {
     pub fn name(self, kind: ObjectKind) -> Option<&'static str> {
         use ObjectKind as K;
         match (self, kind) {
-            (Upgrade::Unbreakable, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Toilet | K::Computer) => Some("Prevent Breakage"),
+            (Upgrade::Unbreakable, K::Toilet) => Some("Prevent Clogging"),
+            (Upgrade::Unbreakable, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Computer | K::Dishwasher) => Some("Prevent Breakage"),
+            (Upgrade::Improved, K::Dishwasher) => Some("Make Silent"),
             (Upgrade::Unbreakable, K::Tv | K::Stereo) => Some("Make Unbreakable"),
             (Upgrade::Improved, K::Shower | K::Bathtub | K::ShowerTub) => Some("Water Heater"),
             (Upgrade::Improved, K::Tv) => Some("Boost Channels"),
@@ -90,7 +92,7 @@ impl Upgrade {
         use ObjectKind as K;
         match (self, kind) {
             (Upgrade::Unbreakable, _) => 6,
-            (Upgrade::Improved, K::Bathtub | K::Stereo) => 3,
+            (Upgrade::Improved, K::Bathtub | K::Stereo | K::Dishwasher) => 3,
             (Upgrade::Improved, K::Shower | K::ShowerTub) => 6,
             (Upgrade::Improved, K::Tv | K::Stove) => 7,
             (Upgrade::Improved, _) => 8,

@@ -2098,6 +2098,17 @@ installation is unreachable.
   trash for most, now and then a rubber ducky or teddy bear, a laptop from the very rich; a
   rock, gem, metal or seed fifteen times in a hundred). Smelly work, and the family seeing it insult
   them; anyone else is put off them. Knocked over is kept in saves. Dishwashers break now and then, and are repaired with the game's animations.
+- **Dishwashers running**, as the game's `Dishwasher`: once the dishes are loaded it runs (the
+  tuned `WashTime`: thirty minutes the cheap one, twenty the dear one), humming as it washes
+  (`dwasher_running_lp_chp`) and chiming when it's done (`dwasher_done_chp`); loaded again
+  while it runs, it starts over, and broken as it's loaded, it doesn't. Its noise (the game's
+  `kNormalDishwasherBroadcastParams`: three metres, in its room) wakes a Sim asleep there with
+  a Rude Awakening (not a Heavy Sleeper), and those awake there the first time cover their ears
+  at it (the game's `BadNoise` reaction), stopping on their way to do it if they're passing; nor
+  is it noisy loaded by a Heavy Sleeper. A Handiness 3 Sim can make the *Upgrade: Make Silent*
+  (the quiet one's sounds, `dwasher_running_lp_exp`, and it disturbs nobody), and at 6 *Prevent
+  Breakage*; a toilet's is *Prevent Clogging*, as the game names it. Reactions in general now
+  stop a Sim on their way somewhere, then they carry on. `DISH_TEST=load|silent` (tests).
 - **Fish bowls**: a fish from a Sim's inventory (fish now come in the game's qualities, a
   master angler often landing a perfect one) put in a bowl swims there, its own model
   turning slowly in the glass, and can be taken out again. It wants feeding: hungry a day and

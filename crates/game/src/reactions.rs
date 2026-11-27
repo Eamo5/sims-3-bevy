@@ -14,7 +14,8 @@
 //! - to the weather, out in it as it starts: rain, snow, hail (the game's `ReactRain`...).
 //!
 //! A reaction waits for its Sim to be standing free (between things, as the game's
-//! `AfterInteraction`), for a while, then lapses. Sitting at a table or on a sofa, they react
+//! `AfterInteraction`), or stops them on their way somewhere (they go on after), for a while,
+//! then lapses. Sitting at a table or on a sofa, they react
 //! where they sit, with the game's seated clips, and carry on.
 
 use std::collections::{HashMap, HashSet};
@@ -372,7 +373,7 @@ fn play(
     data: Res<crate::baked::Baked>,
     mut lib: ResMut<ClipLibrary>,
     mut sims: Query<
-        (Entity, &Sim, &mut ActionQueue, &SimAnim, &Transform, &Pending, Option<&ActionClip>, Has<crate::idles::Idling>, Option<&crate::nav::PathFollow>, &InheritedVisibility),
+        (Entity, &Sim, &mut ActionQueue, &mut SimAnim, &Transform, &Pending, Option<&ActionClip>, Has<crate::idles::Idling>, Option<&crate::nav::PathFollow>, &InheritedVisibility),
         (
             Without<crate::swim::Swimming>,
             Without<crate::death::Dying>,
@@ -390,7 +391,7 @@ fn play(
     let Some(ui) = ui else { return };
     let known = known.get_or_insert_with(|| data.0.clip_names.iter().map(|n| n.to_ascii_lowercase()).collect());
     let mut rng = rand::rng();
-    for (e, sim, mut queue, anim, tf, p, clip, idling, path, shown) in &mut sims {
+    for (e, sim, mut queue, mut anim, tf, p, clip, idling, path, shown) in &mut sims {
         if clock.minutes > p.until || !shown.get() {
             commands.entity(e).remove::<Pending>();
             continue;
@@ -419,7 +420,12 @@ fn play(
         // (Standing, between things.)
         let walking = path.is_some_and(|p| !p.done);
         let between = queue.0.front().is_none_or(|a| a.phase == Phase::Start && !matches!(a.kind, ActionKind::Outro { .. } | ActionKind::MotiveFail(_)));
-        if anim.pose != Pose::Stand || walking || !between {
+        // (On their way somewhere: stopped to react, then on again, as the game's `NowOrLater`
+        // has a Sim walking by.)
+        let on_the_way = walking
+            && anim.pose == Pose::Walk
+            && queue.0.front().is_some_and(|a| a.phase == Phase::Routing && !a.cancel && matches!(a.kind, ActionKind::Object { .. } | ActionKind::Social { .. } | ActionKind::GoHere(..)));
+        if !on_the_way && (anim.pose != Pose::Stand || walking || !between) {
             continue;
         }
         // (A fidget gives way; anything else playing, they're busy.)
@@ -438,6 +444,13 @@ fn play(
         }
         let clips: &'static [&'static str] = *names.entry(all.join(",")).or_insert_with(|| Box::leak(all.iter().map(|c| &*Box::leak(c.clone().into_boxed_str())).collect::<Vec<_>>().into_boxed_slice()));
         debug!("{} reacts: {} ({:.1} s)", sim.first, all.join(", "), secs);
+        if on_the_way {
+            if let Some(a) = queue.0.front_mut() {
+                a.phase = Phase::Start;
+            }
+            commands.entity(e).remove::<crate::nav::PathFollow>();
+            anim.pose = Pose::Stand;
+        }
         queue.0.push_front(Action::new("React", ActionKind::Outro { clips, then: None, secs, stand_at: None, target: e }, true));
         commands.entity(e).try_remove::<FaceOverlay>().try_insert(ActionClip::steps(clips[0], &clips[1..], &[]));
         if let Some(at) = p.toward {

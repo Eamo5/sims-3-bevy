@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::bake::{BakeRoot, Progress, par_map};
 use crate::pack::{PackReader, PackWriter, write_value};
 
-pub const SOUNDS_VERSION: u32 = 29;
+pub const SOUNDS_VERSION: u32 = 30;
 
 /// Sample file formats in `sounds.pack`.
 pub const FORMAT_MP3: u8 = 0;
@@ -121,6 +121,11 @@ pub const EXTRA_SOUNDS: &[&str] = &[
     "ui_photo_sting_bad",
     // A photography collection completed.
     "sting_obj_collect_piece_final",
+    // A dishwasher running and done, and a silent one's.
+    "dwasher_running_lp_chp",
+    "dwasher_running_lp_exp",
+    "dwasher_done_chp",
+    "dwasher_done_exp",
     // A treehouse's pretend games about it (`PlayPretendSoundLoopName`, `...PListName`).
     "thouse_pretend_castle_loop",
     "thouse_pretend_castle_plist",

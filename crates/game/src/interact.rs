@@ -5463,6 +5463,10 @@ pub(crate) fn run_actions(
                                         }
                                     }
                                     match d.special {
+                                        // (A dishwasher loaded: running, `dishwasher`.)
+                                        Special::WashDishes if obj.kind == ObjectKind::Dishwasher => {
+                                            commands.entity(*target).try_insert(crate::dishwasher::Loaded(me));
+                                        }
                                         // (Getting out of the pool is the swim module's.)
                                         Special::FindJob => {
                                             // (The day's openings, in the game's listings.)
