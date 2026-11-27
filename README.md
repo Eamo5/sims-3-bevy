@@ -687,7 +687,10 @@ installation is unreachable.
   manicures and spa days, each at three levels with the game's prices, lengths and moodlets
   (Relaxed, Smooth Skin, Rejuvenated, Nice Nails, Completely At Ease); the better ones ease
   away bad moodlets. The grocery buys the produce and fish carried for a tenth over their
-  worth. City hall, the science lab, the military base, the theatre and the mausoleum can be
+  worth. The science lab takes the butterflies and beetles carried (the game's *Donate Insects
+  to Science*), paying their worth and thanking the Sim by the rarest of them ("Wow! You've made
+  some great discoveries!" for an extraordinarily unusual one), or says where to find some if
+  there are none (`DONATE_TEST=1`, tests). City hall, the science lab, the military base, the theatre and the mausoleum can be
   visited: Bored, by age, else Fascinated, Intrigued, Impressed, Educated or excited. The
   mausoleum's catacombs can be explored for gems, seeds and old books, with a one-in-four
   chance of being Horrified. Meals, drinks, shows, games and visits can be gone to with someone,

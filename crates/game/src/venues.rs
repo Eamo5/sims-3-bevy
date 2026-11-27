@@ -29,7 +29,35 @@ pub struct VenuesPlugin;
 
 impl Plugin for VenuesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, venue_done.run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (venue_done, donate_test).run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// `DONATE_TEST=1` (tests): the selected Sim given a butterfly and a beetle of the game's, and off
+/// to the science lab to donate them.
+fn donate_test(
+    mut commands: Commands,
+    world: Res<crate::loading::CurrentWorld>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut sims: Query<(Entity, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
+    mut done: Local<bool>,
+) {
+    if *done || std::env::var_os("DONATE_TEST").is_none() {
+        return;
+    }
+    let (Some(ui), Ok((e, mut q))) = (ui, sims.single_mut()) else { return };
+    *done = true;
+    use s3bake::gamedata::CollectKind as K;
+    for kind in [K::Butterfly, K::Beetle] {
+        if let Some(c) = ui.data.collectibles.iter().filter(|c| c.kind == kind).max_by_key(|c| rarity_rank(&c.rarity)) {
+            crate::inventory::give(&mut commands, e, crate::inventory::ItemKind::Insect, c.key.clone(), c.name.clone(), 0, c.max_price as i64, 1);
+            info!("donate test: a {} ({}) in hand", c.name, c.rarity);
+        }
+    }
+    let lot = world.data.lots.iter().position(|l| SCIENCE.iter().any(|w| venue_name(l).contains(w)));
+    let act = ACTS.iter().position(|a| a.effect == Effect::DonateInsects);
+    if let (Some(lot), Some(i)) = (lot, act) {
+        q.push_player(crate::interact::Action::new(ACTS[i].activity.name, crate::interact::ActionKind::Visit { lot, activity: VENUE_TASK + i }, false));
     }
 }
 
@@ -58,6 +86,29 @@ pub enum Effect {
     Shop,
     /// Gone in to the bookstore's shop (the same dialog, its books).
     ShopBooks,
+    /// The butterflies and beetles carried donated to the science lab (`SellInsect`).
+    DonateInsects,
+}
+
+/// The science lab's thanks for a donation of insects (`SellInsect`'s TNS), by the rarest given:
+/// common, uncommon, rare, extraordinarily unusual.
+pub fn donation_thanks(rarest: &str) -> &'static str {
+    match rarest.to_ascii_lowercase().as_str() {
+        "uncommon" => "Thank you for the nice specimens.",
+        "rare" => "What a remarkable set of specimens!",
+        r if r.starts_with("extraordinar") => "Wow!  You've made some great discoveries!",
+        _ => "Hmmm, these were rather ordinary specimens.",
+    }
+}
+
+/// How rare a rarity is, to find the rarest given.
+fn rarity_rank(r: &str) -> u8 {
+    match r.to_ascii_lowercase().as_str() {
+        "uncommon" => 1,
+        "rare" => 2,
+        r if r.starts_with("extraordinar") => 3,
+        _ => 0,
+    }
 }
 
 /// A venue's activity: where (words in the lot's name), when (days of the week, Monday 0; and
@@ -109,7 +160,7 @@ const BOOKSTORE: &[&str] = &["bookstore"];
 /// A great show: sixteen hours.
 const SHOW_MINUTES: f64 = 960.0;
 
-pub static ACTS: [VenueAct; 35] = [
+pub static ACTS: [VenueAct; 36] = [
     // The theatre (`ShowVenue`): evenings from five (doors close two hours before the end).
     v(THEATRE, MON_TO_THU, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
     v(THEATRE, FRI_SAT_SUN, a("See a Movie", 120.0, 40, AT_SHOW, 17.0, 21.0), Effect::Moodlet(MoodletKind::SawGreatMovie, 10, SHOW_MINUTES)),
@@ -155,6 +206,8 @@ pub static ACTS: [VenueAct; 35] = [
     v(GROCERY, EVERY_DAY, a("Shop", 30.0, 0, SELLING, 7.0, 24.0), Effect::Shop),
     // The bookstore's (`Bookstore.ShopForBooks`), nine till nine.
     v(BOOKSTORE, EVERY_DAY, a("Shop for Books", 30.0, 0, SELLING, 9.0, 21.0), Effect::ShopBooks),
+    // (The science lab's `SellInsectChoose`: the insects carried, given for their worth.)
+    v(SCIENCE, EVERY_DAY, a("Donate Insects to Science", 15.0, 0, SELLING, 0.0, 24.0), Effect::DonateInsects),
 ];
 
 /// The grocery's "Shop" (its visit's activity, for `shop` to know a shopper by).
@@ -428,6 +481,28 @@ fn venue_done(
                 }
                 notes.push(if paid > 0 { format!("{} sold their produce and fish for §{paid}.", sim.first) } else { format!("{} had nothing to sell.", sim.first) });
             }
+            // (The insects carried, given for their worth, and thanks by the rarest of them.)
+            Effect::DonateInsects => {
+                let insects: Vec<crate::inventory::Stack> = inv.as_ref().map(|i| i.0.iter().filter(|s| s.kind == crate::inventory::ItemKind::Insect).cloned().collect()).unwrap_or_default();
+                if insects.is_empty() {
+                    notes.push(format!("No insects in {0}'s inventory. {0} can catch butterflies and beetles all over town, just try looking for them!", sim.first));
+                    continue;
+                }
+                let worth: i64 = insects.iter().map(|s| s.worth).sum();
+                let rarest = insects
+                    .iter()
+                    .filter_map(|s| ui.as_ref().and_then(|u| u.data.collectibles.iter().find(|c| c.key == s.key)).map(|c| c.rarity.clone()))
+                    .max_by_key(|r| rarity_rank(r))
+                    .unwrap_or_default();
+                if let Some(mut i) = inv {
+                    i.0.retain(|s| s.kind != crate::inventory::ItemKind::Insect);
+                }
+                if let Some(h) = household.as_deref_mut() {
+                    h.funds += worth;
+                }
+                let money = if rng.random_bool(0.5) { format!("Your donation has earned you §{worth}.") } else { format!("We are glad to give you §{worth} for your donation.") };
+                notes.push(format!("{}  {money}", donation_thanks(&rarest)));
+            }
         }
     }
 }
@@ -435,6 +510,16 @@ fn venue_done(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_science_lab_takes_insects_with_thanks_by_their_rarity() {
+        let lab = s3formats::world::LotInfo { id: 0, internal_name: "Com_ScienceLab".into(), corner: [0.0; 3], rotation: 0.0, width: 20, depth: 20, string_keys: Vec::new() };
+        let options: Vec<String> = lot_options(&lab, 2, 3.0, Age::Child).into_iter().map(|o| o.0).collect();
+        assert!(options.contains(&"Donate Insects to Science".to_string()), "{options:?}");
+        assert_eq!(donation_thanks("Rare"), "What a remarkable set of specimens!");
+        assert_eq!(donation_thanks("Common"), "Hmmm, these were rather ordinary specimens.");
+        assert!(rarity_rank("ExtraordinarilyUnusual") > rarity_rank("Rare"));
+    }
 
     #[test]
     fn venues_open_as_the_games_do() {
