@@ -517,7 +517,11 @@ installation is unreachable.
   their arms) and pick up, read to and put toddlers to bed; toddlers crawl about until a
   grown-up has taught them to walk (three lessons, with the game's kneel-and-hold-hands
   animation; talking is taught the same way, and both show on the toddler's Skills tab), play
-  with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected.
+  with toy boxes, xylophones and peg boxes, nap in cribs and cry when neglected. A child plays
+  *Play Peek-A-Boo* with a toddler stood on the floor (the game's `PlayPeekAboo`: children only,
+  under Care, not with one in arms or the crib or busy), hands over the face and away with the
+  game's `c2p_soc_playPeekAboo` clips on both sides, a quarter of an hour of company for both
+  (its Social 100 an hour), and of their own accord when either's lonely.
 - **The activity table**, as the game's (`ActivityTable`): four places round it, toddlers and
   children each at their own ("Play with Blocks"). A toddler shakes and chews a block (the
   pack's `p2o_toyBlocks` clips, the block in hand). A child kneels, gathers the blocks out

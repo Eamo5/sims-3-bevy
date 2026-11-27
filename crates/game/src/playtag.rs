@@ -446,7 +446,7 @@ fn tag_test(
     mut me: Query<(Entity, &mut Sim, &mut ActionQueue, &Transform), With<crate::sim::Selected>>,
     others: Query<(Entity, &Sim, &Transform), (With<crate::sim::HouseholdMember>, Without<crate::sim::Selected>)>,
     mut cams: Query<&mut crate::camera::SimsCamera>,
-    mut done: Local<bool>,
+    mut stage: Local<u8>,
 ) {
     let Ok(what) = std::env::var("TAG_TEST") else { return };
     let t = time.elapsed_secs();
@@ -457,14 +457,38 @@ fn tag_test(
         cam.look_at(tf.translation);
         cam.distance = std::env::var("TAG_DIST").ok().and_then(|v| v.parse().ok()).unwrap_or(14.0);
     }
-    if *done || t < 10.0 {
+    // (=peek, a moment after: Peek-A-Boo with the toddler.)
+    if *stage == 1 && t >= 14.0 {
+        *stage = 2;
+        let toddler = others.iter().find(|o| o.1.age == Age::Toddler).map(|o| o.0);
+        if let (Some(toddler), Some(i)) = (toddler, crate::social::social_index(crate::social::PEEK_A_BOO)) {
+            q.push_player(Action::new(crate::social::PEEK_A_BOO, ActionKind::Social { target: toddler, social: i }, false));
+            info!("tag test: peek-a-boo");
+        }
         return;
     }
-    *done = true;
-    if sim.age != Age::Child && !sim.traits.contains(&Trait::Childish) {
+    if *stage > 0 || t < 10.0 {
+        return;
+    }
+    *stage = 2;
+    if what != "peek" && sim.age != Age::Child && !sim.traits.contains(&Trait::Childish) {
         sim.traits.push(Trait::Childish);
     }
-    let Some((other, _, _)) = others.iter().filter(|o| may_play(&sim, o.1.age, false)).min_by(|a, b| a.2.translation.distance(tf.translation).total_cmp(&b.2.translation.distance(tf.translation))) else {
+    let near = |o: &(Entity, &Sim, &Transform)| o.2.translation.distance(tf.translation);
+    // (=peek: the nearest other child made a toddler, then played Peek-A-Boo with.)
+    if what == "peek" {
+        let Some((other, ..)) = others.iter().filter(|o| o.1.age == Age::Child).min_by(|a, b| near(a).total_cmp(&near(b))) else { return };
+        commands.queue(move |w: &mut World| {
+            if let Some(mut s) = w.get_mut::<Sim>(other) {
+                s.age = Age::Toddler;
+                s.outfit = crate::sim::OutfitChoice::default();
+            }
+            w.entity_mut(other).insert((crate::aging::NeedsNewBody, crate::little::ToddlerSkills::default()));
+        });
+        *stage = 1;
+        return;
+    }
+    let Some((other, _, _)) = others.iter().filter(|o| may_play(&sim, o.1.age, false)).min_by(|a, b| near(a).total_cmp(&near(b))) else {
         warn!("tag test: nobody to play with");
         return;
     };

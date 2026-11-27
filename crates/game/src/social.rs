@@ -316,7 +316,15 @@ pub enum SocialEffect {
     RemoveCostume,
     /// A game of tag, the one who asked "it" (the game's "Play Tag": `AfterPlayTag`): `playtag`.
     PlayTag,
+    /// A child's peek-a-boo with a toddler on the floor (the game's `PlayPeekAboo`).
+    PeekABoo,
 }
+
+/// The game's words for peek-a-boo (`PlayPeekAboo`), and its clips (`PeekAboo`'s `c2p_` pair:
+/// hands over the face and away, two ways).
+pub const PEEK_A_BOO: &str = "Play Peek-A-Boo";
+pub const PEEK_A_BOO_START: &str = "c2p_soc_playPeekAboo_start";
+pub const PEEK_A_BOO_CLIPS: &[&str] = &["c2p_soc_playPeekAboo_loop1", "c2p_soc_playPeekAboo_loop2"];
 
 /// What a Mooch gets out of others (the game's `MoochAmount`, at the hidden Mooch skill's first
 /// level: a small sum, and a large one two levels up), as often doubled (a half) or quadrupled
@@ -606,7 +614,7 @@ const fn occult(o: crate::sim::Occult, def: SocialDef) -> SocialDef {
 use crate::sim::Occult as O;
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 63] = [
+pub static SOCIALS: [SocialDef; 64] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::Greet, ..sd("Greet", Friendly, 3.0, 80.0, 5.0, 4.0, 0.0) },
     SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
@@ -644,6 +652,8 @@ pub static SOCIALS: [SocialDef; 63] = [
     SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachWalk, care: [0.0, 0.0, -20.0, 150.0, 0.0, 60.0], ..sd("Teach to Walk", Care, 30.0, 60.0, 20.0, 6.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachTalk, care: [0.0, 0.0, 0.0, 200.0, 0.0, 40.0], ..sd("Teach to Talk", Care, 30.0, 70.0, 10.0, 6.0, 0.0) },
+    // (Its ITUN's Social 100 an hour, both ways; liking 5 every five minutes, `kLTRLikingDelta`.)
+    SocialDef { autonomous: true, effect: SocialEffect::PeekABoo, care: [0.0, 0.0, 0.0, 100.0, 0.0, 0.0], ..sd(PEEK_A_BOO, Care, 15.0, 100.0, 0.0, 15.0, 0.0) },
     // More of the game's socials.
     SocialDef { autonomous: true, min_friendship: 10.0, ..sd("Tell Funny Story", Funny, 12.0, 100.0, 50.0, 8.0, 0.0) },
     SocialDef { min_friendship: 10.0, ..sd("Tell Dramatic Story", Friendly, 15.0, 100.0, 20.0, 7.0, 0.0) },
@@ -1161,6 +1171,11 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
     if actor.age.is_little() {
         return false;
     }
+    // (Peek-A-Boo: a child's, with a toddler: the game's `AgeSpeciesAvail` C, and
+    // `TestInteractionWithChildOnFloor`.)
+    if def.effect == SocialEffect::PeekABoo {
+        return actor.age == Age::Child && target.age == Age::Toddler;
+    }
     if target.age.is_little() {
         let toddler_only = matches!(def.effect, SocialEffect::TeachWalk | SocialEffect::TeachTalk) || def.name == "Read to";
         return def.cat == SocialCat::Care && !matches!(actor.age, Age::Child) && (!toddler_only || target.age == Age::Toddler);
@@ -1207,6 +1222,24 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peek_a_boo_is_a_childs_with_a_toddler_and_tag_a_childs_game() {
+        let peek = &SOCIALS[social_index(PEEK_A_BOO).unwrap()];
+        let tag = &SOCIALS[social_index(crate::playtag::PLAY_TAG).unwrap()];
+        let sim = |age| {
+            let mut s = crate::sim::random_sim(&mut rand::rng(), "S", Some(true), age);
+            s.traits.clear();
+            s
+        };
+        let (rel, none) = (Relationship::default(), [Side::default(), Side::default()]);
+        let ok = |d, a: Age, b: Age| available(d, &rel, &sim(a), &sim(b), true, false, none);
+        assert!(ok(peek, Age::Child, Age::Toddler));
+        assert!(!ok(peek, Age::Adult, Age::Toddler) && !ok(peek, Age::Child, Age::Baby) && !ok(peek, Age::Child, Age::Child));
+        assert!(ok(tag, Age::Child, Age::Child) && ok(tag, Age::Child, Age::Elder));
+        assert!(!ok(tag, Age::Adult, Age::Child) && !ok(tag, Age::Child, Age::Toddler));
+        assert_eq!((peek.cat, peek.effect, tag.effect), (SocialCat::Care, SocialEffect::PeekABoo, SocialEffect::PlayTag));
+    }
 
     #[test]
     fn socials_sharing_a_phrase_get_a_menu_of_their_own() {

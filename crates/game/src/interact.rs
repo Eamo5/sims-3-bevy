@@ -2931,6 +2931,7 @@ pub fn social_start(name: &str, little: Option<Age>, held: bool) -> Option<&'sta
         ("Play With" | "Cuddle" | "Change Diaper" | "Put to Bed", Some(Age::Toddler)) => Some("a2p_pickUp"),
         ("Read to", Some(Age::Toddler)) => Some("a2p_book_readWith_start"),
         ("Teach to Walk", _) => Some("a2p_teachToWalk_start_kneelDown"),
+        (crate::social::PEEK_A_BOO, _) => Some(crate::social::PEEK_A_BOO_START),
         ("Fight", _) => Some("a2a_soc_Bad_Fight_Start"),
         ("Give Back Rub", _) => Some("a2a_soc_Amorous_Massage_Amorous_start"),
         _ => None,
@@ -2966,6 +2967,7 @@ pub fn social_clips(name: &str, little: Option<Age>, held: bool) -> &'static [&'
         "Cuddle" | "Play With" => &["a2p_carry_chat_loop", "a2p_idle_carry_breathe_y", "a2p_idle_carry_idle"],
         "Read to" => &["a2p_book_readWith_loop"],
         "Teach to Walk" => &["a2p_teachToWalk_loopBreathe", "a2p_teachToWalk_firstSteps"],
+        crate::social::PEEK_A_BOO => crate::social::PEEK_A_BOO_CLIPS,
         "Tell Funny Story" => &["a2a_soc_Neutral_TellFunnyStory_Funny_Friendly"],
         "Hypnotic Gaze" => &["a2a_soc_vampire_hypnoticGaze_success"],
         "Talk About the Joy of Plasma" => &["a2a_soc_vampire_talkAboutJoyOfPlasma_accept"],
@@ -7375,12 +7377,12 @@ fn autonomy(
         Res<crate::klepto::Swipeable>,
         Res<crate::mirrors::LastLooked>,
     ),
-    (convs, toilets, bed_owners, bowls, (moods, smashed_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q, fridge_keeps, left_on_easel)): (
+    (convs, toilets, bed_owners, bowls, (moods, smashed_q, in_crib_q), (residents_q, can_owners, tipped_q, visited_lot, work_to_do_q, fridge_keeps, left_on_easel)): (
         Res<crate::groups::Conversations>,
         Res<crate::toilets::Unflushed>,
         Query<&crate::bedowners::BedOwners>,
         Query<&crate::fishbowl::BowlFish>,
-        (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>),
+        (Query<&crate::life::Mood>, Query<(), With<crate::dollhouse::Smashed>>, Query<(), With<crate::little::InCrib>>),
         (
             Query<(), With<crate::homes::Resident>>,
             Res<crate::trashcans::CanOwners>,
@@ -7400,6 +7402,8 @@ fn autonomy(
     // (The repairman's been called: repairs are left to him.)
     let repairman = called.is_some() || !repairmen.is_empty();
     let others: Vec<(Entity, Vec3, Age, [f32; 6], Option<usize>)> = sims.iter().map(|s| (s.0, s.1.translation, s.7.age, s.2.0, s.9.map(|l| l.0))).collect();
+    // (Toddlers stood about with nothing to do: not in the crib, nor in arms.)
+    let idle_toddlers: Vec<Entity> = sims.iter().filter(|s| s.7.age == Age::Toddler && s.3.0.is_empty() && !in_crib_q.contains(s.0)).map(|s| s.0).collect();
     // (Sims' ids, for whose bed's whose.)
     let ids: HashMap<Entity, u64> = sims.iter().map(|s| (s.0, s.7.id)).collect();
     let bed_owner_ids: std::collections::HashSet<u64> = bed_owners.iter().flat_map(|o| o.0.into_iter().flatten()).collect();
@@ -7980,6 +7984,22 @@ fn autonomy(
                     if best.as_ref().is_none_or(|b| score > b.0) {
                         best = Some((score, Action::new(crate::social::social(si).name, ActionKind::Social { target: other, social: si }, true)));
                     }
+                }
+            }
+        }
+        // A child plays Peek-A-Boo with a toddler stood about (the game's `PlayPeekAboo`, its
+        // Social advertised), the more as either's lonelier.
+        if sim.age == Age::Child
+            && household.contains(me)
+            && let Some(si) = crate::social::social_index(crate::social::PEEK_A_BOO)
+        {
+            for &(other, pos, age, needs, lot) in &others {
+                if age != Age::Toddler || lot != my_lot || !idle_toddlers.contains(&other) || (motives.0[SOCIAL] > social_need && needs[SOCIAL] > 0.0) {
+                    continue;
+                }
+                let score = (8.0 + urgency(SOCIAL) * 30.0 + (-needs[SOCIAL]).max(0.0) / 5.0) / (1.0 + pos.distance(tf.translation) / 25.0) * rng.random_range(0.85..1.15);
+                if best.as_ref().is_none_or(|b| score > b.0) {
+                    best = Some((score, Action::new(crate::social::PEEK_A_BOO, ActionKind::Social { target: other, social: si }, true)));
                 }
             }
         }
