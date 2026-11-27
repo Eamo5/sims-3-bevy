@@ -140,6 +140,13 @@ installation is unreachable.
   A grown plant can be *Viewed* (the game's `ViewPlant`, grown or bearing): a look at it, and
   tears of joy at a fine one, a recoil at one of the bottom three qualities (`QualityLevel`
   under 0.3: the game's `JoyousCrying` and `Repel` reactions). `VIEW_PLANT=fine|poor` (tests).
+  From Gardening 3 a plant's *Fertilize ›* lists the produce and fish carried that the game
+  gives a fertilizer value, each with how good it is by its quality (the game's picker's Deadly,
+  Neutral, Nice, Great, Excellent or Outstanding), and *Fertilize Garden with Best Fertilizers*
+  (the game's `FertilizeAll`) digs in the best one carried (never a deadly one) and goes on to
+  the nearest plant still wanting it, plant after plant, till the garden's done or the
+  fertilizer's gone (the game's "...has used every fertilizer in his inventory but there are
+  still plants to left to fertilize."). `FERTILIZE_TEST=1|menu` (tests).
   **Ambrosia**, as the game's: a Sim who's mastered Cooking, Gardening and Fishing learns it,
   and makes it of a Lifefruit and a Deathfish (neither to be bought), set out a single
   serving for whoever's to eat it. Eaten, it's a Divine Meal (the game's moodlet, a week) and

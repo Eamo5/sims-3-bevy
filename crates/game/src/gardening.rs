@@ -38,7 +38,61 @@ impl Plugin for GardeningPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Garden>()
             .add_message::<PlantNow>()
-            .add_systems(Update, (starter_packet, restore_plants, plant_now, garden_requests, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks, view_test).chain().run_if(in_state(PlayMode::Live)));
+            .add_systems(Update, (starter_packet, restore_plants, plant_now, garden_requests, fertilize_all, grow, evaluate_plants, sprinkle, flame_fruit, dead_looks, view_test, fertilize_test).chain().run_if(in_state(PlayMode::Live)));
+    }
+}
+
+/// `FERTILIZE_TEST=1|menu` (tests): eight seconds in, three grown tomato plants a few steps from
+/// the selected Sim (Gardening 3 now), a minnow and a tomato in their inventory, and the garden
+/// fertilized with the best first (or the nearest plant's menu up); the camera on it.
+fn fertilize_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut sel: Query<(Entity, &Transform, &mut Skills, &mut crate::interact::ActionQueue), With<crate::sim::Selected>>,
+    plants: Query<(Entity, &Transform), With<GrowingPlant>>,
+    mut planted: MessageWriter<PlantNow>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut stage: Local<u8>,
+) {
+    if std::env::var_os("FERTILIZE_TEST").is_none() {
+        return;
+    }
+    let t = time.elapsed_secs();
+    let (Some(ui), Ok((me, tf, mut skills, mut q))) = (ui, sel.single_mut()) else { return };
+    if t > 7.0
+        && let Ok(mut cam) = cams.single_mut()
+    {
+        cam.look_at(tf.translation + tf.rotation * Vec3::new(0.0, 0.0, 3.0));
+        cam.distance = 9.0;
+    }
+    match *stage {
+        0 if t > 8.0 => {
+            let Some(i) = ui.data.plants.iter().position(|p| p.produce == "Tomato") else { return };
+            for at in [Vec3::new(-1.5, 0.0, 3.0), Vec3::new(0.0, 0.0, 4.5), Vec3::new(1.5, 0.0, 3.0)] {
+                planted.write(PlantNow { plant: i, at: tf.translation + tf.rotation * at, growth: 1.0, ready: 0 });
+            }
+            skills.0.insert("Gardening", 3.0);
+            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Fish, "Minnow".into(), "Minnow".into(), 4, 5, 1);
+            crate::inventory::give(&mut commands, me, crate::inventory::ItemKind::Produce, "Tomato".into(), "Tomato".into(), 4, 5, 1);
+            *stage = 1;
+        }
+        1 if t > 11.0 => {
+            *stage = 2;
+            let Some((first, _)) = plants.iter().min_by(|a, b| a.1.translation.distance(tf.translation).total_cmp(&b.1.translation.distance(tf.translation))) else { return };
+            // (=menu: the plant's menu.)
+            if std::env::var("FERTILIZE_TEST").is_ok_and(|v| v == "menu") {
+                commands.insert_resource(crate::hud::PieFor(first));
+                return;
+            }
+            let Some(def) = crate::interact::interactions_for(ObjectKind::GardenPlant).iter().position(|d| d.special == crate::interact::Special::Fertilize) else { return };
+            let mut a = crate::interact::Action::new(FERTILIZE, crate::interact::ActionKind::Object { target: first, def }, false);
+            a.fish_choice = Some(("Minnow".into(), 4));
+            q.push_player(a);
+            commands.entity(me).insert(FertilizingAll(first));
+            info!("fertilize test: the garden, best first");
+        }
+        _ => {}
     }
 }
 
@@ -241,6 +295,81 @@ pub fn fertilizers<'a>(data: &'a s3bake::GameDataBaked, inv: &'a crate::inventor
     })
 }
 
+/// The plant's "Fertilize Garden with Best Fertilizers" (the game's `DoFertilize`'s
+/// `SingletonFertilizeAll`): the best fertilizer they carry dug in, and on to the next plant
+/// wanting it on the lot, till there are none or the fertilizer's gone (the game's words then).
+pub const FERTILIZE_ALL: &str = "Fertilize Garden with Best Fertilizers";
+
+/// How good a fertilizer is (`FertilizerComponent.GetFertilizerEffectivenessValue`: its value
+/// by its quality's multiplier).
+pub fn effectiveness(data: &s3bake::GameDataBaked, s: &crate::inventory::Stack) -> Option<f32> {
+    let (value, _) = data.ingredients.iter().find(|i| i.key == s.key)?.fertilizer?;
+    let q = (s.quality as usize * 10 / (QUALITIES.len() - 1)).min(10);
+    Some(value * FERTILIZER_QUALITY[q])
+}
+
+/// Its word (`kFertilizerEffectivenessThresholds` 0, 5, 10, 15, 20: Deadly below none).
+pub fn effectiveness_word(v: f32) -> &'static str {
+    match v {
+        v if v < 0.0 => "Deadly",
+        v if v < 5.0 => "Neutral",
+        v if v < 10.0 => "Nice",
+        v if v < 15.0 => "Great",
+        v if v < 20.0 => "Excellent",
+        _ => "Outstanding",
+    }
+}
+
+/// The best fertilizer they carry, never a deadly one (`ChooseAndReserveBestFertilizer`).
+pub fn best_fertilizer<'a>(data: &'a s3bake::GameDataBaked, inv: &'a crate::inventory::Inventory) -> Option<&'a crate::inventory::Stack> {
+    fertilizers(data, inv).filter_map(|s| Some((s, effectiveness(data, s)?))).filter(|(_, v)| *v >= 0.0).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(s, _)| s)
+}
+
+/// Fertilizing the garden, at this plant now.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct FertilizingAll(pub Entity);
+
+/// The next of the garden for it: the nearest plant on the home lot still wanting fertilizer.
+pub fn next_to_fertilize(at: Vec3, plants: impl Iterator<Item = (Entity, Vec3, bool)>) -> Option<Entity> {
+    plants.filter(|p| p.2).min_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at))).map(|p| p.0)
+}
+
+/// One plant fertilized: on to the next with the best fertilizer left, or done (the game's words
+/// if there's garden left and no fertilizer); stopped short (told to, or it couldn't), done.
+#[allow(clippy::type_complexity)]
+fn fertilize_all(
+    mut commands: Commands,
+    mut sims: Query<(Entity, &Sim, &mut crate::interact::ActionQueue, &FertilizingAll, Option<&crate::inventory::Inventory>, &Transform), Without<GardenRequest>>,
+    plants: Query<(Entity, &GrowingPlant, &Transform), Without<crate::visit::LotObject>>,
+    ui: Option<Res<crate::icons::GameUi>>,
+    mut notes: ResMut<Notifications>,
+) {
+    let Some(ui) = ui else { return };
+    for (me, sim, mut q, f, inv, tf) in &mut sims {
+        if q.0.iter().any(|a| !a.cancel && a.label == FERTILIZE) {
+            continue;
+        }
+        commands.entity(me).remove::<FertilizingAll>();
+        // (Only on from a plant that took it.)
+        if !plants.get(f.0).is_ok_and(|p| p.1.fertilizer.is_some()) {
+            continue;
+        }
+        let wanting = |e: Entity, p: &GrowingPlant| e != f.0 && offers(p, crate::interact::Special::Fertilize);
+        let Some(next) = next_to_fertilize(tf.translation, plants.iter().map(|(e, p, t)| (e, t.translation, wanting(e, p)))) else { continue };
+        let Some(best) = inv.and_then(|i| best_fertilizer(&ui.data, i)) else {
+            let his = if sim.female { "her" } else { "his" };
+            notes.push(format!("{} has used every fertilizer in {his} inventory but there are still plants to left to fertilize.", sim.first));
+            continue;
+        };
+        let Some(def) = crate::interact::interactions_for(ObjectKind::GardenPlant).iter().position(|d| d.special == crate::interact::Special::Fertilize) else { continue };
+        let mut a = crate::interact::Action::new(FERTILIZE, crate::interact::ActionKind::Object { target: next, def }, false);
+        a.fish_choice = Some((best.key.clone(), best.quality));
+        q.0.push_back(a);
+        commands.entity(me).insert(FertilizingAll(next));
+        debug!("{} goes on to fertilize the next plant with {}", sim.first, best.name);
+    }
+}
+
 impl GrowingPlant {
     /// Commit a crop only once. Queued interactions can finish after another Sim has
     /// already harvested this plant, so the menu's readiness check is not sufficient.
@@ -343,6 +472,30 @@ mod harvest_tests {
         p.ready = 4;
         assert_eq!(p.harvest(3000.0), Some(4));
         assert_eq!(p.harvests_left, 0);
+    }
+
+    #[test]
+    fn the_garden_is_fertilized_with_the_best_and_nearest_first() {
+        use crate::inventory::{Inventory, ItemKind};
+        let mut data = s3bake::GameDataBaked::default();
+        for (key, value) in [("Tomato", 6.0), ("Garlic", -3.0), ("Minnow", 12.0)] {
+            data.ingredients.push(s3bake::gamedata::IngredientInfo { key: key.into(), fertilizer: Some((value, 1)), ..default() });
+        }
+        let mut inv = Inventory::default();
+        inv.add(ItemKind::Produce, "Garlic", "Perfect Garlic", 9, 5);
+        inv.add(ItemKind::Produce, "Tomato", "Tomato", 4, 5);
+        inv.add(ItemKind::Fish, "Minnow", "Minnow", 4, 5);
+        assert_eq!(best_fertilizer(&data, &inv).map(|s| s.key.as_str()), Some("Minnow"));
+        assert_eq!(effectiveness_word(effectiveness(&data, &inv.0[0]).unwrap()), "Deadly");
+        assert_eq!(effectiveness_word(effectiveness(&data, &inv.0[1]).unwrap()), "Nice");
+        assert_eq!(effectiveness_word(12.0), "Great");
+        // (Only the deadly left: none to use.)
+        inv.0.retain(|s| s.key == "Garlic");
+        assert!(best_fertilizer(&data, &inv).is_none());
+        let (a, b, c) = (Entity::from_bits(1), Entity::from_bits(2), Entity::from_bits(3));
+        let plants = [(a, Vec3::new(9.0, 0.0, 0.0), true), (b, Vec3::new(2.0, 0.0, 0.0), false), (c, Vec3::new(4.0, 0.0, 0.0), true)];
+        assert_eq!(next_to_fertilize(Vec3::ZERO, plants.into_iter()), Some(c));
+        assert_eq!(next_to_fertilize(Vec3::ZERO, plants.into_iter().map(|p| (p.0, p.1, false))), None);
     }
 
     #[test]

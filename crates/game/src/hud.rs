@@ -2062,10 +2062,20 @@ fn world_click(
                 // Fertilizing: with which of their produce or fish ("Fertilize ›").
                 if d.special == Special::Fertilize {
                     if let (Ok(inv), Some(ui)) = (inv_q.get(actor), opp_q.0.as_ref()) {
-                        let list: Vec<(String, ActionKind)> = crate::gardening::fertilizers(&ui.data, inv).map(|s| (format!("{}: {}", crate::gardening::FERTILIZE, s.name), ActionKind::Object { target: t, def: i })).collect();
+                        // (Each with how good it is, as the game's picker has it.)
+                        let list: Vec<(String, ActionKind)> = crate::gardening::fertilizers(&ui.data, inv)
+                            .map(|s| {
+                                let how = crate::gardening::effectiveness(&ui.data, s).map(|v| format!(" ({})", crate::gardening::effectiveness_word(v))).unwrap_or_default();
+                                (format!("{}: {}{how}", crate::gardening::FERTILIZE, s.name), ActionKind::Object { target: t, def: i })
+                            })
+                            .collect();
                         if !list.is_empty() {
                             options.push((format!("{} ›", crate::gardening::FERTILIZE), submenu_kind(pie.submenus.len())));
                             pie.submenus.push((crate::gardening::FERTILIZE.to_string(), list));
+                        }
+                        // (The whole garden with the best they've got.)
+                        if crate::gardening::best_fertilizer(&ui.data, inv).is_some() {
+                            options.push((crate::gardening::FERTILIZE_ALL.to_string(), ActionKind::Object { target: t, def: i }));
                         }
                     }
                     continue;
@@ -3694,10 +3704,19 @@ fn pie_buttons(
         }
         // (What a plant's fertilized with: `gardening`.)
         if let Some(n) = label.strip_prefix(&format!("{}: ", crate::gardening::FERTILIZE))
-            && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.name == n))
+            && let Some(s) = inventories.get(a).ok().and_then(|inv| inv.0.iter().find(|s| s.name == n || n.starts_with(&format!("{} (", s.name))))
         {
             fish_choice = Some((s.key.clone(), s.quality));
             label = crate::gardening::FERTILIZE.to_string();
+        }
+        // (The whole garden, the best first: `gardening`.)
+        if label == crate::gardening::FERTILIZE_ALL
+            && let ActionKind::Object { target, .. } = kind
+            && let Some(s) = ui_data.as_ref().zip(inventories.get(a).ok()).and_then(|(u, inv)| crate::gardening::best_fertilizer(&u.data, inv))
+        {
+            fish_choice = Some((s.key.clone(), s.quality));
+            label = crate::gardening::FERTILIZE.to_string();
+            commands.entity(a).insert(crate::gardening::FertilizingAll(target));
         }
         // (The bait chosen to fish with, as the menu offered it; "No Bait", none.)
         if let ActionKind::Object { .. } = kind {
