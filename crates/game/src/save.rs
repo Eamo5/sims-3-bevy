@@ -1104,7 +1104,7 @@ fn save_game(
         ResMut<SaveSlot>,
         (Res<crate::services::MaidService>, Res<crate::mail::PaperRound>),
         Option<Res<crate::services::MailDue>>,
-        Query<(&GameObject, &Transform, &crate::upgrades::Upgrades)>,
+        Query<(&GameObject, &Transform, &crate::upgrades::Upgrades, Option<&crate::fireplace::FireColor>)>,
         Res<crate::family::Genealogy>,
         Res<crate::terrain_paint::Strokes>,
         Res<crate::terrain_paint::Sculpted>,

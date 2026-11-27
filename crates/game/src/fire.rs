@@ -205,6 +205,32 @@ pub(crate) fn flame_image() -> Image {
     )
 }
 
+/// A coloured flame's texture (a fireplace's fire changed colour): the same teardrop, its tip's
+/// colour at the edges and above, its root's in the hot heart of it.
+pub(crate) fn flame_image_tinted(tip: [f32; 3], root: [f32; 3]) -> Image {
+    let (w, h) = (32u32, 64u32);
+    let mut data = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let u = (x as f32 + 0.5) / w as f32 * 2.0 - 1.0;
+            let v = 1.0 - (y as f32 + 0.5) / h as f32;
+            let width = (1.0 - v).powf(0.6) * (0.35 + 0.65 * (v * 3.0).min(1.0));
+            let inside = (1.0 - (u.abs() / width.max(0.01))).clamp(0.0, 1.0);
+            let a = inside.powf(0.8) * (1.0 - v).powf(0.5);
+            let heat = ((1.0 - v) * inside).powf(1.5);
+            let c = |i: usize| ((tip[i] + (root[i] - tip[i]) * heat) * 255.0) as u8;
+            data.extend_from_slice(&[c(0), c(1), c(2), (a * 255.0) as u8]);
+        }
+    }
+    Image::new(
+        bevy::render::render_resource::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    )
+}
+
 /// One tongue of flame (a quad turned to the camera), its size and flicker phase.
 #[derive(Component)]
 pub(crate) struct Flame {

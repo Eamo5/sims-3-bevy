@@ -1809,7 +1809,18 @@ installation is unreachable.
   it or put it out. Now and then a spark catches the floor in front. Candles are lit and blown
   out too: a little flame and a soft flickering light for a few hours. Anyone within ten metres
   of a fire is Cozy (the game's `CozyFireBuffNormal`, 10); *Poke Fire* (the game's poker clips,
-  fifteen minutes) sets it raging for twenty, brighter, and Cozy 20. Build mode sells the
+  fifteen minutes) sets it raging for twenty, brighter, and Cozy 20. A Daredevil teen or older
+  will *Play with Fire* while it's lit, by choice or of their own accord (the game's
+  `PlayWithFire`: hands in and out of the flames, fun 50 an hour), and past its first five
+  minutes, every two a chance in ten (the Clumsy's a quarter more: the fireplaces' tuned
+  `ChanceBurnSelfWhenPlaying`, `kClumsyTraitChanceBurnSelfOnFireplace`) of being burned: fun 15
+  less and the game's burnt ending, hands shaken and blown on. A Handiness 9 Sim can make the
+  Upgrade: Change Color (knelt at the hearth with the game's upgrade clips, as for its other
+  upgrades), and then a lit fire's *Change Fire Color ›* menu turns it Blue, Green or Purple, or
+  back to Normal (any but the one it is: `ChangeFireColor`, a pinch thrown in), flames and light
+  in the colour (the tuning's `...FlameLightChannel`s), kept for the next fire and in saves.
+  Warming hands has its ending too. `FIRE_TEST=play|color:<colour>|menu|upgrade`, `FIRE_BURN=1`,
+  `FIRE_YAW`, `FIRE_DIST` (tests). Build mode sells the
   fireplaces at their prices (the game has them out of the Buy catalogue, so they were missing
   from the Construction catalogue's Fireplaces tab), and a chimney built up over one is just a
   chimney: nobody tries to light it.

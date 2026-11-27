@@ -112,6 +112,10 @@ pub const CLIP_PREFIXES: &[&str] = &[
     "a2o_fireplace_warmHands",
     // (Poking the fire, the poker in hand: its clips and the poker's.)
     "a2o_fireplace_poke_",
+    // (Playing with the fire, a colour thrown in, and upgrading it.)
+    "a2o_fireplace_playFire_",
+    "a2o_fireplace_throwHerb_",
+    "a2o_fireplace_upgrade_",
     // (A sponge bath at the sink, the sponge in hand.)
     "a2o_sink_spongeBath",
     // (A fridge's spoiled food cleaned out, its bag carried away.)

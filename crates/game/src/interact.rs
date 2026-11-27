@@ -1319,6 +1319,8 @@ pub fn repair_of(kind: ObjectKind) -> (&'static str, crate::anim::ActionClip) {
         ObjectKind::Stereo => ("Repair", A::new(Some("a2o_stereo_repair_start_x"), &["a2o_stereo_repair_loop1_x", "a2o_stereo_repair_loop2_x"])),
         // (A door's bell changed: its own tinkering, the game's `genericdoor` "Upgrade".)
         ObjectKind::Door => ("Repair", A::new(Some("a2o_door_upgrade_start_x"), &["a2o_door_upgrade_loop1_x", "a2o_door_upgrade_loop2_x"])),
+        // (A fireplace's upgrades: the game's `fireplace` "Upgrade", knelt at the hearth.)
+        ObjectKind::Fireplace => ("Repair", A::new(Some("a2o_fireplace_upgrade_start_x"), &["a2o_fireplace_upgrade_loop1_x", "a2o_fireplace_upgrade_loop2_x"])),
         _ => ("Repair", A::new(None, &["a2o_dishwasher_repair_loopTinker_x"])),
     }
 }
@@ -1619,6 +1621,10 @@ pub enum Special {
     CheckResponses,
     FindCoupons,
     Blog,
+    /// At a lit fireplace: a Daredevil playing with the fire, an upgraded fire's colour changed
+    /// (`fireplace`).
+    PlayWithFire,
+    ChangeFireColor,
 }
 
 impl Special {
@@ -1742,13 +1748,20 @@ static GARDEN: [InteractionDef; 7] = [
 static COLLECTIBLE: [InteractionDef; 1] = [InteractionDef { special: Special::Collect, ..def("Collect", 4.0, [0.0, 0.0, 0.0, 0.0, -2.0, 10.0], Pose::Use) }];
 static FISHING_SPOT: [InteractionDef; 1] =
     [InteractionDef { special: Special::Fish, skill: Some("Fishing"), ..def("Fish", 60.0, [-4.0, -4.0, -3.0, 0.0, -2.0, 25.0], Pose::Use) }];
-static FIREPLACE: [InteractionDef; 5] = [
+static FIREPLACE: [InteractionDef; 10] = [
     InteractionDef { special: Special::LightFire, ..def("Light Fire", 2.0, [0.0, 0.0, 0.0, 0.0, 0.0, 4.0], Pose::Use) },
     InteractionDef { autonomous: false, special: Special::PutOutFire, ..def("Put Out Fire", 2.0, [0.0; 6], Pose::Use) },
     def("Warm Hands", 20.0, [0.0, 0.0, 0.0, 0.0, 0.0, 14.0], Pose::Use),
     InteractionDef { special: Special::NeuroticCheck, ..def("Check Fireplace", 5.1, N, Pose::Use) },
     // (The game's `PokeFireStageTime`, 15 minutes; its ITUN's Fun 10 advertised.)
     InteractionDef { special: Special::PokeFire, ..def("Poke Fire", 15.0, [0.0, 0.0, 0.0, 0.0, 0.0, 10.0], Pose::Use) },
+    // (A Daredevil's `PlayWithFire`: its ITUN's Fun 50 an hour; the burns `fireplace`'s.)
+    InteractionDef { special: Special::PlayWithFire, ..def(crate::fireplace::PLAY_WITH_FIRE, 60.0, [0.0, 0.0, 0.0, 0.0, 0.0, 50.0], Pose::Use) },
+    // (The upgraded fire's colours, `ChangeFireColor`'s: the player's to choose.)
+    InteractionDef { autonomous: false, special: Special::ChangeFireColor, ..def("Normal", 3.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::ChangeFireColor, ..def("Blue", 3.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::ChangeFireColor, ..def("Green", 3.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::ChangeFireColor, ..def("Purple", 3.0, N, Pose::Use) },
 ];
 static POOL_LADDER: [InteractionDef; 1] = [InteractionDef {
     special: Special::Swim,
@@ -2524,7 +2537,11 @@ pub fn interaction_clip(name: &str, kind: ObjectKind) -> Option<crate::anim::Act
         "Poke Fire" => A::new(Some("a2o_fireplace_poke_start_x"), &["a2o_fireplace_poke_loopjab_x", "a2o_fireplace_poke_loopbreathe_x"]),
         "Light Candle" | "Blow Out" => A::new(None, &["a2o_object_genericSwipe_x"]),
         "Put Out Fire" => A::new(None, &["a2o_fireplace_putOut_x"]),
-        "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]),
+        "Warm Hands" => A::new(Some("a2o_fireplace_warmHands_start_x"), &["a2o_fireplace_warmHands_x"]).ending(&["a2o_fireplace_warmHands_stop_x"], 2.4),
+        // (Hands in and out of the flames, `Loop PlayWithFire`; its ending, `Exit`.)
+        "Play with Fire" => A::new(Some("a2o_fireplace_playFire_start_x"), &["a2o_fireplace_playFire_loop_x"]).ending(&["a2o_fireplace_playFire_stop_x"], 1.0),
+        // (A colour thrown into the fire: `ChangeFireColor`'s toss.)
+        "Normal" | "Blue" | "Green" | "Purple" if kind == ObjectKind::Fireplace => A::new(None, &["a2o_fireplace_throwHerb_throw_x"]),
         "Catch" if kind == ObjectKind::Butterfly => A::new(None, &["a2o_butterfly_catch_x"]),
         "Catch" if kind == ObjectKind::Beetle => A::new(None, &["a2o_beetle_catch_x"]),
         "Fish" if kind == ObjectKind::FishingSpot => {
@@ -3401,11 +3418,14 @@ pub struct Action {
     pub donation: Option<(String, i64)>,
     /// Where in the pool a swim's to (the pool's water clicked: "Swim"), to tread water there.
     pub swim_to: Option<Vec2>,
+    /// An ending of its own, played in place of its interaction's, and how long (a fire played
+    /// with and burned: `fireplace`).
+    pub ending: Option<(&'static [&'static str], f32)>,
 }
 
 impl Action {
     pub fn new(label: impl Into<String>, kind: ActionKind, autonomous: bool) -> Self {
-        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None, swim_to: None }
+        Self { label: label.into(), kind, phase: Phase::Start, autonomous, cancel: false, completed: false, novel_genre: None, outfit_choice: None, canvas_choice: None, channel_choice: None, book_choice: None, fish_choice: None, recipe_choice: None, song_choice: None, for_one: false, approach: None, social_outcome: None, seated: false, jog: false, chat_with: None, donation: None, swim_to: None, ending: None }
     }
 }
 
@@ -5432,6 +5452,10 @@ pub(crate) fn run_actions(
                                         (None, Some((out, secs))) => Some((&[], Some(out), secs, *target, far_side)),
                                         (None, None) => None,
                                     };
+                                    // (An ending of its own: a fire played with and burned, `fireplace`.)
+                                    if let Some((clips, secs)) = action.ending {
+                                        outro = Some((clips, None, secs, *target, far_side));
+                                    }
                                     // (A child's last blow and getting up take longer: their own clips.)
                                     if d.special == Special::SmashDollhouse && sim.age == Age::Child {
                                         if let Some(o) = outro.as_mut() {
@@ -5943,6 +5967,17 @@ pub(crate) fn run_actions(
                                                 w.write_message(if light { crate::fireplace::FireplaceRequest::Light(t) } else { crate::fireplace::FireplaceRequest::PutOut(t) });
                                             });
                                         }
+                                        // (A colour thrown in: `fireplace`.)
+                                        Special::ChangeFireColor => {
+                                            if let Some(c) = crate::fireplace::FireColor::of(d.name) {
+                                                let t = *target;
+                                                commands.queue(move |w: &mut World| {
+                                                    w.write_message(crate::fireplace::FireplaceRequest::Recolor(t, c));
+                                                });
+                                            }
+                                        }
+                                        // (Its burns as it goes: `fireplace`.)
+                                        Special::PlayWithFire => {}
                                         Special::PayBills => {
                                             if let Some(h) = household.as_mut() {
                                                 let due: i64 = h.bills.iter().map(|b| b.amount).sum();
@@ -7529,6 +7564,10 @@ fn autonomy(
                 }
                 // (A Neurotic's own checks.)
                 if !crate::neurotic::offers(d.special, sim) {
+                    continue;
+                }
+                // (A Daredevil's fire to play with: `fireplace`.)
+                if d.special == Special::PlayWithFire && !crate::fireplace::offers(d.special, sim, None, None, d.name) {
                     continue;
                 }
                 // (Never by choice to the TV or a computer for a Technophobe, but to turn it off;

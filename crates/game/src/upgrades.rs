@@ -43,10 +43,12 @@ pub enum Upgrade {
     Fireproof,
     /// A fireplace lights itself after dark, and goes out in the morning.
     AutoLight,
+    /// A fireplace's fire can be turned blue, green or purple ("Change Fire Color": `fireplace`).
+    ChangeColor,
 }
 
 impl Upgrade {
-    pub const ALL: [Upgrade; 5] = [Upgrade::Unbreakable, Upgrade::Improved, Upgrade::SelfCleaning, Upgrade::Fireproof, Upgrade::AutoLight];
+    pub const ALL: [Upgrade; 6] = [Upgrade::Unbreakable, Upgrade::Improved, Upgrade::SelfCleaning, Upgrade::Fireproof, Upgrade::AutoLight, Upgrade::ChangeColor];
 
     pub fn bit(self) -> u8 {
         match self {
@@ -55,6 +57,7 @@ impl Upgrade {
             Upgrade::SelfCleaning => 4,
             Upgrade::Fireproof => 8,
             Upgrade::AutoLight => 16,
+            Upgrade::ChangeColor => 32,
         }
     }
 
@@ -77,6 +80,7 @@ impl Upgrade {
             (Upgrade::SelfCleaning, K::Shower | K::Bathtub | K::ShowerTub | K::Sink | K::Toilet) => Some("Make Self-Cleaning"),
             (Upgrade::Fireproof, K::Stove | K::Fireplace) => Some("Make Fireproof"),
             (Upgrade::AutoLight, K::Fireplace) => Some("Auto-Light"),
+            (Upgrade::ChangeColor, K::Fireplace) => Some("Change Color"),
             _ => None,
         }
     }
@@ -94,6 +98,7 @@ impl Upgrade {
             (Upgrade::Fireproof, K::Stove) => 4,
             (Upgrade::Fireproof, _) => 6,
             (Upgrade::AutoLight, _) => 7,
+            (Upgrade::ChangeColor, _) => 9,
         }
     }
 
@@ -146,19 +151,26 @@ fn auto_light(
     }
 }
 
-/// An object's upgrades as saved: the object, where it stands, and the upgrade bits.
+/// An object's upgrades as saved: the object, where it stands, the upgrade bits, and a
+/// fireplace's fire colour (`fireplace::FireColor`'s number).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SavedUpgrades {
     pub objd: (u32, u32, u64),
     pub position: [f32; 3],
     pub bits: u8,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub color: u8,
 }
 
-pub fn saved(objects: &Query<(&GameObject, &Transform, &Upgrades)>) -> Vec<SavedUpgrades> {
+fn is_zero(v: &u8) -> bool {
+    *v == 0
+}
+
+pub fn saved(objects: &Query<(&GameObject, &Transform, &Upgrades, Option<&crate::fireplace::FireColor>)>) -> Vec<SavedUpgrades> {
     objects
         .iter()
-        .filter(|(_, _, u)| u.0 != 0)
-        .map(|(o, tf, u)| SavedUpgrades { objd: o.objd, position: tf.translation.to_array(), bits: u.0 })
+        .filter(|(_, _, u, _)| u.0 != 0)
+        .map(|(o, tf, u, c)| SavedUpgrades { objd: o.objd, position: tf.translation.to_array(), bits: u.0, color: c.map_or(0, |c| *c as u8) })
         .collect()
 }
 
@@ -180,6 +192,9 @@ fn restore_upgrades(mut commands: Commands, mut pending: ResMut<PendingUpgrades>
         match objects.iter().find(|(_, o, tf)| o.objd == s.objd && tf.translation.distance(at) < 0.2) {
             Some((e, ..)) => {
                 commands.entity(e).insert(Upgrades(s.bits));
+                if let Some(c) = crate::fireplace::FireColor::ALL.get(s.color as usize).filter(|_| s.color != 0) {
+                    commands.entity(e).insert(*c);
+                }
                 false
             }
             None => true,
@@ -202,6 +217,7 @@ mod tests {
         assert_eq!(Upgrade::SelfCleaning.name(K::Tv), None);
         assert_eq!(Upgrade::Fireproof.name(K::Stove), Some("Make Fireproof"));
         assert_eq!(Upgrade::AutoLight.name(K::Fireplace), Some("Auto-Light"));
+        assert_eq!((Upgrade::ChangeColor.name(K::Fireplace), Upgrade::ChangeColor.name(K::Stove), Upgrade::ChangeColor.level(K::Fireplace)), (Some("Change Color"), None, 9));
         assert_eq!(Upgrade::Improved.name(K::Stove), Some("Improve Meal Quality"));
         assert_eq!((Upgrade::Improved.level(K::Computer), Upgrade::Improved.level(K::Bathtub), Upgrade::Fireproof.level(K::Stove)), (8, 3, 4));
         // (Each its own bit, saved as they were.)
