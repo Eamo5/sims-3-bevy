@@ -1221,6 +1221,35 @@ fn main() {
         }
         return;
     }
+    if args[1] == "itunlist" {
+        // itunlist <root>: every interaction tuning, a line each: its pack's code version, its
+        // object, its interaction, and whether the player may choose it (`DisallowUserDirected`).
+        let mut set = s3pkg::install::open_install(std::path::Path::new(&args[2]), |_| true);
+        if let Ok(p) = Package::open(&std::path::Path::new(&args[2]).join("Game/Bin/Gameplay/GameplayData.package")) {
+            set.add(p);
+        }
+        let mut lines = std::collections::BTreeSet::new();
+        for k in set.keys_of_type(0x03B3_3DDF).copied().collect::<Vec<_>>() {
+            let Some(d) = set.read(&k) else { continue };
+            let x = String::from_utf8_lossy(&d);
+            let attr = |tag: &str, name: &str| -> Option<String> {
+                let at = x.find(&format!("<{tag} {name}=\""))? + tag.len() + name.len() + 4;
+                x[at..].split('"').next().map(str::to_string)
+            };
+            let user = attr("Disallow", "DisallowUserDirected").is_none_or(|v| v != "True");
+            lines.insert(format!(
+                "{}\t{}\t{}\t{}",
+                attr("CodeVersion", "name").unwrap_or_default(),
+                attr("Object", "name").unwrap_or_default(),
+                attr("Interaction", "name").unwrap_or_default(),
+                if user { "user" } else { "auto" }
+            ));
+        }
+        for l in lines {
+            println!("{l}");
+        }
+        return;
+    }
     if args[1] == "itun" {
         // itun <root> <filter>: the interaction tunings (ITUN) of every pack whose object or
         // interaction has the filter in it, with all their need changes (any commodity).

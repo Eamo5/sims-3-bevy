@@ -95,40 +95,53 @@ fn stores(mut coupons: ResMut<Coupons>, world: Res<crate::loading::CurrentWorld>
 /// has no coupon now.
 fn clip(mut commands: Commands, mut coupons: ResMut<Coupons>, clock: Res<crate::clock::GameClock>, sims: Query<(Entity, &ClipNow, &Sim)>, ui: Option<Res<crate::icons::GameUi>>, mut notes: ResMut<crate::interact::Notifications>) {
     let Some(ui) = ui else { return };
-    let mut rng = rand::rng();
     for (me, now, sim) in &sims {
         commands.entity(me).remove::<ClipNow>();
         if !coupons.offers(sim, now.0) {
             continue;
         }
-        let (grocery, bookstore) = coupons.stores.unwrap_or_default();
-        let d = &ui.data;
-        let mut stock: Vec<(&str, String, String, i64)> = Vec::new();
-        if grocery {
-            stock.extend(d.ingredients.iter().filter(|i| !i.kind && i.can_buy && i.price > 0).map(|i| (GROCERY, i.key.clone(), i.name.clone(), crate::ingredients::store_price(i))));
-        }
-        if bookstore {
-            stock.extend(d.novels.iter().filter(|b| b.in_store && b.price > 0).map(|b| (BOOKSTORE, b.key.clone(), b.name.clone(), b.price)));
-            stock.extend(d.skill_books.iter().filter(|b| b.price > 0).map(|b| (BOOKSTORE, b.key.clone(), b.name.clone(), b.price)));
-            stock.extend(d.recipes.iter().filter(|r| r.book_price > 0).map(|r| (BOOKSTORE, r.key.clone(), r.name.clone(), r.book_price as i64)));
-        }
-        // (A store first, as the game picks one, then something of it.)
-        let kinds: Vec<&str> = [(grocery, GROCERY), (bookstore, BOOKSTORE)].into_iter().filter(|(o, s)| *o && stock.iter().any(|x| x.0 == *s)).map(|x| x.1).collect();
-        let Some(&store) = kinds.choose(&mut rng) else { continue };
-        let of: Vec<&(&str, String, String, i64)> = stock.iter().filter(|x| x.0 == store).collect();
-        let Some(&&(_, ref item, ref name, price)) = of.choose(&mut rng) else { continue };
-        let blowout = rng.random_bool(BLOWOUT_CHANCE);
-        let off = discount(price, blowout);
-        let cost = coupon_price(price, off);
-        // (Good to the end of the third day, the game's `kNumDaysToExpire`.)
-        let until = (clock.minutes / 1440.0).floor() * 1440.0 + DAYS * 1440.0;
-        crate::inventory::give(&mut commands, me, ItemKind::Coupon, key(store, item, until), format!("Coupon for {name}"), off as u8, cost, 1);
+        let Some(note) = create(&mut commands, &coupons, me, &ui.data, clock.minutes) else { continue };
         coupons.clipped.insert(now.0);
-        let shop = if store == GROCERY { "grocery store" } else { "bookstore" };
-        info!("{} clipped a coupon: {name}, §{cost} ({off}% off)", sim.first);
-        notes.push(format!("{}Coupon for {name} at any {shop} for §{cost} ({off}% off!). Expires in 3 days.", if blowout { "Blowout Special\n" } else { "" }));
+        info!("{} clipped a coupon", sim.first);
+        notes.push(note);
     }
     coupons.clipped.retain(|p| commands.get_entity(*p).is_ok());
+}
+
+impl Coupons {
+    /// Whether the town has a store a coupon could be for.
+    pub fn any_store(&self) -> bool {
+        self.stores.is_some_and(|(g, b)| g || b)
+    }
+}
+
+/// A coupon (`Coupon.Create`): for something a store of the town sells (a store chosen first,
+/// then one of its things), at its discount, into a Sim's inventory; what it says.
+pub fn create(commands: &mut Commands, coupons: &Coupons, me: Entity, d: &s3bake::gamedata::GameDataBaked, now: f64) -> Option<String> {
+    let mut rng = rand::rng();
+    let (grocery, bookstore) = coupons.stores.unwrap_or_default();
+    let mut stock: Vec<(&str, String, String, i64)> = Vec::new();
+    if grocery {
+        stock.extend(d.ingredients.iter().filter(|i| !i.kind && i.can_buy && i.price > 0).map(|i| (GROCERY, i.key.clone(), i.name.clone(), crate::ingredients::store_price(i))));
+    }
+    if bookstore {
+        stock.extend(d.novels.iter().filter(|b| b.in_store && b.price > 0).map(|b| (BOOKSTORE, b.key.clone(), b.name.clone(), b.price)));
+        stock.extend(d.skill_books.iter().filter(|b| b.price > 0).map(|b| (BOOKSTORE, b.key.clone(), b.name.clone(), b.price)));
+        stock.extend(d.recipes.iter().filter(|r| r.book_price > 0).map(|r| (BOOKSTORE, r.key.clone(), r.name.clone(), r.book_price as i64)));
+    }
+    let kinds: Vec<&str> = [(grocery, GROCERY), (bookstore, BOOKSTORE)].into_iter().filter(|(o, s)| *o && stock.iter().any(|x| x.0 == *s)).map(|x| x.1).collect();
+    let &store = kinds.choose(&mut rng)?;
+    let of: Vec<&(&str, String, String, i64)> = stock.iter().filter(|x| x.0 == store).collect();
+    let &&(_, ref item, ref name, price) = of.choose(&mut rng)?;
+    let blowout = rng.random_bool(BLOWOUT_CHANCE);
+    let off = discount(price, blowout);
+    let cost = coupon_price(price, off);
+    // (Good to the end of the third day, the game's `kNumDaysToExpire`.)
+    let until = (now / 1440.0).floor() * 1440.0 + DAYS * 1440.0;
+    crate::inventory::give(commands, me, ItemKind::Coupon, key(store, item, until), format!("Coupon for {name}"), off as u8, cost, 1);
+    let shop = if store == GROCERY { "grocery store" } else { "bookstore" };
+    info!("coupons: {name}, §{cost} ({off}% off)");
+    Some(format!("{}Coupon for {name} at any {shop} for §{cost} ({off}% off!). Expires in 3 days.", if blowout { "Blowout Special\n" } else { "" }))
 }
 
 /// Coupons past their day, gone (the game's `OnExpired`).

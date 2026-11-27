@@ -2079,9 +2079,10 @@ const NOTES_SHOW_DELAY: f32 = 0.5;
 const NOTES_TIMEOUT: f32 = 10.0;
 const NOTES_KEPT: f32 = 120.0;
 
-/// A notification card's height: taller for longer words (about 44 characters a line).
+/// A notification card's height: taller for longer words (about 44 characters a line, each
+/// paragraph its own lines).
 fn note_height(msg: &str) -> f32 {
-    let lines = (msg.chars().count() as f32 / 44.0).ceil().max(2.0);
+    let lines = msg.split('\n').map(|p| (p.chars().count() as f32 / 44.0).ceil().max(1.0)).sum::<f32>().max(2.0);
     (lines * 14.0 + 16.0).max(NOTE_HEIGHT)
 }
 
@@ -2676,5 +2677,12 @@ mod note_tests {
         assert_eq!(note_style("The police caught the burglar! Nothing was taken.", false), NoteStyle::Positive);
         assert_eq!(note_style("Bella would like to come over.", true), NoteStyle::Talking);
         assert_eq!(note_style("You can't afford that.", false), NoteStyle::Negative);
+    }
+    #[test]
+    fn a_notices_card_grows_for_its_paragraphs() {
+        assert_eq!(note_height("Short."), NOTE_HEIGHT);
+        let one = note_height(&"word ".repeat(40));
+        let broken = note_height(&format!("A reply:\n\n\"{}\"\n-\nSomeone", "word ".repeat(40)));
+        assert!(broken > one + 3.0 * 14.0 - 1.0, "{one} {broken}");
     }
 }

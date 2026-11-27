@@ -885,6 +885,8 @@ pub enum MoodletKind {
     Technophobia,
     /// A Technophobe's sabotage come off (`sabotage`).
     FightThePower,
+    /// A forum posting gone unanswered (`forums`).
+    Disappointed,
     /// Out on a community lot worth the look (the game's `BuffBeautifulView`, by the lot's kind),
     /// and a graveyard's creeps (`CreepyGraveyard`): `traitmoods`.
     BeautifulPark,
@@ -973,7 +975,7 @@ pub enum MoodletKind {
 }
 
 impl MoodletKind {
-    pub const ALL: [MoodletKind; 206] = {
+    pub const ALL: [MoodletKind; 207] = {
         use MoodletKind::*;
         [
             Hungry, Starving, StrainedBladder, Tired, Exhausted, Lonely, Smelly, Bored, WellRested, Comfy, SqueakyClean,
@@ -988,7 +990,7 @@ impl MoodletKind {
             AnxiousSink, AnxiousStove, AnxiousFireplace, FeelingCalm, Charitable, FiendishlyDelighted,
             RudeAwakening, CryingBaby, Stuffed, NewStuff, Sore,
             OneWithNature, PlaguedByNature, EnjoyingSolitude, TooManyPeople, StuffTaken, AfraidOfTheDark, FeelingLucky, FeelingUnlucky, Excited, GreatKiss,
-            Technophobia, Hydrophobic, FightThePower, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
+            Technophobia, Hydrophobic, FightThePower, Disappointed, BeautifulPark, LovelyPool, BeautifulGarden, BeautifulBistro, CreepyGraveyard,
             SaddleSore, ForciblyDismounted, SavingTheEnvironment, NewKittens, NewPuppies, NewFoal,
             HungryPet, VeryHungryPet, StarvingPet, HasToPeePet, ReallyHasToPeePet, SleepyPet, TiredPet, ExhaustedPet, LonelyPet, DesolatePet,
             GrungyPet, SmellyPet, StrainedPet, StressedPet, Amused, Delighted, ItchingToScratch, ClawsOut, PurrfectlyManicured, PentUp,
@@ -1173,6 +1175,7 @@ impl MoodletKind {
             GreatKiss => md("Great Kiss", "Great kissers give amazing smooches.", 15, 3.0),
             Technophobia => md("Technophobia", "For some Sims, using technology is an unsettling experience.", -10, 3.0),
             FightThePower => md("Fight the Power", "Keepin' the man off your back never felt so good. Sock it to him!", 15, 2.0),
+        Disappointed => md("Disappointed", "Some Sims just hate it when they blow a chance to impress others.", -15, 24.0),
             BeautifulPark => md("Beautiful Park", "The money City Hall put into this park was well spent! Swing sets, slides, and jungle gyms, oh my!", 15, 0.0),
             LovelyPool => md("Lovely Pool", "The pool is so clean and pristine. Chlorine sure works wonders!", 15, 0.0),
             BeautifulGarden => md("Beautiful Garden", "This garden is lovely and the fertilizer doesn't stink!", 50, 0.0),
@@ -1395,6 +1398,7 @@ impl MoodletKind {
             GreatKiss => ("GreatKisser", true),
             Technophobia => ("AntiTV", true),
             FightThePower => ("FightThePower", true),
+        Disappointed => ("Disappointed", true),
             BeautifulPark | LovelyPool | BeautifulGarden | BeautifulBistro => ("BeautifulView", true),
             CreepyGraveyard => ("CreepyGraveyard", true),
             Hydrophobic => ("Hydrophobic", true),

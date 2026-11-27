@@ -577,6 +577,12 @@ pub fn eyes_by_look(look: u64) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// A woman's or a man's first name.
+pub fn random_given_name(rng: &mut impl Rng, female: bool) -> String {
+    let names: &[&str] = if female { &FIRST_F } else { &FIRST_M };
+    names[rng.random_range(0..names.len())].to_string()
+}
+
 /// A first name, a girl's or a boy's as a coin falls (the game's `GetRandomGivenName`).
 pub fn random_first_name(rng: &mut impl Rng) -> String {
     let names: &[&str] = if rng.random_bool(0.5) { &FIRST_F } else { &FIRST_M };

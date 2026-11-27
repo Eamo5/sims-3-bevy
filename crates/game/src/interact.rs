@@ -1612,6 +1612,13 @@ pub enum Special {
     BuyKingCobra,
     /// A camera picked up into the Sim's inventory (`photos`).
     PocketCamera,
+    /// At the computer: a forum post trolled or made inappropriate, the replies checked, coupons
+    /// looked for, a blog written (`forums`).
+    TrollForum,
+    InappropriatePost,
+    CheckResponses,
+    FindCoupons,
+    Blog,
 }
 
 impl Special {
@@ -1936,7 +1943,7 @@ const SABOTAGE: InteractionDef = InteractionDef { autonomous: false, special: Sp
 /// (The TV watched: from a seat facing it, or standing.)
 const WATCH_TV: InteractionDef = InteractionDef { autonomous: false, special: Special::WatchTv, ..def("Watch the TV", 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 55.0], Pose::Stand) };
 const WATCH_TV_SEATED: InteractionDef = InteractionDef { on_object: true, pose: Pose::Sit, per_hour: [0.0, 0.0, 3.0, 0.0, 0.0, 55.0], ..WATCH_TV };
-static COMPUTER: [InteractionDef; 18] = [
+static COMPUTER: [InteractionDef; 23] = [
     def("Play Computer Games", 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 60.0], Pose::Use),
     // (The game's `ChatRandom`: its ITUN's Social 50, Fun 15 an hour.)
     InteractionDef { special: Special::ChatOnline, ..def("Chat Online", 60.0, [0.0, 0.0, -2.0, 50.0, 0.0, 15.0], Pose::Use) },
@@ -1963,6 +1970,14 @@ static COMPUTER: [InteractionDef; 18] = [
     SABOTAGE,
     // (The game's `WriteReport`: a report or story typed up, till it's done.)
     InteractionDef { autonomous: false, special: Special::WriteReport, ..def("Write Report", 150.0, N, Pose::Use) },
+    // (The game's forum postings, the traits' own: `MakeForumPostingTroll` (fun 15 an hour),
+    // `MakeForumPostingInappropriate` (10), `CheckForResponses`; a Frugal Sim's `FindCoupons`;
+    // anyone's `Blog` (fun 10, Writing 350 an hour): `forums`.)
+    InteractionDef { autonomous: false, special: Special::TrollForum, ..def(crate::forums::TROLL, 120.0, [0.0, 0.0, -2.0, 0.0, 0.0, 15.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::InappropriatePost, ..def(crate::forums::INAPPROPRIATE, 120.0, [0.0, 0.0, -2.0, 0.0, 0.0, 10.0], Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::CheckResponses, ..def(crate::forums::CHECK, 60.0, N, Pose::Use) },
+    InteractionDef { autonomous: false, special: Special::FindCoupons, ..def(crate::forums::FIND_COUPONS, 60.0, [0.0, 0.0, -2.0, 0.0, 0.0, 0.0], Pose::Use) },
+    InteractionDef { autonomous: false, skill: Some("Writing"), special: Special::Blog, ..def(crate::forums::BLOG, 60.0, [0.0, 0.0, -3.0, 0.0, 0.0, 10.0], Pose::Use) },
 ];
 static CRIB: [InteractionDef; 1] = [InteractionDef {
     until_full: Some(ENERGY),
@@ -3549,6 +3564,8 @@ pub fn practice_points(name: &str) -> f32 {
         "Play a Ranked Match" => 600.0,
         // (PracticeWriting_Computer; a novel, the Computer's kWritingNovelPointsPerHour.)
         "Practice Writing" => 650.0,
+        // (Blog_Computer's SkillWriting.)
+        "Blog" => 350.0,
         // (SolveHardProblems_Computer's SkillLogic.)
         "Solve Hard Problems" => 200.0,
         "Write Novel" => 500.0,
@@ -5579,6 +5596,8 @@ pub(crate) fn run_actions(
                                             });
                                         }
                                         Special::Hack | Special::WorkFromHome => {}
+                                        // (Their outcomes as they go: `forums`.)
+                                        Special::TrollForum | Special::InappropriatePost | Special::CheckResponses | Special::FindCoupons | Special::Blog => {}
                                         Special::Overclock => {
                                             commands.entity(me).insert(crate::computertraits::Overclocked(*target));
                                         }

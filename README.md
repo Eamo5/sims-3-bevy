@@ -179,6 +179,22 @@ installation is unreachable.
   work hours (the computer's own performance an hour: 3, 4 or 5 by how good it is, paid for the
   hours); a Bookworm can Join the Book Club (§250 for life, kept in saves), and every
   Monday a book they haven't got comes in the mail for each member, onto the shelves.
+- **Forums, blogs and coupons at the computer**, as the game's `Computer`: the Grumpy, the Evil,
+  the Mean-Spirited and the Rebellious "Troll On Forum" (fun 15 an hour), the Inappropriate
+  "Make Inappropriate Forum Post" (fun 10), teens and up, Technophobes never, typing till the
+  post's done (each ten minutes a chance in three and a third, `kLengthVariance`): posted, they
+  Fight the Power and are told "Check back later to see if anyone has responded to your forum
+  posting." Half the posts draw a reply three to twenty-four hours on (the XML's
+  `kMinimumTimeToResponse`, `kAverageTimeToExpire`); the rest expire after a day, and every post's
+  gone after two. With posts out, "Check For Responses" reads the replies one by one, ten minutes
+  each (Fiendishly Delighted: "Your forum post got a reply:" and a stranger's words, the game's
+  `PostResponseTroll0`... a man's or a woman's, signed with a name of the town's), or finds them
+  still waiting ("No one has replied to your forum posting yet. Better check back later."), or
+  all expired (Disappointed, its −15 for a day). A Frugal Sim can "Find Coupons" where the town
+  has a grocery or a bookstore (each ten minutes a chance in five of one, two at most), and
+  anyone teen and up can "Blog" (fun 10 an hour, Writing 350). The notices' cards grow for
+  their paragraphs. The posts are kept in saves. `FORUMS_TEST=troll|inappropriate|check|
+  coupons|blog|menu`, `FORUMS_POSTS=<n>`, `FORUMS_REPLIED=1` (tests).
 - **Writing novels** by the game's Writing tuning: at a computer, "Write Novel" offers the
   genres the Sim has opened up (Fiction and Non-Fiction to start; Sci-Fi, Trashy, Drama,
   Humor, Mystery and Romance with skill — sooner for the good-humoured and hopeless romantics;
