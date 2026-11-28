@@ -219,7 +219,10 @@ pub fn build_world(baked: &BakedData, world: &WorldBaked) -> WorldBuild {
     let textures = par_map(&tex_keys, |k| (*k, cpu_texture(baked, *k)));
     // (Only the species in the town are grown, each once.)
     let used: HashSet<u64> = world.trees.iter().map(|t| t.kind).collect();
-    let to_grow: Vec<&TreeKindBaked> = world.tree_kinds.iter().filter(|k| k.round && k.speedtree.is_some() && used.contains(&k.kind)).collect();
+    // (NO_GROWN=1, tests: only the billboards.)
+    let grow = std::env::var_os("NO_GROWN").is_none();
+    let to_grow: Vec<&TreeKindBaked> = world.tree_kinds.iter().filter(|k| grow && k.round && k.speedtree.is_some() && used.contains(&k.kind)).collect();
+    debug!("growing {:?}", to_grow.iter().map(|k| format!("{:016X} {} {:?}", k.kind, k.name, k.leaf_tint)).collect::<Vec<_>>());
     let grown = par_map(&to_grow, |k| crate::speedtrees::grow(k).map(|g| (k.kind, g))).into_iter().flatten().collect();
     WorldBuild {
         models,
@@ -397,8 +400,11 @@ fn spawn_world_content(
                 VisibilityRange::abrupt(0.0, 900.0),
             ));
             // (Up close, grown.)
-            for (mesh, mat) in g.iter().flat_map(|g| g.parts.iter()) {
-                commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(*aabb, |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::near_range(), bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
+            for (mesh, mat, foliage) in g.iter().flat_map(|g| g.parts.iter()) {
+                let mut e = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(*aabb, |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::near_range(), bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
+                if *foliage {
+                    e.insert(bevy::light::NotShadowReceiver);
+                }
             }
             continue;
         }

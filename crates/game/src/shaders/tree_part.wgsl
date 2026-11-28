@@ -96,10 +96,10 @@ fn vertex(v: Vertex) -> VertexOutput {
 #endif
 #else
     out.world_normal = mesh_functions::mesh_normal_local_to_world(v.normal, v.instance_index);
-    // (Leaves and fronds lit a little towards the view, as SpeedTree's are: the crown's not
-    // black on its far side.)
+    // (Leaves and fronds lit mostly towards the view and up, as SpeedTree's and the billboards'
+    // are: the crown's not black on its far side.)
     if (mode > 0.5) {
-        out.world_normal = normalize(out.world_normal + normalize(cam - p) * 0.5);
+        out.world_normal = normalize(out.world_normal * 0.4 + normalize(cam - p) * 0.75 + vec3<f32>(0.0, 0.5, 0.0));
     }
 #endif
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX

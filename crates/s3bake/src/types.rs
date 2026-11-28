@@ -29,7 +29,7 @@ pub const T_HAT_LAYER: u32 = 0x0CA5_4A70;
 /// animated texture's first frame.
 pub const OBJECTS_VERSION: u32 = 6;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 82;
+pub const WORLD_VERSION: u32 = 83;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -230,6 +230,8 @@ pub struct TreeKindBaked {
     pub bark: Option<Key>,
     pub composite: Option<Key>,
     pub envelope: Vec<f32>,
+    /// What the composite map's leaves are multiplied by to be as bright as the billboard's.
+    pub leaf_tint: Option<[f32; 3]>,
 }
 
 /// One road / sidewalk / intersection mesh, already in world space.

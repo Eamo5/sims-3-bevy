@@ -102,6 +102,44 @@ pub fn round_views(img: &s3formats::dds::Rgba) -> Option<(Vec<[f32; 4]>, Option<
     Some((views, top.map(|i| uv(cells[i]))))
 }
 
+/// A composite map's quad as a rectangle (u0, v0, u1, v1).
+fn quad_rect(q: &[f32; 8]) -> [f32; 4] {
+    let (us, vs) = ([q[0], q[2], q[4], q[6]], [q[1], q[3], q[5], q[7]]);
+    [us.iter().copied().fold(1.0, f32::min), vs.iter().copied().fold(1.0, f32::min), us.iter().copied().fold(0.0, f32::max), vs.iter().copied().fold(0.0, f32::max)]
+}
+
+/// The average linear colour of what's solid in a picture's rectangles.
+pub fn average(img: &s3formats::dds::Rgba, rects: &[[f32; 4]]) -> Option<[f32; 3]> {
+    let lin = |c: u8| {
+        let c = c as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let (mut sum, mut n) = ([0.0f32; 3], 0usize);
+    for r in rects {
+        let (x0, y0) = ((r[0] * img.width as f32) as usize, (r[1] * img.height as f32) as usize);
+        let (x1, y1) = (((r[2] * img.width as f32) as usize).min(img.width), ((r[3] * img.height as f32) as usize).min(img.height));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let p = &img.data[(y * img.width + x) * 4..][..4];
+                if p[3] > 128 {
+                    for k in 0..3 {
+                        sum[k] += lin(p[k]);
+                    }
+                    n += 1;
+                }
+            }
+        }
+    }
+    (n > 16).then(|| sum.map(|s| s / n as f32))
+}
+
+/// What the leaves' own colour's multiplied by to look as the billboard does (each channel's
+/// ratio, kept within reason).
+pub fn leaf_tint(billboard: &[f32; 3], leaves: &[f32; 3]) -> Option<[f32; 3]> {
+    let t = [0, 1, 2].map(|k| (billboard[k] / leaves[k].max(1e-4)).clamp(0.6, 3.5));
+    t.iter().all(|v| v.is_finite()).then_some(t)
+}
+
 /// How many bands of height a tree's outline is measured in.
 pub const ENVELOPE_BANDS: usize = 24;
 
@@ -247,6 +285,14 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
             textures.push((k, false));
         }
         let envelope = if speedtree.is_some() { envelope(&img, &views) } else { Vec::new() };
+        // (The leaves' colour, as the billboard has them lit, over the composite map's own: the
+        // grown tree's leaves made as bright as its pictures are.)
+        let leaf_tint = speedtree.as_ref().zip(composite).and_then(|(t, _)| {
+            let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, fnv64(&t.composite));
+            let comp = pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)).and_then(|d| s3formats::dds::decode(&d, 512))?;
+            let rects: Vec<[f32; 4]> = t.leaf_quads.iter().map(|q| quad_rect(q)).collect();
+            leaf_tint(&average(&img, &views)?, &average(&comp, &rects)?)
+        });
         out.push(TreeKindBaked {
             kind,
             billboard: key,
@@ -261,7 +307,28 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
             bark,
             composite,
             envelope,
+            leaf_tint,
         });
     }
     (out, textures)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn leaves_are_brightened_to_their_billboard_within_reason() {
+        let img = s3formats::dds::Rgba { width: 2, height: 2, data: vec![255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0] };
+        let a = average(&img, &[[0.0, 0.0, 1.0, 1.0]]);
+        assert!(a.is_none(), "too little that's solid");
+        let t = leaf_tint(&[0.2, 0.3, 0.05], &[0.1, 0.1, 0.1]).unwrap();
+        assert_eq!(t, [2.0, 3.0, 0.6]);
+        assert_eq!(leaf_tint(&[1.0, 1.0, 1.0], &[0.01, 0.01, 0.01]).unwrap(), [3.5; 3]);
+    }
+
+    #[test]
+    fn a_quad_is_its_corners_extent() {
+        assert_eq!(quad_rect(&[0.9925, 0.4925, 0.5075, 0.4925, 0.5075, 0.0075, 0.9925, 0.0075]), [0.5075, 0.0075, 0.9925, 0.4925]);
+    }
 }

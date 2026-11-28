@@ -968,6 +968,9 @@ fn main() {
             && let Some((views, _)) = s3bake::trees::round_views(bb)
         {
             s3bake::spt::fit(&mut g, &s3bake::trees::envelope(bb, &views));
+            let rects: Vec<[f32; 4]> = t.leaf_quads.iter().map(|q| { let (us, vs) = ([q[0], q[2], q[4], q[6]], [q[1], q[3], q[5], q[7]]); [us.iter().copied().fold(1.0, f32::min), vs.iter().copied().fold(1.0, f32::min), us.iter().copied().fold(0.0, f32::max), vs.iter().copied().fold(0.0, f32::max)] }).collect();
+            let (a, b) = (s3bake::trees::average(bb, &views), comp.as_ref().and_then(|c| s3bake::trees::average(c, &rects)));
+            println!("billboard {a:?} leaves {b:?} tint {:?}", a.zip(b).and_then(|(a, b)| s3bake::trees::leaf_tint(&a, &b)));
         }
         println!(
             "{} bark verts, {} frond verts, {} leaves; bounds {:?}..{:?}; bark {:?} composite {:?} billboard {:?}",

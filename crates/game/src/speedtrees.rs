@@ -62,8 +62,11 @@ fn grow_lot_trees(
             }
         }
         commands.entity(e).with_children(|p| {
-            for (mesh, mat) in &g.parts {
-                p.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, g.aabb, GrownPart));
+            for (mesh, mat, foliage) in &g.parts {
+                let mut e = p.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, g.aabb, GrownPart));
+                if *foliage {
+                    e.insert(bevy::light::NotShadowReceiver);
+                }
             }
         });
     }
@@ -126,6 +129,9 @@ impl MaterialExtension for TreePartExt {
     }
 }
 
+/// How much brighter the leaves are drawn than their maps: SpeedTree's leaves are lit as much
+/// from the light through them and round them as on them (as bright as the billboards are).
+const FOLIAGE_LIGHT: f32 = 1.4;
 /// How many leaf cards a tree's grown with (SpeedTree's levels of detail keep about so many).
 const LEAF_BUDGET: usize = 450;
 /// Out to here (metres from the camera) a tree's drawn grown; beyond, from its pictures.
@@ -185,7 +191,9 @@ pub fn grow(k: &TreeKindBaked) -> Option<GrownCpu> {
 /// A species ready to draw: its parts' meshes and materials, and its room.
 #[derive(Clone)]
 pub struct Grown {
-    pub parts: Vec<(Handle<Mesh>, Handle<TreePartMaterial>)>,
+    /// Each part's mesh and material, and whether it's leaves or fronds (not darkened by the
+    /// tree's own shadow: SpeedTree's leaves have their shading in them).
+    pub parts: Vec<(Handle<Mesh>, Handle<TreePartMaterial>, bool)>,
     pub aabb: Aabb,
 }
 
@@ -194,10 +202,14 @@ pub struct Grown {
 pub fn ready(cpu: GrownCpu, k: &TreeKindBaked, bark: Option<Handle<Image>>, composite: Handle<Image>, evergreen: bool, meshes: &mut Assets<Mesh>, mats: &mut Assets<TreePartMaterial>) -> Grown {
     let season = Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32);
     let params = |mode: f32| Vec4::new(mode, k.height.max(0.3), cpu.reach, 0.0);
-    let foliage = |tex: Handle<Image>| StandardMaterial {
+    // (The leaves as bright as the billboard's, the twigs halfway: `leaf_tint`.)
+    let tint = k.leaf_tint.unwrap_or([1.0; 3]).map(|t| t.max(1.0) * FOLIAGE_LIGHT);
+    let foliage = |tex: Handle<Image>, power: f32| StandardMaterial {
         base_color_texture: Some(tex),
+        base_color: Color::linear_rgb(tint[0].powf(power), tint[1].powf(power), tint[2].powf(power)),
         alpha_mode: AlphaMode::AlphaToCoverage,
-        double_sided: true,
+        // (Both sides drawn, but lit as they're turned, not flipped: `tree_part.wgsl`.)
+        double_sided: false,
         cull_mode: None,
         perceptual_roughness: 0.9,
         reflectance: 0.1,
@@ -208,13 +220,13 @@ pub fn ready(cpu: GrownCpu, k: &TreeKindBaked, bark: Option<Handle<Image>>, comp
     let mut parts = Vec::new();
     if cpu.bark.count_vertices() > 0 {
         let base = StandardMaterial { base_color_texture: bark, base_color: Color::WHITE, perceptual_roughness: 0.95, reflectance: 0.08, ..default() };
-        parts.push((meshes.add(cpu.bark), mats.add(TreePartMaterial { base, extension: TreePartExt { part: TreePart { params: params(0.0), season } } })));
+        parts.push((meshes.add(cpu.bark), mats.add(TreePartMaterial { base, extension: TreePartExt { part: TreePart { params: params(0.0), season } } }), false));
     }
     if cpu.fronds.count_vertices() > 0 {
-        parts.push((meshes.add(cpu.fronds), mats.add(TreePartMaterial { base: foliage(composite.clone()), extension: TreePartExt { part: TreePart { params: params(1.0), season } } })));
+        parts.push((meshes.add(cpu.fronds), mats.add(TreePartMaterial { base: foliage(composite.clone(), 0.5), extension: TreePartExt { part: TreePart { params: params(1.0), season } } }), true));
     }
     if cpu.leaves.count_vertices() > 0 {
-        parts.push((meshes.add(cpu.leaves), mats.add(TreePartMaterial { base: foliage(composite), extension: TreePartExt { part: TreePart { params: params(2.0), season } } })));
+        parts.push((meshes.add(cpu.leaves), mats.add(TreePartMaterial { base: foliage(composite, 1.0), extension: TreePartExt { part: TreePart { params: params(2.0), season } } }), true));
     }
     Grown { parts, aabb: cpu.aabb }
 }
