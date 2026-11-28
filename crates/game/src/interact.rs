@@ -2996,6 +2996,7 @@ pub fn social_clips(name: &str, little: Option<Age>, held: bool) -> &'static [&'
         // (The wand out, the spell cast, and it takes.)
         "Cast Charm Spell" | "Cast Curse" => &["a2a_magicWand_castSpell_lowSkill_loop", "a2a_magicWand_castSpell_lowSkill_success"],
         // (The one throws, the other catches: soft, hard, wimpy and showing off.)
+        crate::careercelebs::SIGN => &["a2a_soc_Neutral_Autograph_Friendly_Neutral"],
         "Play Catch" => &["a2a_soc_playCatch_throwSoft", "a2a_soc_playCatch_throwHard", "a2a_soc_playCatch_throwWimpy", "a2a_soc_playCatch_throwHighSkill"],
         "Tell Dramatic Story" => &["a2a_soc_Neutral_TellDramaticStory_Impressive_Neutral"],
         "Brag" => &["a2a_soc_Neutral_BoastAbout_Impressive_Friendly"],
@@ -6253,6 +6254,11 @@ pub(crate) fn run_actions(
                                                     info!("competition promoted ({} in all)", j.tally.promoted);
                                                 }
                                             });
+                                        }
+                                        // (An autograph signed: the fan's had it, `careercelebs`.)
+                                        SocialEffect::SignAutograph => {
+                                            let fan = *target;
+                                            commands.queue(move |w: &mut World| crate::careercelebs::signed(w, me, fan));
                                         }
                                         // (Tag taken up: the game's on, `playtag`.)
                                         SocialEffect::PlayTag if action.social_outcome.is_none_or(|o| o.accepted) => {

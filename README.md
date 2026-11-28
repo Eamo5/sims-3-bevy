@@ -2039,6 +2039,21 @@ installation is unreachable.
   `kGathererTraitSpaceRocksAnalyzeBetter`). With half the kinds analyzed a new kind's tried for
   five times over, with all of them one worth two and a half times or more (the Collecting
   skill's rock collector challenges). `ANALYZE_TEST=1|all|menu` (tests).
+- **Career celebrities**, as the base game's `Celebrity` has them: a rock star from level 8, a
+  symphony player from 9, a sports star from 8 and a politician at 10 (`Career.IsCelebrity`, the
+  tuned levels). Anyone child and up within eight metres of one (not of their household, nor a
+  friend or sweetheart) may react, eight times in ten at each of the broadcaster's pulses, once
+  in two hours: a cheer or a wave, now and then a boo (`kProportionOfSimsThatRespondNegatively`
+  0.15). Taken well, they get on a little (friendly 25, liking 3) and most go over: some, if the
+  celebrity signs autographs (the musicians and athletes, not the politicians), to ask for one,
+  the rest to greet them. Cheered five times in two hours (a boo taking off half), the celebrity
+  is a Celebrity (+30, two hours). A fan after an autograph follows them about at a run when
+  they get five metres off, excited, then by turns impatient, then only impatient (the game's
+  anims, ten to fifty minutes each), the celebrity in their thoughts; the celebrity *Sign
+  Autograph*s for them (the game's social and clip, of their own accord when free), or *Deny
+  Autograph* turns them down (a shoo), and turned down or kept waiting too long they like them 50
+  less, take it as an insult and sulk, cry or boo. `CELEB_TEST=<career>:<level>[:<branch>]`,
+  `CELEB_FAN=1`, `CELEB_SIGN=1` (tests).
 - **Celebrities** (Late Night), as the game's `CelebrityManager` and `Celebrity` tables have
   them: each Sim's level, Fame Leecher to Superstar, the world's own celebrities as its
   `CharacterImport` says (Bridgeport's twenty: Matthew Hamming and Lola Belle Superstars), kept

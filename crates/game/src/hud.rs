@@ -1240,7 +1240,7 @@ fn world_click(
         Res<crate::potty::Potties>,
         Query<(Entity, &GlobalTransform, &crate::fire::Fire)>,
     ),
-    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res, cobras_q, (nectar_q, recipes_q, posts_q, fire_colors_q, memorized_q, off_floor_q, pregnant_q))))): (
+    (selected, pet_sel, bowl_food_q, baked, (pet_info_q, home_objects_q, unnamed_q, (toy_objects_q, toycrates_q, holding_pet_q, carried_pets_q, courts_res, training_q, nav_grid, seesaws_res, costume_q, playground_q, (treehouses_res, house_info_q, in_tree_q, knocked_q, breakers_res, cobras_q, (nectar_q, recipes_q, posts_q, fire_colors_q, memorized_q, off_floor_q, pregnant_q, seekers_q))))): (
         Query<(Entity, &Relationships, &Sim, &crate::sim::Motives), With<Selected>>,
         Query<(Entity, &crate::pets::Pet, Option<&crate::pets::PetBonds>, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>), (With<Selected>, With<crate::pets::HomePet>)>,
         Query<&crate::petneeds::BowlFood>,
@@ -1249,7 +1249,7 @@ fn world_click(
             Query<(&crate::pets::HomePet, Has<crate::petlitters::PetPregnant>, Option<&crate::petaging::PetAge>)>,
             Query<&GameObject, Without<crate::visit::LotObject>>,
             Query<(), With<crate::petlitters::Unnamed>>,
-            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>, Query<(), With<crate::snakecharm::KingCobra>>, (Query<&crate::nectar::Maker>, Query<&crate::nectar::Recipes>, Query<&crate::forums::Posts>, Query<&crate::fireplace::FireColor>, Query<(), With<crate::photos::Memorized>>, Query<(), Or<(With<crate::little::Carried>, With<crate::little::InCrib>)>>, Query<(), With<crate::little::Pregnancy>>))),
+            (Query<(Entity, &GameObject), Without<crate::visit::LotObject>>, Query<&crate::toycrate::ToyCrate>, Query<&crate::petcarry::HoldingPet>, Query<(), With<crate::petcarry::CarriedPet>>, Res<crate::hopscotch::Courts>, Query<(Entity, &crate::trainingposts::Training)>, Option<Res<crate::nav::NavGrid>>, Res<crate::seesaw::Boards>, Query<(Option<&crate::costumes::WornCostume>, Option<&crate::simbody::Wearing>)>, Query<(Entity, &GameObject, Option<&crate::visit::LotObject>, Option<&crate::interact::UsedBy>)>, (Res<crate::treehouse::Houses>, Query<(&crate::treehouse::HouseInfo, &crate::treehouse::HouseRules)>, Query<&crate::treehouse::InTreehouse>, Query<&crate::ornaments::KnockedOver>, Res<crate::boardbreaker::Breakers>, Query<(), With<crate::snakecharm::KingCobra>>, (Query<&crate::nectar::Maker>, Query<&crate::nectar::Recipes>, Query<&crate::forums::Posts>, Query<&crate::fireplace::FireColor>, Query<(), With<crate::photos::Memorized>>, Query<(), Or<(With<crate::little::Carried>, With<crate::little::InCrib>)>>, Query<(), With<crate::little::Pregnancy>>, Query<&crate::careercelebs::AutographSeeker>))),
         ),
     ),
     (members_q, laundry, sides_q, moods_q, locks_q, lot_objects_q, journals_q, klepto_q, fridge_stock, postures, (graves_q, queues_q, cuddles_q, convs, ghosts_q, club_q, unflushed, tv_on, (layout_ui, charities_q), (mood_q, smashed_q, trays_q, easel_q, lamps_q), (can_owners, rummaged, tipped_q, family_homes, coupons, real_estate))): (
@@ -1738,6 +1738,10 @@ fn world_click(
                 for (k, play) in crate::swim::PoolPlay::ALL.into_iter().enumerate().rev() {
                     options.insert(at, (play.label().to_string(), ActionKind::Social { target: t, social: crate::swim::POOL_SOCIAL + k }));
                 }
+            }
+            // (One after their autograph: turned down, `careercelebs`.)
+            if seekers_q.get(t).is_ok_and(|s| s.celeb == actor) {
+                options.push((crate::careercelebs::DENY.to_string(), ActionKind::Social { target: t, social: usize::MAX - 9 }));
             }
             if crate::cheats::testing() && keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
                 options.extend(cheat_options(t, member));
@@ -3483,6 +3487,12 @@ fn pie_buttons(
             }
             crate::cheats::ADD_TO_FAMILY => {
                 commands.entity(target).try_insert(crate::interact::JoinHousehold { last_name: None });
+                return;
+            }
+            crate::careercelebs::DENY => {
+                if let Some(a) = actor {
+                    commands.queue(move |w: &mut World| crate::careercelebs::deny(w, a, target));
+                }
                 return;
             }
             crate::cheats::MAKE_HAPPY => {

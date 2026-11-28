@@ -214,7 +214,7 @@ pub fn pick_run(from: Vec2, origin: Vec2, indoors: bool, lot_point: impl Fn(&mut
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
-struct Ways<'w> {
+pub(crate) struct Ways<'w> {
     grid: Option<Res<'w, NavGrid>>,
     upper: Option<Res<'w, UpperFloors>>,
     visited: Option<Res<'w, crate::visit::VisitedLot>>,
@@ -224,7 +224,7 @@ struct Ways<'w> {
 
 impl Ways<'_> {
     /// The walks of the lot a Sim's on (a visited one's, else home's), and whether it's away.
-    fn of(&self, lot: Option<&crate::visit::OnLot>) -> Option<(&NavGrid, Option<&UpperFloors>, bool)> {
+    pub(crate) fn of(&self, lot: Option<&crate::visit::OnLot>) -> Option<(&NavGrid, Option<&UpperFloors>, bool)> {
         match lot.and_then(|l| self.visited.as_deref().filter(|v| v.lot == l.0)) {
             Some(v) => Some((&v.grid, Some(&v.upper), true)),
             None => self.grid.as_deref().map(|g| (g, self.upper.as_deref(), false)),
@@ -232,7 +232,7 @@ impl Ways<'_> {
     }
 
     /// A way there at a run, from their floor to the ground.
-    fn route(&self, lot: Option<&crate::visit::OnLot>, from: Vec2, level: u8, to: Vec2) -> Option<Vec<crate::nav::Waypoint>> {
+    pub(crate) fn route(&self, lot: Option<&crate::visit::OnLot>, from: Vec2, level: u8, to: Vec2) -> Option<Vec<crate::nav::Waypoint>> {
         let (g, u, _) = self.of(lot)?;
         crate::nav::plan_route(g, u, from, level, to, 1)
     }

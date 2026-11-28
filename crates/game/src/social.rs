@@ -318,6 +318,9 @@ pub enum SocialEffect {
     PlayTag,
     /// A child's peek-a-boo with a toddler on the floor (the game's `PlayPeekAboo`).
     PeekABoo,
+    /// A career celebrity's autograph signed for a fan (the game's "Sign Autograph":
+    /// `careercelebs`).
+    SignAutograph,
 }
 
 /// The game's words for peek-a-boo (`PlayPeekAboo`), and its clips (`PeekAboo`'s `c2p_` pair:
@@ -614,7 +617,7 @@ const fn occult(o: crate::sim::Occult, def: SocialDef) -> SocialDef {
 use crate::sim::Occult as O;
 
 use SocialCat::*;
-pub static SOCIALS: [SocialDef; 64] = [
+pub static SOCIALS: [SocialDef; 65] = [
     SocialDef { autonomous: true, ..sd("Chat", Friendly, 25.0, 110.0, 10.0, 8.0, 0.0) },
     SocialDef { effect: SocialEffect::Greet, ..sd("Greet", Friendly, 3.0, 80.0, 5.0, 4.0, 0.0) },
     SocialDef { effect: SocialEffect::HelpHomework, ..sd("Help with Homework", Friendly, 40.0, 60.0, -10.0, 5.0, 0.0) },
@@ -652,6 +655,8 @@ pub static SOCIALS: [SocialDef; 64] = [
     SocialDef { effect: SocialEffect::PutToBed, care: [0.0, 0.0, 0.0, 60.0, 0.0, 0.0], ..sd("Put to Bed", Care, 6.0, 40.0, 0.0, 3.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachWalk, care: [0.0, 0.0, -20.0, 150.0, 0.0, 60.0], ..sd("Teach to Walk", Care, 30.0, 60.0, 20.0, 6.0, 0.0) },
     SocialDef { effect: SocialEffect::TeachTalk, care: [0.0, 0.0, 0.0, 200.0, 0.0, 40.0], ..sd("Teach to Talk", Care, 30.0, 70.0, 10.0, 6.0, 0.0) },
+    // (A celebrity's signature: `careercelebs`.)
+    SocialDef { effect: SocialEffect::SignAutograph, ..sd(crate::careercelebs::SIGN, Friendly, 5.0, 60.0, 10.0, 3.0, 0.0) },
     // (Its ITUN's Social 100 an hour, both ways; liking 5 every five minutes, `kLTRLikingDelta`.)
     SocialDef { autonomous: true, effect: SocialEffect::PeekABoo, care: [0.0, 0.0, 0.0, 100.0, 0.0, 0.0], ..sd(PEEK_A_BOO, Care, 15.0, 100.0, 0.0, 15.0, 0.0) },
     // More of the game's socials.
@@ -1164,6 +1169,12 @@ pub fn available(def: &SocialDef, rel: &Relationship, actor: &Sim, target: &Sim,
         return false;
     }
     // (Tag: children's, and the Childish's: `playtag`.)
+    // (A celebrity's autograph: theirs to sign, of a level for it, `careercelebs`.)
+    if def.effect == SocialEffect::SignAutograph
+        && (target.age.is_little() || !side[0].career.and_then(|c| crate::careers::careers().get(c)).is_some_and(|t| crate::careercelebs::celebrity(t.key, side[0].branch, side[0].level + 1).1))
+    {
+        return false;
+    }
     if def.effect == SocialEffect::PlayTag && !crate::playtag::may_play(actor, target.age, false) {
         return false;
     }
