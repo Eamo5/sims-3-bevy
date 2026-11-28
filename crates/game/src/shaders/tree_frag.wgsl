@@ -11,12 +11,17 @@
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
 }
+#ifdef VISIBILITY_RANGE_DITHER
+#import bevy_pbr::pbr_functions::visibility_range_dither
+#endif
 
 struct TreeBillboard {
     views: array<vec4<f32>, 16>,
     params: vec4<f32>,
     // x: fall colour (0..1), y: leaves gone (0..1), z: snow (0..1), w: 1 for an evergreen
     season: vec4<f32>,
+    // x: within how far of the camera it's left to the grown tree (0: never)
+    near: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> tree: TreeBillboard;
@@ -30,6 +35,9 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
+#ifdef VISIBILITY_RANGE_DITHER
+    visibility_range_dither(in.position, in.visibility_range_dither);
+#endif
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     var c = pbr_input.material.base_color;
     let evergreen = tree.season.w > 0.5;

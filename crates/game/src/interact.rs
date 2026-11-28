@@ -3050,6 +3050,23 @@ mod hang_out_tests {
     use super::*;
 
     #[test]
+    #[ignore]
+    fn list_unhandled_kinds() {
+        let Ok(text) = std::fs::read_to_string(std::env::var("KINDS_FILE").unwrap_or_default()) else { return };
+        for line in text.lines() {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 4 || parts[0] != "KIND" {
+                continue;
+            }
+            let first = parts[3].split(" | ").next().unwrap_or("");
+            let kind = ObjectKind::from_script(parts[1], first);
+            if interactions_for(kind).is_empty() {
+                println!("UNHANDLED {} {} :: {}", parts[2], parts[1], parts[3].chars().take(90).collect::<String>());
+            }
+        }
+    }
+
+    #[test]
     fn children_play_on_jungle_gyms_and_teens_hang_out_on_them() {
         for kind in [ObjectKind::JungleGym, ObjectKind::Slide] {
             let defs = interactions_for(kind);

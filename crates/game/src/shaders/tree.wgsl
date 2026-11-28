@@ -22,6 +22,8 @@ struct TreeBillboard {
     params: vec4<f32>,
     // (The seasons, for the fragment shader.)
     season: vec4<f32>,
+    // x: within how far of the camera it's left to the grown tree (0: never)
+    near: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> tree: TreeBillboard;
@@ -62,6 +64,8 @@ fn vertex(v: Vertex) -> VertexOutput {
     let cam = view.world_position;
     let mid = origin + vec3<f32>(0.0, h * 0.55, 0.0);
     var hide = distance(cam, mid) < h * 1.4;
+    // (Near the camera the tree's drawn grown instead.)
+    hide = hide || (tree.near.x > 0.0 && distance(cam, origin) < tree.near.x);
     let ahead = -back;
     if (ahead.y < -0.05) {
         // Where the view meets the ground at the tree's foot, and how near the crown is to the

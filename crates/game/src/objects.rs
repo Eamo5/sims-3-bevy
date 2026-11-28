@@ -374,6 +374,11 @@ impl ObjectAssets {
         !self.garden.is_empty()
     }
 
+    /// A catalogue tree's, shrub's or flower's species.
+    pub fn garden_kind(&self, objd: Key) -> Option<&s3bake::TreeKindBaked> {
+        self.garden.get(&objd)
+    }
+
     /// A mesh to draw without a skeleton: a skinned part's, its copy without bones and weights
     /// (at rest it's the same shape), else itself. A mesh with bones drawn without its skin
     /// fails the GPU's validation, which ends the game.

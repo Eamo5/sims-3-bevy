@@ -20,7 +20,7 @@ use rand::seq::IndexedRandom;
 use crate::PlayMode;
 use crate::interact::{Action, ActionKind, ActionQueue};
 use crate::nav::{Floor, PathFollow, WalkStyle};
-use crate::sim::{Age, HouseholdMember, Sim};
+use crate::sim::{HouseholdMember, Sim};
 use crate::social::Relationships;
 
 pub struct CareerCelebsPlugin;

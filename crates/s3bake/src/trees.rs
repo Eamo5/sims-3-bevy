@@ -46,7 +46,7 @@ fn tree_bounds(d: &[u8]) -> Option<([f32; 3], [f32; 3])> {
 /// cut, again and again until each piece is one picture), in the atlas's order: the views round
 /// the tree, and the one from above (the odd one out, much bigger than the rest). None when it
 /// doesn't come apart into at least three.
-fn round_views(img: &s3formats::dds::Rgba) -> Option<(Vec<[f32; 4]>, Option<[f32; 4]>)> {
+pub fn round_views(img: &s3formats::dds::Rgba) -> Option<(Vec<[f32; 4]>, Option<[f32; 4]>)> {
     let (w, h) = (img.width, img.height);
     let solid = |x: usize, y: usize| img.data[(y * w + x) * 4 + 3] > 96;
     // Runs of non-empty lines at least a few pixels long.
@@ -100,6 +100,42 @@ fn round_views(img: &s3formats::dds::Rgba) -> Option<(Vec<[f32; 4]>, Option<[f32
     let top = cells.iter().position(|c| area(c) > median * 1.3);
     let views = cells.iter().enumerate().filter(|(i, _)| Some(*i) != top).map(|(_, c)| uv(*c)).collect();
     Some((views, top.map(|i| uv(cells[i]))))
+}
+
+/// How many bands of height a tree's outline is measured in.
+pub const ENVELOPE_BANDS: usize = 24;
+
+/// A tree's outline from its 360° billboard: in bands of height from its foot to its top, how
+/// far it reaches out from its trunk (of its height), the views round it averaged.
+pub fn envelope(img: &s3formats::dds::Rgba, views: &[[f32; 4]]) -> Vec<f32> {
+    let (w, h) = (img.width, img.height);
+    let solid = |x: usize, y: usize| img.data[(y * w + x) * 4 + 3] > 96;
+    let mut sum = vec![0.0f32; ENVELOPE_BANDS];
+    let mut n = 0;
+    for v in views {
+        let (x0, y0, x1, y1) = ((v[0] * w as f32) as usize, (v[1] * h as f32) as usize, ((v[2] * w as f32) as usize).min(w), ((v[3] * h as f32) as usize).min(h));
+        if x1 <= x0 + 2 || y1 <= y0 + 4 {
+            continue;
+        }
+        let tall = (y1 - y0) as f32;
+        // (The trunk: the middle of what's solid in its lowest rows.)
+        let foot: Vec<usize> = (y1.saturating_sub(((y1 - y0) / 30).max(2))..y1).flat_map(|y| (x0..x1).filter(move |&x| solid(x, y))).collect();
+        let mid = if foot.is_empty() { (x0 + x1) as f32 * 0.5 } else { foot.iter().sum::<usize>() as f32 / foot.len() as f32 + 0.5 };
+        let mut band = vec![0.0f32; ENVELOPE_BANDS];
+        for y in y0..y1 {
+            let b = (((y1 - 1 - y) as f32 / tall) * ENVELOPE_BANDS as f32) as usize;
+            let reach = (x0..x1).filter(|&x| solid(x, y)).map(|x| (x as f32 + 0.5 - mid).abs()).fold(0.0, f32::max);
+            band[b.min(ENVELOPE_BANDS - 1)] = band[b.min(ENVELOPE_BANDS - 1)].max(reach / tall);
+        }
+        for (s, b) in sum.iter_mut().zip(band) {
+            *s += b;
+        }
+        n += 1;
+    }
+    if n == 0 {
+        return Vec::new();
+    }
+    sum.iter().map(|s| s / n as f32).collect()
 }
 
 /// Finds the separate tree pictures in a billboard atlas: connected opaque regions.
@@ -199,6 +235,18 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
         let (mn, mx) = pkgs.read_ti(T_TREE_INFO, kind).and_then(|d| tree_bounds(&d)).unwrap_or(([-3.0, 0.0, -3.0], [3.0, 8.0, 3.0]));
         let key = key_of(&tex);
         textures.push((key, false));
+        // (A tree's parameters, to grow it up close, with its bark's and leaves' pictures.)
+        let speedtree = round.then(|| crate::spt::SpeedTree::parse(&spt)).flatten();
+        let tex_of = |stem: &str| {
+            let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, fnv64(stem));
+            (!stem.is_empty() && (pkgs.read(&k).is_some() || pkgs.read_ti(k.t, k.i).is_some())).then(|| key_of(&k))
+        };
+        let bark = speedtree.as_ref().and_then(|t| tex_of(&t.bark));
+        let composite = speedtree.as_ref().and_then(|t| tex_of(&t.composite));
+        for k in [bark, composite].into_iter().flatten() {
+            textures.push((k, false));
+        }
+        let envelope = if speedtree.is_some() { envelope(&img, &views) } else { Vec::new() };
         out.push(TreeKindBaked {
             kind,
             billboard: key,
@@ -209,6 +257,10 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
             height: mx[1] - mn[1].min(0.0),
             radius: ((mx[0] - mn[0]).max(mx[2] - mn[2])) * 0.5,
             name: bb_name.clone(),
+            speedtree: speedtree.filter(|_| composite.is_some()),
+            bark,
+            composite,
+            envelope,
         });
     }
     (out, textures)

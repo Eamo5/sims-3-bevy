@@ -267,16 +267,20 @@ fn seasonal_looks(
     clock: Option<Res<crate::clock::GameClock>>,
     weather: Option<Res<Weather>>,
     mut trees: ResMut<Assets<crate::world::TreeMaterial>>,
+    mut grown: ResMut<Assets<crate::speedtrees::TreePartMaterial>>,
     mut roads: ResMut<Assets<crate::roads::RoadMaterial>>,
     mut last: Local<(Vec3, Vec2, usize, usize)>,
 ) {
     let (Some(clock), Some(w)) = (clock, weather) else { return };
     let tree = w.trees(clock.minutes);
     let road = Vec2::new(w.snow / 100.0, w.wet / 100.0);
-    let (nt, nr) = (trees.len(), roads.len());
+    let (nt, nr) = (trees.len() + grown.len(), roads.len());
     if (tree - last.0).abs().max_element() > 0.01 || nt != last.2 {
         for (_, m) in trees.iter_mut() {
             m.extension.billboard.season = tree.extend(m.extension.billboard.season.w);
+        }
+        for (_, m) in grown.iter_mut() {
+            m.extension.part.season = tree.extend(m.extension.part.season.w);
         }
     }
     if (road - last.1).abs().max_element() > 0.01 || nr != last.3 {

@@ -23,6 +23,7 @@ impl Plugin for WorldPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/tree.wgsl");
         embedded_asset!(app, "shaders/tree_frag.wgsl");
+        embedded_asset!(app, "shaders/tree_shadow.wgsl");
         app.add_plugins(MaterialPlugin::<TreeMaterial>::default())
             .add_systems(OnEnter(AppState::InGame), spawn_world_content)
             .add_systems(Update, (street_lights, imposters_at_night).run_if(in_state(AppState::InGame)));
@@ -48,6 +49,9 @@ pub struct TreeBillboard {
     pub params: Vec4,
     /// x: fall colour, y: leaves gone, z: snow (0..1), w: 1 for an evergreen (`weather`).
     pub season: Vec4,
+    /// x: within how far of the camera it's not drawn (the grown tree is, `speedtrees`; its
+    /// shadow still is), 0 for always.
+    pub near: Vec4,
 }
 
 impl MaterialExtension for TreeExt {
@@ -60,11 +64,14 @@ impl MaterialExtension for TreeExt {
     fn fragment_shader() -> ShaderRef {
         "embedded://sims3/shaders/tree_frag.wgsl".into()
     }
+    fn prepass_fragment_shader() -> ShaderRef {
+        "embedded://sims3/shaders/tree_shadow.wgsl".into()
+    }
 }
 
 /// Whether a tree keeps its leaves through winter: the conifers and palms, by the species its
 /// billboard is named after (or, without a name, a slender tree).
-fn evergreen(k: &TreeKindBaked) -> bool {
+pub(crate) fn evergreen(k: &TreeKindBaked) -> bool {
     let n = k.name.to_ascii_lowercase();
     if n.is_empty() {
         return k.radius < k.height * 0.3;
@@ -97,6 +104,8 @@ pub struct WorldBuild {
     pub instances: Vec<InstanceBaked>,
     pub trees: Vec<TreeBaked>,
     pub tree_kinds: Vec<TreeKindBaked>,
+    /// The species grown up close (`speedtrees`).
+    pub grown: Vec<(u64, crate::speedtrees::GrownCpu)>,
 }
 
 /// A world tree (stand-in for a SpeedTree).
@@ -203,16 +212,22 @@ pub fn build_world(baked: &BakedData, world: &WorldBaked) -> WorldBuild {
         .iter()
         .flat_map(|(_, p)| p.iter().filter_map(|x| x.tex))
         .chain(world.tree_kinds.iter().map(|k| k.billboard))
+        .chain(world.tree_kinds.iter().filter(|k| k.speedtree.is_some()).flat_map(|k| [k.bark, k.composite]).flatten())
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
     let textures = par_map(&tex_keys, |k| (*k, cpu_texture(baked, *k)));
+    // (Only the species in the town are grown, each once.)
+    let used: HashSet<u64> = world.trees.iter().map(|t| t.kind).collect();
+    let to_grow: Vec<&TreeKindBaked> = world.tree_kinds.iter().filter(|k| k.round && k.speedtree.is_some() && used.contains(&k.kind)).collect();
+    let grown = par_map(&to_grow, |k| crate::speedtrees::grow(k).map(|g| (k.kind, g))).into_iter().flatten().collect();
     WorldBuild {
         models,
         textures,
         instances: world.instances.clone(),
         trees: world.trees.clone(),
         tree_kinds: world.tree_kinds.clone(),
+        grown,
     }
 }
 
@@ -259,6 +274,7 @@ fn spawn_world_content(
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut tree_mats: ResMut<Assets<TreeMaterial>>,
+    mut part_mats: ResMut<Assets<crate::speedtrees::TreePartMaterial>>,
 ) {
     let Some(mut build) = build else { return };
     for (k, img) in build.textures.drain(..) {
@@ -307,6 +323,8 @@ fn spawn_world_content(
     // to the view; shrubs' and flowers' leaf cards crossed); stand-ins when a species has none.
     let mut kinds: HashMap<u64, (Handle<Mesh>, Handle<StandardMaterial>)> = HashMap::new();
     let mut billboards: HashMap<u64, (Handle<Mesh>, Handle<TreeMaterial>, Aabb)> = HashMap::new();
+    let mut grown_cpu: HashMap<u64, crate::speedtrees::GrownCpu> = build.grown.drain(..).collect();
+    let mut grown: HashMap<u64, crate::speedtrees::Grown> = HashMap::new();
     for k in build.tree_kinds.drain(..) {
         let Some(tex) = assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, k.billboard)
         else {
@@ -333,11 +351,20 @@ fn spawn_world_content(
             }
             let evergreen = evergreen(&k);
             debug!("tree {}: {}", k.name, if evergreen { "evergreen" } else { "deciduous" });
-            let billboard = TreeBillboard {
+            let mut billboard = TreeBillboard {
                 views,
                 params: Vec4::new(k.views.len().min(16) as f32, k.atlas_aspect, k.height.max(0.3), texels),
                 season: Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32),
+                near: Vec4::ZERO,
             };
+            // (Grown up close, in its bark and its composite map's leaves.)
+            if let Some(cpu) = grown_cpu.remove(&k.kind)
+                && let Some(comp) = k.composite.and_then(|c| assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, c))
+            {
+                let bark = k.bark.and_then(|b| assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, b));
+                grown.insert(k.kind, crate::speedtrees::ready(cpu, &k, bark, comp, evergreen, &mut meshes, &mut part_mats));
+                billboard.near.x = crate::speedtrees::NEAR - crate::speedtrees::BLEND * 0.5;
+            }
             let (mesh, aabb) = billboard_quad(&k);
             billboards.insert(k.kind, (meshes.add(mesh), tree_mats.add(TreeMaterial { base, extension: TreeExt { billboard } }), aabb));
             continue;
@@ -359,6 +386,7 @@ fn spawn_world_content(
             let tf = Transform::from_translation(Vec3::from(t.position))
                 .with_rotation(quat(t.rotation))
                 .with_scale(Vec3::splat(t.scale));
+            let g = grown.get(&t.kind);
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat.clone()),
@@ -368,6 +396,10 @@ fn spawn_world_content(
                 DespawnOnExit(AppState::InGame),
                 VisibilityRange::abrupt(0.0, 900.0),
             ));
+            // (Up close, grown.)
+            for (mesh, mat) in g.iter().flat_map(|g| g.parts.iter()) {
+                commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(*aabb, |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::near_range(), bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
+            }
             continue;
         }
         if let Some((mesh, mat)) = kinds.get(&t.kind) {

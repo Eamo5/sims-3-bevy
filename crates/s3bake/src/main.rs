@@ -743,6 +743,10 @@ fn main() {
         for k in pkgs.keys_of_type(0x02D5_DF13).filter(|k| k.i == want).copied().collect::<Vec<_>>() {
             let Some(d) = pkgs.read(&k) else { continue };
             found = true;
+            // (ASM_DUMP=<file>: its bytes, for reading its states.)
+            if let Ok(out) = std::env::var("ASM_DUMP") {
+                let _ = std::fs::write(out, &d);
+            }
             let mut seen = std::collections::HashSet::new();
             for w in d.windows(8) {
                 let v = u64::from_le_bytes(w.try_into().unwrap());
@@ -938,6 +942,179 @@ fn main() {
             return;
         }
         eprintln!("not found");
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--spt-render") {
+        // --spt-render <kind hex> <out.png> [leaf budget]: the tree grown from its parameters,
+        // drawn from the side (bark, fronds and leaves in their own pictures), beside its
+        // billboard's first view, the same height.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let kind = u64::from_str_radix(&args[i + 1], 16).expect("kind");
+        let d = pkgs.read_ti(0x00B5_52EA, kind).expect("speedtree");
+        let t = s3bake::spt::SpeedTree::parse(&d).expect("parses");
+        let budget = args.get(i + 3).and_then(|b| b.parse().ok()).unwrap_or(450);
+        let mut g = s3bake::spt::grow(&t, budget);
+        let tex = |stem: &str| {
+            let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, s3pkg::fnv64(stem));
+            pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)).and_then(|d| s3formats::dds::decode(&d, 1024))
+        };
+        let bark = tex(&t.bark);
+        let comp = tex(&t.composite);
+        let bb_name = format!("{}", t.composite.trim_end_matches("_composite_d")) + "_composite_billboards_d";
+        let bb = tex(&bb_name);
+        // (NOFIT=1: as grown, not fitted to the billboard's outline.)
+        if std::env::var_os("NOFIT").is_none()
+            && let Some(bb) = &bb
+            && let Some((views, _)) = s3bake::trees::round_views(bb)
+        {
+            s3bake::spt::fit(&mut g, &s3bake::trees::envelope(bb, &views));
+        }
+        println!(
+            "{} bark verts, {} frond verts, {} leaves; bounds {:?}..{:?}; bark {:?} composite {:?} billboard {:?}",
+            g.bark.positions.len(),
+            g.fronds.positions.len(),
+            g.leaves.positions.len() / 4,
+            g.min,
+            g.max,
+            bark.as_ref().map(|i| (i.width, i.height)),
+            comp.as_ref().map(|i| (i.width, i.height)),
+            bb.as_ref().map(|i| (i.width, i.height))
+        );
+        const W: usize = 512;
+        let mut img = vec![[200u8, 215, 230, 255]; W * 2 * W];
+        let mut zb = vec![f32::MIN; W * 2 * W];
+        let h = (g.max[1] - g.min[1].min(0.0)).max(1e-3);
+        let s = (W as f32 * 0.92) / h;
+        let to = |p: [f32; 3]| [W as f32 * 0.5 + p[0] * s, W as f32 * 0.96 - p[1] * s, p[2]];
+        let sample = |im: &Option<s3formats::dds::Rgba>, uv: [f32; 2], fallback: [u8; 4]| -> [u8; 4] {
+            let Some(im) = im else { return fallback };
+            let x = ((uv[0].rem_euclid(1.0)) * im.width as f32) as usize % im.width;
+            let y = ((uv[1].rem_euclid(1.0)) * im.height as f32) as usize % im.height;
+            let o = (y * im.width + x) * 4;
+            [im.data[o], im.data[o + 1], im.data[o + 2], im.data[o + 3]]
+        };
+        let light = [0.45f32, 0.8, 0.4];
+        let mut draw = |tri: [([f32; 3], [f32; 2], [f32; 3]); 3], im: &Option<s3formats::dds::Rgba>, fallback: [u8; 4]| {
+            let (a, b, c) = (tri[0].0, tri[1].0, tri[2].0);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+            if area.abs() < 1e-6 {
+                return;
+            }
+            let (x0, x1) = (a[0].min(b[0]).min(c[0]).floor().max(0.0) as usize, (a[0].max(b[0]).max(c[0]).ceil() as usize).min(W - 1));
+            let (y0, y1) = (a[1].min(b[1]).min(c[1]).floor().max(0.0) as usize, (a[1].max(b[1]).max(c[1]).ceil() as usize).min(W - 1));
+            for y in y0..=y1 {
+                for x in x0..=x1 {
+                    let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                    let w0 = ((b[0] - px) * (c[1] - py) - (b[1] - py) * (c[0] - px)) / area;
+                    let w1 = ((c[0] - px) * (a[1] - py) - (c[1] - py) * (a[0] - px)) / area;
+                    let w2 = 1.0 - w0 - w1;
+                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                        continue;
+                    }
+                    let z = a[2] * w0 + b[2] * w1 + c[2] * w2;
+                    let o = y * W * 2 + x;
+                    if z <= zb[o] {
+                        continue;
+                    }
+                    let uv = [0, 1].map(|k| tri[0].1[k] * w0 + tri[1].1[k] * w1 + tri[2].1[k] * w2);
+                    let col = sample(im, uv, fallback);
+                    if col[3] < 128 {
+                        continue;
+                    }
+                    let n = [0, 1, 2].map(|k| tri[0].2[k] * w0 + tri[1].2[k] * w1 + tri[2].2[k] * w2);
+                    let l = 0.45 + 0.55 * (n[0] * light[0] + n[1] * light[1] + n[2] * light[2]).abs().min(1.0);
+                    zb[o] = z;
+                    img[o] = [(col[0] as f32 * l) as u8, (col[1] as f32 * l) as u8, (col[2] as f32 * l) as u8, 255];
+                }
+            }
+        };
+        for (part, im, fb) in [(&g.bark, &bark, [90u8, 70, 50, 255]), (&g.fronds, &comp, [60, 90, 40, 255])] {
+            for tri in part.indices.chunks_exact(3) {
+                let v = |k: usize| (to(part.positions[tri[k] as usize]), part.uvs[tri[k] as usize], part.normals[tri[k] as usize]);
+                draw([v(0), v(1), v(2)], im, fb);
+            }
+        }
+        for tri in g.leaves.indices.chunks_exact(3) {
+            let v = |k: usize| {
+                let i = tri[k] as usize;
+                let (p, c) = (g.leaves.positions[i], g.leaves.corners[i]);
+                (to([p[0] + c[0], p[1] + c[1], p[2]]), g.leaves.uvs[i], g.leaves.normals[i])
+            };
+            draw([v(0), v(1), v(2)], &comp, [50, 110, 40, 255]);
+        }
+        // (The billboard's first view beside it, as tall.)
+        if let Some(bb) = &bb
+            && let Some((views, _)) = s3bake::trees::round_views(bb)
+        {
+            let r = views[0];
+            let (bx0, by0, bx1, by1) = (r[0] * bb.width as f32, r[1] * bb.height as f32, r[2] * bb.width as f32, r[3] * bb.height as f32);
+            let sc = (W as f32 * 0.92) / (by1 - by0);
+            for y in 0..W {
+                for x in 0..W {
+                    let sx = bx0 + (x as f32 - W as f32 * 0.5) / sc + (bx1 - bx0) * 0.5;
+                    let sy = by1 - (W as f32 * 0.96 - y as f32) / sc;
+                    if sx < bx0 || sx >= bx1 || sy < by0 || sy >= by1 {
+                        continue;
+                    }
+                    let o = (sy as usize * bb.width + sx as usize) * 4;
+                    if bb.data[o + 3] >= 128 {
+                        img[y * W * 2 + W + x] = [bb.data[o], bb.data[o + 1], bb.data[o + 2], 255];
+                    }
+                }
+            }
+        }
+        let f = std::fs::File::create(&args[i + 2]).expect("out");
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(f), (W * 2) as u32, W as u32);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        let flat: Vec<u8> = img.iter().flatten().copied().collect();
+        enc.write_header().and_then(|mut w| w.write_image_data(&flat)).expect("png");
+        return;
+    }
+    if let Some(i) = args.iter().position(|a| a == "--spt-parse") {
+        // --spt-parse <kind hex | all> [tokens]: a SpeedTree parameter file read (each one's, with
+        // "all": where any stops making sense); "tokens": every token.
+        let pkgs = s3pkg::install::open_install(&data, |_| true);
+        let want = args.get(i + 1).map(String::as_str).unwrap_or("all");
+        let kinds: Vec<u64> = if want == "all" {
+            let mut v: Vec<u64> = pkgs.keys_of_type(0x00B5_52EA).map(|k| k.i).collect();
+            v.sort();
+            v.dedup();
+            v
+        } else {
+            vec![u64::from_str_radix(want, 16).expect("kind")]
+        };
+        let (mut ok, mut bad) = (0, 0);
+        for kind in kinds {
+            let Some(d) = pkgs.read_ti(0x00B5_52EA, kind) else { continue };
+            let (toks, stop) = s3bake::spt::tokens(&d);
+            if let Some((at, t)) = stop {
+                bad += 1;
+                println!("{kind:016X}: stops at {at} of {} on token {t} after {:?}", d.len(), toks.last());
+                continue;
+            }
+            ok += 1;
+            if args.get(i + 2).is_some_and(|a| a == "tokens") {
+                for (k, v) in &toks {
+                    println!("{k} {v:?}");
+                }
+            }
+            if want != "all" {
+                let Some(t) = s3bake::spt::SpeedTree::parse(&d) else { continue };
+                let sp = |s: &s3bake::spt::Spline| format!("{}..{}~{} [{}]", s.min, s.max, s.variance, s.points.iter().map(|p| format!("{:.2},{:.2}", p[0], p[1])).collect::<Vec<_>>().join(" "));
+                println!("size {} ~{} seed {} bark {} composite {} fronds {:?} x{} {:?}", t.size, t.size_variance, t.seed, t.bark, t.composite, t.frond_level, t.frond_blades, t.frond_sizes);
+                for (n, l) in t.levels.iter().enumerate() {
+                    println!("L{n}: len {}\n    rad {} prof {}\n    angle {}\n    grav {} gprof {}\n    disturb {}\n    gen {}..{} x{} segs {}x{} profile {:?}", sp(&l.length), sp(&l.radius), sp(&l.radius_profile), sp(&l.start_angle), sp(&l.gravity), sp(&l.gravity_profile), sp(&l.disturbance), l.first, l.last, l.frequency, l.cross_segments, l.length_segments, l.frequency_profile.as_ref().map(sp));
+                }
+                for m in &t.leaf_maps {
+                    println!("leaf {} size {:?} origin {:?} blossom {}", m.name, m.size, m.origin, m.blossom);
+                }
+                println!("hang {:?} rotate {:?}", t.leaf_hang, t.leaf_rotate);
+            } else if let Some(t) = s3bake::spt::SpeedTree::parse(&d) {
+                println!("{kind:016X}: {} levels, size {} bark {} composite {} leaves {} quads {} fronds {:?}", t.levels.len(), t.size, t.bark, t.composite, t.leaf_maps.len(), t.leaf_quads.len(), t.frond_level);
+            }
+        }
+        println!("{ok} read, {bad} not");
         return;
     }
     if let Some(i) = args.iter().position(|a| a == "--spt") {

@@ -187,6 +187,7 @@ mod story;
 mod chess;
 mod blink;
 mod world;
+mod speedtrees;
 mod upgrades;
 mod family;
 mod terrain_paint;
@@ -335,6 +336,7 @@ fn main() {
             home::HomePlugin,
             buy::BuyPlugin,
             world::WorldPlugin,
+            speedtrees::SpeedTreesPlugin,
             anim::AnimPlugin,
             simbody::SimBodyPlugin,
             roads::RoadPlugin,

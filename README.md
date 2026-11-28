@@ -29,7 +29,17 @@ installation is unreachable.
   Moonlight Falls, Starlight Shores, Sims University, Isla Paradiso, Oasis Landing and the
   World Adventures destinations Shang Simla, Al Simhara and Champs Les Sims) with their
   terrain paint, the game's own terrain colour and shadow maps,
-  roads with markings, water, placed objects and SpeedTree trees drawn from their own 360°
+  roads with markings, water, placed objects and SpeedTree trees. Up close (within 70 metres,
+  dithering away beyond) a tree is grown as the game grows it, from its species' own SpeedTree
+  parameters (`SPT2`): the trunk upright, each branch level spread along its parent between its
+  first and last, as many as its frequency on the longest, turned round by the golden angle, at
+  its start angle, as long and as thick as its length and radius curves have it, bent by its
+  gravity and disturbed, forking where the trunk forks, the frond level drawn as the species'
+  fronds and the leaves as cards from its composite map, turned to the view as SpeedTree's are;
+  fitted to its billboard's outline, so it's the tree its pictures show from afar. It sways in
+  the wind, the higher the more, its leaves fluttering; its leaves turn and fall through fall,
+  leaving the branches and twigs bare through winter; and trees bought for a lot are grown the
+  same (`TREE_LOOK=<metres>` tests). Further off, trees are drawn from their own 360°
   billboard pictures (each tree turned to the view, showing the side of it that's seen, lit as
   a rounded crown the way the game's leaves are, bright on the sun's side and shaded on the
   far side and underneath, close up drawn in with leaves where the picture would blur, and

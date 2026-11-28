@@ -6,6 +6,7 @@ pub mod bake;
 pub mod building;
 pub mod clips;
 pub mod trees;
+pub mod spt;
 pub mod ddsw;
 pub mod dnp;
 pub mod gamedata;

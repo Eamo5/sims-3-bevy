@@ -29,7 +29,7 @@ pub const T_HAT_LAYER: u32 = 0x0CA5_4A70;
 /// animated texture's first frame.
 pub const OBJECTS_VERSION: u32 = 6;
 /// Version of `world.bin` alone, so world-only changes don't force a global rebake.
-pub const WORLD_VERSION: u32 = 81;
+pub const WORLD_VERSION: u32 = 82;
 
 /// A resource key `(type, group, instance)`.
 pub type Key = (u32, u32, u64);
@@ -223,6 +223,13 @@ pub struct TreeKindBaked {
     pub radius: f32,
     /// Its billboard's name (`treeBirchLarge_composite_billboards_d`): the species.
     pub name: String,
+    /// What the tree's grown from up close (its SpeedTree parameters), its bark's and composite
+    /// map's (leaves' and fronds') textures, and its outline from the billboard to fit it to
+    /// (`spt::fit`).
+    pub speedtree: Option<crate::spt::SpeedTree>,
+    pub bark: Option<Key>,
+    pub composite: Option<Key>,
+    pub envelope: Vec<f32>,
 }
 
 /// One road / sidewalk / intersection mesh, already in world space.
