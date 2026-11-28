@@ -25,8 +25,8 @@ impl Plugin for SpeedTreesPlugin {
     }
 }
 
-/// Trees bought from the catalogue (on the lots): grown as the town's are, in their crossed
-/// pictures' stead, each species once; near enough to be seen grown wherever they're seen from,
+/// Trees, shrubs and flowers bought from the catalogue (on the lots): grown as the town's are,
+/// in their crossed pictures' stead, each species once; near enough to be seen grown wherever they're seen from,
 /// they cast their own shadows.
 #[allow(clippy::too_many_arguments)]
 fn grow_lot_trees(
@@ -43,7 +43,7 @@ fn grow_lot_trees(
 ) {
     let (Some(baked), Some(mut assets)) = (baked, assets) else { return };
     for (e, o, children) in &added {
-        let Some(k) = assets.garden_kind(o.objd).filter(|k| k.round && k.speedtree.is_some()).cloned() else { continue };
+        let Some(k) = assets.garden_kind(o.objd).filter(|k| k.speedtree.is_some()).cloned() else { continue };
         let grown = match cache.get(&o.objd) {
             Some(g) => g.clone(),
             None => {
@@ -78,7 +78,14 @@ pub struct GrownPart;
 
 /// `TREE_LOOK=<metres>[,<pitch>]` (tests): eight seconds in, the camera on the grown tree nearest
 /// where it's looking, from that far off.
-fn tree_look(time: Res<Time>, parts: Query<&GlobalTransform, With<GrownPart>>, mut cams: Query<&mut crate::camera::SimsCamera>, mut done: Local<u8>) {
+fn tree_look(
+    time: Res<Time>,
+    parts: Query<&GlobalTransform, With<GrownPart>>,
+    objects: Query<(&crate::interact::GameObject, &GlobalTransform)>,
+    assets: Option<Res<crate::objects::ObjectAssets>>,
+    mut cams: Query<&mut crate::camera::SimsCamera>,
+    mut done: Local<u8>,
+) {
     let Ok(v) = std::env::var("TREE_LOOK") else { return };
     if *done >= 3 || time.elapsed_secs() < 8.0 + *done as f32 {
         return;
@@ -87,7 +94,16 @@ fn tree_look(time: Res<Time>, parts: Query<&GlobalTransform, With<GrownPart>>, m
     let mut it = v.split(',').filter_map(|x| x.parse::<f32>().ok());
     let (dist, pitch) = (it.next().unwrap_or(12.0), it.next());
     let at = cam.focus;
-    let Some(t) = parts.iter().map(|g| g.translation()).min_by(|a, b| a.distance(at).total_cmp(&b.distance(at))) else { return };
+    // (",plants": the nearest shrub or flower bought for the lot instead.)
+    let plants = v.ends_with("plants");
+    let near = |a: &Vec3, b: &Vec3| a.distance(at).total_cmp(&b.distance(at));
+    let found = if plants {
+        let Some(assets) = assets else { return };
+        objects.iter().filter(|(o, _)| assets.garden_kind(o.objd).is_some_and(|k| !k.round)).map(|(_, g)| g.translation()).min_by(near)
+    } else {
+        parts.iter().map(|g| g.translation()).min_by(near)
+    };
+    let Some(t) = found else { return };
     *done += 1;
     cam.look_at(t + Vec3::Y * dist * 0.3);
     cam.distance = dist;
@@ -108,7 +124,8 @@ pub struct TreePartExt {
 
 #[derive(ShaderType, Reflect, Debug, Clone, Copy)]
 pub struct TreePart {
-    /// x: 0 bark, 1 fronds, 2 leaves; y: the tree's height (m); z: its crown's reach (m).
+    /// x: 0 bark, 1 fronds, 2 leaves; y: the tree's height (m); z: its crown's reach (m); w: 1 for
+    /// a shrub or flower (never taken out of the camera's way).
     pub params: Vec4,
     /// x: fall colour, y: leaves gone, z: snow (0..1), w: 1 for an evergreen (`weather`).
     pub season: Vec4,
@@ -134,8 +151,15 @@ impl MaterialExtension for TreePartExt {
 const FOLIAGE_LIGHT: f32 = 1.4;
 /// How many leaf cards a tree's grown with (SpeedTree's levels of detail keep about so many).
 const LEAF_BUDGET: usize = 450;
+/// A shrub's or flower's.
+const PLANT_LEAF_BUDGET: usize = 200;
+/// The fewest leaves a shrub or flower's grown with to be a bush.
+const MIN_BUSH_LEAVES: usize = 150;
 /// Out to here (metres from the camera) a tree's drawn grown; beyond, from its pictures.
 pub const NEAR: f32 = 70.0;
+/// A shrub's or flower's: as near as the camera's usually off a lot, and swapped at once (small
+/// as they are, a dithered change from the one to the other shows more than a swap).
+pub const PLANT_NEAR: f32 = 60.0;
 /// Over how far the one gives way to the other.
 pub const BLEND: f32 = 10.0;
 
@@ -161,14 +185,35 @@ fn part_mesh(p: &s3bake::spt::Part, s: f32) -> Mesh {
 /// Grows a species with SpeedTree parameters, fitted to its outline.
 pub fn grow(k: &TreeKindBaked) -> Option<GrownCpu> {
     let t = k.speedtree.as_ref()?;
-    let mut g = s3bake::spt::grow(t, LEAF_BUDGET);
+    let mut g = s3bake::spt::grow(t, if k.round { LEAF_BUDGET } else { PLANT_LEAF_BUDGET });
     if g.leaves.positions.is_empty() && g.fronds.positions.is_empty() {
         return None;
+    }
+    // (Of the shrubs and flowers, only the leafy bushes are grown: grasses, reeds and fronds keep
+    // their crossed pictures, which are them better; and a bush's stems are hidden in it.)
+    if !k.round {
+        if !g.fronds.positions.is_empty() || g.leaves.positions.len() / 4 < MIN_BUSH_LEAVES {
+            return None;
+        }
+        g.bark = Default::default();
     }
     if !k.envelope.is_empty() {
         s3bake::spt::fit(&mut g, &k.envelope);
     }
     let s = k.height.max(0.3) / g.max[1].max(1e-3);
+    // (A shrub or flower, without an outline to fit: as wide as its bounds, too.)
+    if k.envelope.is_empty() {
+        let reach = g.min[0].abs().max(g.min[2].abs()).max(g.max[0].abs()).max(g.max[2].abs()) * s;
+        let w = (k.radius.max(0.1) / reach.max(1e-3)).clamp(0.4, 2.0);
+        for p in g.bark.positions.iter_mut().chain(g.fronds.positions.iter_mut()).chain(g.leaves.positions.iter_mut()) {
+            p[0] *= w;
+            p[2] *= w;
+        }
+        for v in [&mut g.min, &mut g.max] {
+            v[0] *= w;
+            v[2] *= w;
+        }
+    }
     let mut leaves = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD);
     let l = &g.leaves;
     leaves.insert_attribute(Mesh::ATTRIBUTE_POSITION, l.positions.iter().map(|v| [v[0] * s, v[1] * s, v[2] * s]).collect::<Vec<_>>());
@@ -201,7 +246,8 @@ pub struct Grown {
 /// composite map's (soft at their edges, as the billboards are).
 pub fn ready(cpu: GrownCpu, k: &TreeKindBaked, bark: Option<Handle<Image>>, composite: Handle<Image>, evergreen: bool, meshes: &mut Assets<Mesh>, mats: &mut Assets<TreePartMaterial>) -> Grown {
     let season = Vec4::new(0.0, 0.0, 0.0, evergreen as u8 as f32);
-    let params = |mode: f32| Vec4::new(mode, k.height.max(0.3), cpu.reach, 0.0);
+    // (Shrubs and flowers aren't taken out of the way: they're never in it.)
+    let params = |mode: f32| Vec4::new(mode, k.height.max(0.3), cpu.reach, if k.round { 0.0 } else { 1.0 });
     // (The leaves as bright as the billboard's, the twigs halfway: `leaf_tint`.)
     let tint = k.leaf_tint.unwrap_or([1.0; 3]).map(|t| t.max(1.0) * FOLIAGE_LIGHT);
     let foliage = |tex: Handle<Image>, power: f32| StandardMaterial {
@@ -233,7 +279,12 @@ pub fn ready(cpu: GrownCpu, k: &TreeKindBaked, bark: Option<Handle<Image>>, comp
 
 /// The grown tree's visibility: near the camera, dithering away over the billboard beyond (which
 /// comes in where it starts to: `tree.wgsl`'s `near`).
-pub fn near_range() -> bevy::camera::visibility::VisibilityRange {
-    bevy::camera::visibility::VisibilityRange { start_margin: 0.0..0.0, end_margin: NEAR - BLEND * 0.5..NEAR + BLEND * 0.5, use_aabb: false }
+pub fn near_range(near: f32) -> bevy::camera::visibility::VisibilityRange {
+    bevy::camera::visibility::VisibilityRange { start_margin: 0.0..0.0, end_margin: near - BLEND * 0.5..near + BLEND * 0.5, use_aabb: false }
+}
+
+/// A shrub's or flower's grown self's, and its crossed pictures' beyond.
+pub fn plant_ranges() -> (bevy::camera::visibility::VisibilityRange, bevy::camera::visibility::VisibilityRange) {
+    (bevy::camera::visibility::VisibilityRange::abrupt(0.0, PLANT_NEAR), bevy::camera::visibility::VisibilityRange::abrupt(PLANT_NEAR, 900.0))
 }
 

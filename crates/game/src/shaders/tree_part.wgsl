@@ -21,7 +21,8 @@
 #endif
 
 struct TreePart {
-    // x: 0 bark, 1 fronds, 2 leaves; y: the tree's height (m); z: its crown's reach (m)
+    // x: 0 bark, 1 fronds, 2 leaves; y: the tree's height (m); z: its crown's reach (m); w: 1 for a
+    // shrub or flower, never taken out of the way
     params: vec4<f32>,
     // (The seasons, for the fragment shader.)
     season: vec4<f32>,
@@ -63,9 +64,9 @@ fn vertex(v: Vertex) -> VertexOutput {
     let cam = view.world_position;
     let mid = origin + vec3<f32>(0.0, h * 0.55, 0.0);
     let reach = max(part.params.z * scale, h * 0.25);
-    var hide = distance(cam, mid) < max(h * 0.7, reach) + 1.0;
+    var hide = part.params.w < 0.5 && distance(cam, mid) < max(h * 0.7, reach) + 1.0;
     let ahead = -back;
-    if (ahead.y < -0.05) {
+    if (ahead.y < -0.05 && part.params.w < 0.5) {
         let seg = ahead * ((origin.y - cam.y) / ahead.y);
         let s = clamp(dot(mid - cam, seg) / max(dot(seg, seg), 1e-4), 0.0, 1.0);
         hide = hide || (s < 0.92 && distance(mid, cam + seg * s) < reach + 1.0);

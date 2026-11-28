@@ -274,7 +274,7 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
         let key = key_of(&tex);
         textures.push((key, false));
         // (A tree's parameters, to grow it up close, with its bark's and leaves' pictures.)
-        let speedtree = round.then(|| crate::spt::SpeedTree::parse(&spt)).flatten();
+        let speedtree = crate::spt::SpeedTree::parse(&spt);
         let tex_of = |stem: &str| {
             let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, fnv64(stem));
             (!stem.is_empty() && (pkgs.read(&k).is_some() || pkgs.read_ti(k.t, k.i).is_some())).then(|| key_of(&k))
@@ -284,10 +284,10 @@ pub fn bake_tree_kinds(pkgs: &PackageSet, kinds: &[u64]) -> (Vec<TreeKindBaked>,
         for k in [bark, composite].into_iter().flatten() {
             textures.push((k, false));
         }
-        let envelope = if speedtree.is_some() { envelope(&img, &views) } else { Vec::new() };
+        let envelope = if speedtree.is_some() && round { envelope(&img, &views) } else { Vec::new() };
         // (The leaves' colour, as the billboard has them lit, over the composite map's own: the
         // grown tree's leaves made as bright as its pictures are.)
-        let leaf_tint = speedtree.as_ref().zip(composite).and_then(|(t, _)| {
+        let leaf_tint = speedtree.as_ref().zip(composite).filter(|_| round).and_then(|(t, _)| {
             let k = s3pkg::ResourceKey::new(s3pkg::types::DDS, 0, fnv64(&t.composite));
             let comp = pkgs.read(&k).or_else(|| pkgs.read_ti(k.t, k.i)).and_then(|d| s3formats::dds::decode(&d, 512))?;
             let rects: Vec<[f32; 4]> = t.leaf_quads.iter().map(|q| quad_rect(q)).collect();

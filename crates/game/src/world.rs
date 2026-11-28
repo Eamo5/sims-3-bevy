@@ -221,7 +221,7 @@ pub fn build_world(baked: &BakedData, world: &WorldBaked) -> WorldBuild {
     let used: HashSet<u64> = world.trees.iter().map(|t| t.kind).collect();
     // (NO_GROWN=1, tests: only the billboards.)
     let grow = std::env::var_os("NO_GROWN").is_none();
-    let to_grow: Vec<&TreeKindBaked> = world.tree_kinds.iter().filter(|k| grow && k.round && k.speedtree.is_some() && used.contains(&k.kind)).collect();
+    let to_grow: Vec<&TreeKindBaked> = world.tree_kinds.iter().filter(|k| grow && k.speedtree.is_some() && used.contains(&k.kind)).collect();
     debug!("growing {:?}", to_grow.iter().map(|k| format!("{:016X} {} {:?}", k.kind, k.name, k.leaf_tint)).collect::<Vec<_>>());
     let grown = par_map(&to_grow, |k| crate::speedtrees::grow(k).map(|g| (k.kind, g))).into_iter().flatten().collect();
     WorldBuild {
@@ -372,6 +372,13 @@ fn spawn_world_content(
             billboards.insert(k.kind, (meshes.add(mesh), tree_mats.add(TreeMaterial { base, extension: TreeExt { billboard } }), aabb));
             continue;
         }
+        // (A shrub or flower grown up close too.)
+        if let Some(cpu) = grown_cpu.remove(&k.kind)
+            && let Some(comp) = k.composite.and_then(|c| assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, c))
+        {
+            let bark = k.bark.and_then(|b| assets.texture(&mut AssetCtx { baked: &baked.0, meshes: &mut meshes, images: &mut images, materials: &mut mats }, b));
+            grown.insert(k.kind, crate::speedtrees::ready(cpu, &k, bark, comp, evergreen(&k), &mut meshes, &mut part_mats));
+        }
         kinds.insert(k.kind, (meshes.add(tree_mesh(&k)), mats.add(base)));
     }
     let trunk = meshes.add(Cylinder::new(0.22, 4.0));
@@ -401,7 +408,7 @@ fn spawn_world_content(
             ));
             // (Up close, grown.)
             for (mesh, mat, foliage) in g.iter().flat_map(|g| g.parts.iter()) {
-                let mut e = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(*aabb, |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::near_range(), bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
+                let mut e = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(*aabb, |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::near_range(crate::speedtrees::NEAR), bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
                 if *foliage {
                     e.insert(bevy::light::NotShadowReceiver);
                 }
@@ -412,14 +419,22 @@ fn spawn_world_content(
             let tf = Transform::from_translation(Vec3::from(t.position))
                 .with_rotation(quat(t.rotation))
                 .with_scale(Vec3::splat(t.scale));
+            let g = grown.get(&t.kind);
             commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat.clone()),
                 tf,
                 Tree,
                 DespawnOnExit(AppState::InGame),
-                VisibilityRange::abrupt(0.0, 900.0),
+                if g.is_some() { crate::speedtrees::plant_ranges().1 } else { VisibilityRange::abrupt(0.0, 900.0) },
             ));
+            // (Up close, grown, the crossed pictures' shadow standing in for its own.)
+            for (mesh, mat, foliage) in g.iter().flat_map(|g| g.parts.iter()) {
+                let mut e = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), tf, g.map_or(Aabb::default(), |g| g.aabb), Tree, DespawnOnExit(AppState::InGame), crate::speedtrees::plant_ranges().0, bevy::light::NotShadowCaster, crate::speedtrees::GrownPart));
+                if *foliage {
+                    e.insert(bevy::light::NotShadowReceiver);
+                }
+            }
             continue;
         }
         let conifer = t.kind % 3 == 0;

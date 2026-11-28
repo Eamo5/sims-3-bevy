@@ -39,7 +39,9 @@ installation is unreachable.
   fitted to its billboard's outline, so it's the tree its pictures show from afar. It sways in
   the wind, the higher the more, its leaves fluttering; its leaves turn and fall through fall,
   leaving the branches and twigs bare through winter; and trees bought for a lot are grown the
-  same (`TREE_LOOK=<metres>`, `NO_GROWN=1` tests). Further off, trees are drawn from their own 360°
+  same. Leafy bushes are grown too, within 60 metres (swapped at once, small as they are, and
+  shaded by their pictures' shadows), as wide as their bounds; grasses, reeds and fronds keep their
+  crossed pictures (`TREE_LOOK=<metres>[,<pitch>][,plants]`, `NO_GROWN=1` tests). Further off, trees are drawn from their own 360°
   billboard pictures (each tree turned to the view, showing the side of it that's seen, lit as
   a rounded crown the way the game's leaves are, bright on the sun's side and shaded on the
   far side and underneath, close up drawn in with leaves where the picture would blur, and
