@@ -3941,7 +3941,7 @@ pub(crate) fn run_actions(
         Res<crate::realestate::RealEstate>,
         Query<&crate::celebrity::Famous>,
     ),
-    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q, lapped))): (
+    (mut did, journals, mut inventories, mut wear, mut seconds, double_beds, unmade, (tunings, puddles_q, weather, object_rates, mut memories, (partners_of, at_door, cuddles, convs, ghost_spots, held_q, lapped, pace_q))): (
         MessageWriter<crate::journal::Did>,
         Query<&crate::journal::SkillJournal>,
         Query<&mut crate::inventory::Inventory>,
@@ -3963,6 +3963,7 @@ pub(crate) fn run_actions(
                 Query<(Entity, &Transform, &crate::nav::Floor), (With<crate::ghosts::Ghost>, Without<crate::ghosts::Resting>, Without<crate::sim::Motives>)>,
                 Query<&crate::little::Carried>,
                 Query<(), With<crate::petlap::LapTaken>>,
+                Query<&crate::rabbitholes::HomeworkPace>,
             ),
         ),
     ),
@@ -5407,7 +5408,8 @@ pub(crate) fn run_actions(
                                     Special::ServeMeal if prepped.contains(me) && d.minutes > 30.0 => d.minutes - 15.0,
                                     // Original reward and trait completion rates.
                                     Special::CleanUp | Special::EmptyTrash if crate::wishes::has(wishes, "SpeedyCleaner") => d.minutes / 3.0,
-                                    Special::Homework => crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")),
+                                    // (At the pace the moment allows: `rabbitholes::HomeworkPace`.)
+                                    Special::Homework => pace_q.get(me).map_or_else(|_| crate::rabbitholes::homework_minutes(&sim.traits, crate::wishes::has(wishes, "MultiTasker")), |p| 100.0 / p.0.max(0.01)),
                                     Special::SmashDollhouse => crate::dollhouse::smash_minutes(sim.age),
                                     // (A microwave with "Faster Cooking": `upgrades`.)
                                     Special::Microwave if upgraded.get(*target).is_ok_and(|u| u.has(crate::upgrades::Upgrade::Improved)) => d.minutes * crate::upgrades::FASTER_COOKING,

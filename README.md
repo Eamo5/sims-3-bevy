@@ -1882,7 +1882,15 @@ installation is unreachable.
 - **Homework**: children and teens come home from school (Monday to Friday) with homework,
    and sit down at a table to do it (the game's homework animations and base completion rate;
    faster for Bookworms, Workaholics and Multi-Taskers, slower for Perfectionists); done, it
-   lifts their grades; left undone, it drags them down. A teen or grown-up
+   lifts their grades; left undone, it drags them down. Its pace is the game's tuned
+   `GetCompletionRate`: quicker in a good mood (Happy, Very Happy, Elated), with another
+   student at theirs within ten metres, at the library or when failing, and a teen's a third
+   harder (`kTeenDifficultyMultiplier`). A student can *Copy Bella's Homework* from another of the
+   same school further along with theirs (the game's `CopyHomework`: three times the pace, and
+   Fight the Power when it's done); seen at it by the one whose homework it is (within five
+   metres, the game's broadcaster), they're shooed off (a child's shoo, a teen's insult) and the
+   copying's over. `HOMEWORK=<name>[:<percent>],...`, `COPY_TEST=<name>`, `COPY_CAUGHT=1`,
+   `MENU_OF=Homework` (tests). A teen or grown-up
   can Help with Homework (a Friendly social, offered while there's homework): it's done, with
   better grades, the helper learns a little Logic, and the hours count towards Teacher
    Extraordinaire (whose teachers get through it twice as fast). A grown-up can tell a child or

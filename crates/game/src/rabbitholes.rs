@@ -17,7 +17,7 @@ pub struct RabbitHolePlugin;
 
 impl Plugin for RabbitHolePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (school_bus, outings, told_homework).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
+        app.add_systems(Update, (school_bus, outings, told_homework, homework_pace, copy_test).chain().after(crate::save::apply_loaded_game).run_if(in_state(PlayMode::Live)));
     }
 }
 
@@ -478,13 +478,180 @@ pub const HOMEWORK_BASE_RATE: f32 = 0.556;
 
 /// Homework.xml base completion percentage per minute, with additive trait tuning.
 pub fn homework_minutes(traits: &[crate::life::Trait], multitasker: bool) -> f32 {
+    100.0 / homework_rate(traits, multitasker, Pace::default())
+}
+
+/// What else sets the pace of homework (`Homework.GetCompletionRate`, its tuning's): their mood,
+/// another doing theirs near them (`kCompletetionRateModifierWorkingWithOthers`), being at the
+/// library, failing at school, copying it (`kCopyingMultiplier`), and a teen's being harder
+/// (`kTeenDifficultyMultiplier`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Pace {
+    pub mood: f32,
+    pub together: bool,
+    pub library: bool,
+    pub failing: bool,
+    pub copying: bool,
+    pub teen: bool,
+}
+
+pub fn homework_rate(traits: &[crate::life::Trait], multitasker: bool, p: Pace) -> f32 {
     use crate::life::Trait;
     let mut rate = HOMEWORK_BASE_RATE;
     if traits.contains(&Trait::Bookworm) { rate += 0.278; }
     if traits.contains(&Trait::Workaholic) { rate += 0.278; }
     if traits.contains(&Trait::Perfectionist) { rate -= 0.15; }
+    // (Happy, Very Happy, Elated: `kCompletetionRateModifierMood...`.)
+    rate += match p.mood {
+        m if m >= 80.0 => 0.556,
+        m if m >= 50.0 => 0.25,
+        m if m >= 20.0 => 0.1,
+        _ => 0.0,
+    };
+    if p.together { rate += 0.25; }
+    if p.library { rate += 1.111; }
+    if p.failing { rate += 0.556; }
+    if p.copying { rate *= 3.0; }
     if multitasker { rate *= 1.5; }
-    100.0 / rate
+    if p.teen { rate *= 0.667; }
+    rate
+}
+
+/// How fast their homework's going now (percent a minute), while they're at it.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct HomeworkPace(pub f32);
+
+/// Copying this one's homework (the game's `CopyHomework`: three times the pace, Fight the Power
+/// done, the owner's shooing them off if they come by).
+#[derive(Component, Clone, Copy, Debug)]
+pub struct CopyingHomework(pub Entity);
+
+/// How near the one whose homework it is sees it copied (`kCopyingBroadcasterParams`' 5 m), and
+/// how near another's doing theirs to keep them company (`kMaxDistanceFromSim`).
+const SEEN_COPYING: f32 = 5.0;
+/// The shoo's clip.
+const SHOO: &str = "a_neutral_shoo_x";
+const STUDY_TOGETHER: f32 = 10.0;
+
+/// The game's words: "Copy Bella's Homework".
+pub fn copy_label(owner: &str) -> String {
+    format!("Copy {owner}'s Homework")
+}
+pub const COPY_HOMEWORK: &str = "Copy Homework";
+
+/// Whose homework they might copy (`CopyHomework`'s test): another's of the same school (a
+/// child's a child's, a teen's a teen's) further along than theirs, not being done right now.
+pub fn copyable(mine: (Age, f32), theirs: (Age, f32, bool)) -> bool {
+    mine.0 == theirs.0 && theirs.1 > mine.1 && !theirs.2
+}
+
+/// `COPY_TEST=<first name>` (tests, with `HOMEWORK`): ten seconds in, the selected Sim sets
+/// about copying that one's homework at the nearest place for homework (`COPY_CAUGHT=1`: and
+/// they're caught at it wherever they are).
+fn copy_test(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut me: Query<(Entity, &Transform, &mut ActionQueue), (With<Selected>, With<Homework>)>,
+    owners: Query<(Entity, &Sim), With<Homework>>,
+    objects: Query<(Entity, &GameObject, &Transform)>,
+    mut done: Local<bool>,
+) {
+    let Ok(name) = std::env::var("COPY_TEST") else { return };
+    if *done || time.elapsed_secs() < 10.0 {
+        return;
+    }
+    let Ok((e, tf, mut q)) = me.single_mut() else { return };
+    let Some((owner, _)) = owners.iter().find(|o| o.0 != e && o.1.first.eq_ignore_ascii_case(&name)) else { return };
+    *done = true;
+    let spot = objects
+        .iter()
+        .filter_map(|(oe, o, otf)| interactions_for(o.kind).iter().position(|d| d.special == Special::Homework).map(|def| (oe, def, otf.translation.distance(tf.translation))))
+        .min_by(|a, b| a.2.total_cmp(&b.2));
+    if let Some((oe, def, _)) = spot {
+        commands.entity(e).insert(CopyingHomework(owner));
+        q.push_player(Action::new(COPY_HOMEWORK, ActionKind::Object { target: oe, def }, false));
+        info!("copy test: copying {name}'s homework");
+    }
+}
+
+pub fn doing_homework(q: &ActionQueue) -> bool {
+    q.0.front().is_some_and(|a| (a.label == "Do Homework" || a.label == COPY_HOMEWORK) && !a.cancel && matches!(a.phase, Phase::Running(_)))
+}
+
+/// The pace of each one at their homework, as things stand; and one copying seen by the one whose
+/// it is: shooed off (a child's "Shoo", a teen's "Teen Insult"), the copying over.
+#[allow(clippy::type_complexity)]
+fn homework_pace(
+    mut commands: Commands,
+    world: Res<CurrentWorld>,
+    students: Query<(Entity, &Sim, &Transform, Option<&crate::nav::Floor>, &ActionQueue, Option<&crate::life::Mood>, Option<&crate::wishes::Wishes>, Option<&SchoolGrades>, Option<&crate::visit::OnLot>, (Option<&CopyingHomework>, Has<HomeworkPace>)), With<Homework>>,
+) {
+    let at_it: Vec<(Entity, Vec3, u8)> = students.iter().filter(|s| doing_homework(s.4)).map(|s| (s.0, s.2.translation, s.3.map_or(1, |f| f.0))).collect();
+    let mut caught: Vec<(Entity, Entity)> = Vec::new();
+    for (e, sim, tf, floor, q, mood, wishes, grades, lot, (copying, paced)) in &students {
+        if !doing_homework(q) {
+            if paced {
+                commands.entity(e).remove::<HomeworkPace>();
+            }
+            continue;
+        }
+        let level = floor.map_or(1, |f| f.0);
+        let library = lot.is_some_and(|l| crate::opportunities::lot_types(&world.data, l.0).contains(&"Library"));
+        let pace = Pace {
+            mood: mood.map_or(0.0, |m| m.0),
+            together: at_it.iter().any(|o| o.0 != e && o.2 == level && o.1.distance(tf.translation) <= STUDY_TOGETHER),
+            library,
+            failing: grades.is_some_and(|g| g.letter() == "F"),
+            copying: copying.is_some(),
+            teen: sim.age == Age::Teen,
+        };
+        commands.entity(e).try_insert(HomeworkPace(homework_rate(&sim.traits, crate::wishes::has(wishes, "MultiTasker"), pace)));
+        // (Seen copying by the one whose homework it is.)
+        if let Some(&CopyingHomework(owner)) = copying
+            && let Ok((_, _, otf, ofloor, ..)) = students.get(owner)
+            // (COPY_CAUGHT=1, tests: seen wherever they are.)
+            && (std::env::var_os("COPY_CAUGHT").is_some() || (ofloor.map_or(1, |f| f.0) == level && otf.translation.distance(tf.translation) <= SEEN_COPYING))
+        {
+            caught.push((owner, e));
+        }
+    }
+    for (owner, copier) in caught {
+        let Ok((_, osim, ..)) = students.get(owner) else { continue };
+        // (The game's "Teen Insult" is its insult, a teen's.)
+        let social = (osim.age == Age::Teen).then(|| crate::social::social_index("Insult")).flatten();
+        info!("homework: {} catches someone copying their homework ({:?})", osim.first, social.map(|i| crate::social::social(i).name));
+        commands.entity(copier).remove::<CopyingHomework>();
+        commands.entity(copier).queue_silenced(|mut e: EntityWorldMut| {
+            if let Some(mut q) = e.get_mut::<ActionQueue>() {
+                for a in q.0.iter_mut().filter(|a| a.label == COPY_HOMEWORK) {
+                    a.cancel = true;
+                }
+            }
+        });
+        match social {
+            Some(i) => {
+                commands.entity(owner).queue_silenced(move |mut e: EntityWorldMut| {
+                    if let Some(mut q) = e.get_mut::<ActionQueue>() {
+                        q.0.push_front(Action::new(crate::social::social(i).name, ActionKind::Social { target: copier, social: i }, false));
+                    }
+                });
+            }
+            // (A child's shoo, turned to them: the `Shoo` social's own clip.)
+            None => {
+                let to = students.get(copier).map(|c| c.2.translation).ok();
+                commands.entity(owner).queue_silenced(move |mut e: EntityWorldMut| {
+                    if let (Some(to), Some(mut tf)) = (to, e.get_mut::<Transform>()) {
+                        let d = to - tf.translation;
+                        tf.rotation = Quat::from_rotation_y(d.x.atan2(d.z));
+                    }
+                    if let Some(mut q) = e.get_mut::<ActionQueue>() {
+                        q.0.push_front(Action::new("Shoo", ActionKind::Outro { clips: &[SHOO], then: None, secs: 1.83, stand_at: None, target: owner }, true));
+                    }
+                    e.insert(crate::anim::ActionClip::new(Some(SHOO), &[]));
+                });
+            }
+        }
+    }
 }
 
 /// Claim an assignment in the exclusive command phase before granting any rewards.
@@ -503,7 +670,15 @@ pub fn complete_homework(world: &mut World, student: Entity, helper: Option<Enti
         }
         None => None,
     };
-    world.entity_mut(student).remove::<Homework>();
+    world.entity_mut(student).remove::<(Homework, HomeworkPace)>();
+    // (Copied: Fight the Power, as the game's `CopyHomework` leaves them.)
+    if world.entity_mut(student).take::<CopyingHomework>().is_some() {
+        let now = world.resource::<crate::clock::GameClock>().minutes;
+        if let Some(mut m) = world.get_mut::<crate::life::Moodlets>(student) {
+            m.add(crate::life::MoodletKind::FightThePower, now);
+        }
+        info!("homework: {student_name} copied theirs");
+    }
     // (The game's `kFinishedHomework`, and a helper's `kDidHomework` for them.)
     world.write_message(crate::dreams::DreamEvent::new(student, "kFinishedHomework"));
     if let Some(h) = helper {
@@ -591,6 +766,22 @@ mod school_schedule_tests {
         assert!((assignment.0 - 50.0).abs() < 0.001);
         assert!(assignment.advance(accelerated, accelerated));
         assert_eq!(assignment.0, 100.0);
+    }
+
+    #[test]
+    fn homework_goes_faster_happy_together_or_copied_and_slower_for_teens() {
+        let base = homework_rate(&[], false, Pace::default());
+        assert!((homework_rate(&[], false, Pace { mood: 85.0, ..default() }) - (base + 0.556)).abs() < 1e-4);
+        assert!((homework_rate(&[], false, Pace { mood: 30.0, together: true, ..default() }) - (base + 0.35)).abs() < 1e-4);
+        assert!((homework_rate(&[], false, Pace { copying: true, ..default() }) - base * 3.0).abs() < 1e-4);
+        assert!((homework_rate(&[], true, Pace { teen: true, ..default() }) - base * 1.5 * 0.667).abs() < 1e-4);
+        assert!((homework_rate(&[], false, Pace { library: true, failing: true, ..default() }) - (base + 1.667)).abs() < 1e-4);
+        // (Copied only from one of the same school further along, not at it now.)
+        assert!(copyable((Age::Child, 10.0), (Age::Child, 60.0, false)));
+        assert!(!copyable((Age::Child, 10.0), (Age::Teen, 60.0, false)));
+        assert!(!copyable((Age::Child, 70.0), (Age::Child, 60.0, false)));
+        assert!(!copyable((Age::Child, 10.0), (Age::Child, 60.0, true)));
+        assert_eq!(copy_label("Bella"), "Copy Bella's Homework");
     }
 
     #[test]

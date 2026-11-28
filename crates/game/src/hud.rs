@@ -1230,7 +1230,7 @@ fn world_click(
         Query<&GameObject>,
         Query<(), With<crate::interact::Broken>>,
         Query<(), With<crate::fireplace::Lit>>,
-        Query<(), With<crate::rabbitholes::Homework>>,
+        Query<&crate::rabbitholes::Homework>,
         Query<&crate::surroundings::TrashFill>,
         (Res<crate::meals::Leftovers>, Res<crate::meals::FridgeKeeps>),
         Query<(), With<crate::gardening::Sprinkling>>,
@@ -2567,6 +2567,18 @@ fn world_click(
                 if d.special == Special::Homework && !hw_q.contains(actor) {
                     continue;
                 }
+                // (Another's homework of the same school further along, to copy: `rabbitholes`.)
+                if d.special == Special::Homework
+                    && let Ok(mine) = hw_q.get(actor)
+                {
+                    let here = company_q.get(actor).ok().and_then(|c| c.3.map(|l| l.0));
+                    for (e, s, _, lot) in company_q.iter() {
+                        let busy = queues_q.get(e).is_ok_and(crate::rabbitholes::doing_homework);
+                        if e != actor && lot.map(|l| l.0) == here && hw_q.get(e).is_ok_and(|theirs| crate::rabbitholes::copyable((actor_sim.age, mine.0), (s.age, theirs.0, busy))) {
+                            options.push((crate::rabbitholes::copy_label(&s.first), ActionKind::Object { target: t, def: i }));
+                        }
+                    }
+                }
                 // A terrarium, as the game's: "Stock" it with one of the pack's species of its kind
                 // (empty), fill its dish, watch its pet, its pet's info, mourn a dead one.
                 if matches!(obj.kind, ObjectKind::Terrarium | ObjectKind::BirdCage)
@@ -3740,6 +3752,15 @@ fn pie_buttons(
             }
         }
         let mut outfit_choice = label.strip_prefix("Change Into: ").and_then(|n| crate::simbody::OutfitKind::CHOICES.into_iter().find(|k| k.label() == n));
+        // (Someone's homework to copy: whose, `rabbitholes`.)
+        if let ActionKind::Object { .. } = kind
+            && let Some(first) = label.strip_prefix("Copy ").and_then(|l| l.strip_suffix("'s Homework"))
+            && let Some(owner) = people.iter().find(|p| p.0 != a && p.1.first == first).map(|p| p.0)
+        {
+            commands.entity(a).insert(crate::rabbitholes::CopyingHomework(owner));
+            info!("homework: copying {first}'s");
+            label = crate::rabbitholes::COPY_HOMEWORK.to_string();
+        }
         // (A uniform of their career's put on: `careers`.)
         if title == crate::careers::PUT_ON_UNIFORM
             && let Some(u) = jobs.get(a).ok().zip(people.get(a).ok()).and_then(|(j, (_, me, _))| crate::careers::uniforms_reached(j, me).into_iter().find(|(t, _)| *t == label).map(|(_, u)| u))

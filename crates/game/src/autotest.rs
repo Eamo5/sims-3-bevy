@@ -1483,15 +1483,15 @@ fn wear_uniform(mut commands: Commands, sel: Query<Entity, With<crate::sim::Sele
 }
 
 /// UNIFORM_MENU=1 (with UNIFORM): nine seconds in, the menu of the dresser nearest the selected
-/// Sim is up (for `PHOTO_MENU=Put On Uniform>...`), the camera on it.
+/// Sim is up (for `PHOTO_MENU=Put On Uniform>...`), the camera on it; MENU_OF=<special> (`Homework`...)
+/// the nearest thing's offering that.
 fn dresser_menu(mut commands: Commands, time: Res<Time>, sel: Query<&Transform, With<crate::sim::Selected>>, objects: Query<(Entity, &crate::interact::GameObject, &Transform), Without<crate::visit::LotObject>>, mut cam: Query<&mut SimsCamera>, mut done: Local<bool>) {
-    if *done || std::env::var_os("UNIFORM_MENU").is_none() || time.elapsed_secs() < 9.0 {
-        return;
-    }
+    let want = std::env::var("MENU_OF").ok().or_else(|| std::env::var_os("UNIFORM_MENU").map(|_| "ChangeClothes".to_string()));
+    let Some(want) = want.filter(|_| !*done && time.elapsed_secs() >= 9.0) else { return };
     let Ok(at) = sel.single().map(|t| t.translation) else { return };
     let dresser = objects
         .iter()
-        .filter(|(_, o, _)| crate::interact::interactions_for(o.kind).iter().any(|d| d.special == crate::interact::Special::ChangeClothes))
+        .filter(|(_, o, _)| crate::interact::interactions_for(o.kind).iter().any(|d| format!("{:?}", d.special) == want))
         .min_by(|a, b| a.2.translation.distance(at).total_cmp(&b.2.translation.distance(at)));
     let Some((e, _, tf)) = dresser else { return };
     *done = true;
@@ -2200,17 +2200,21 @@ fn run_out(mut sims: Query<(&crate::sim::Sim, &mut crate::sim::Motives, Has<crat
     }
 }
 
-/// HOMEWORK=<first name>: a few seconds in, that Sim has homework to do.
+/// HOMEWORK=<first name>[:<percent done>],...: a few seconds in, those Sims have homework to do.
 fn give_homework(mut commands: Commands, sims: Query<(Entity, &crate::sim::Sim)>, mut done: Local<bool>, time: Res<Time>) {
     if *done || time.elapsed_secs() < 8.0 {
         return;
     }
-    let Ok(who) = std::env::var("HOMEWORK") else { return };
+    let Ok(list) = std::env::var("HOMEWORK") else { return };
     *done = true;
-    for (e, s) in &sims {
-        if s.first.eq_ignore_ascii_case(&who) {
-            info!("{} has homework", s.first);
-            commands.entity(e).insert(crate::rabbitholes::Homework::default());
+    // (`<first name>[:<percent done>],...`.)
+    for who in list.split(',') {
+        let (who, done) = who.split_once(':').map_or((who, 0.0), |(w, p)| (w, p.parse().unwrap_or(0.0)));
+        for (e, s) in &sims {
+            if s.first.eq_ignore_ascii_case(who.trim()) {
+                info!("{} has homework ({done}% done)", s.first);
+                commands.entity(e).insert(crate::rabbitholes::Homework(done, false));
+            }
         }
     }
 }
