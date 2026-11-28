@@ -4719,6 +4719,7 @@ dependencies = [
 name = "s3bake"
 version = "0.1.0"
 dependencies = [
+ "glam",
  "lz4_flex",
  "png 0.17.16",
  "postcard",
